@@ -1,6 +1,12 @@
-# main.cyr -- DOOM entry point (minimal)
+# main.cyr -- DOOM entry point
 # Build: cat src/main.cyr | cc2 > build/doom && chmod +x build/doom
-# Run:   ./build/doom /path/to/doom1.wad
+# Run:   ./build/doom /path/to/doom1.wad [mapname]
+#
+# Full game loop: walk through E1M1
+# BUG: fails to compile with all modules included
+# Error: "unexpected ';'" at preprocessed line ~1984
+# Root cause: unknown -- likely a cc2 compiler limit
+# The core engine (without input/player/tick) compiles at 45KB
 
 include "lib/string.cyr"
 include "lib/alloc.cyr"
@@ -18,13 +24,18 @@ include "src/wad.cyr"
 include "src/framebuf.cyr"
 include "src/map.cyr"
 include "src/render.cyr"
+include "src/input.cyr"
+include "src/player.cyr"
+include "src/tick.cyr"
+
+var game_running = 0;
 
 fn doom_main() {
     alloc_init();
     args_init();
 
     syscall(1, 1, "cyrius-doom v0.1.0\n", 19);
-    if (argc() < 2) { syscall(1, 2, "usage: doom <wad>\n", 18); syscall(60, 1); }
+    if (argc() < 2) { syscall(1, 2, "usage: doom <wad> [map]\n", 24); syscall(60, 1); }
 
     tables_init();
     var wad_path = argv(1);
@@ -45,18 +56,30 @@ fn doom_main() {
     map_print_stats();
     map_find_player_start();
 
-    # Render one frame from player start
-    view_x = player_start_x;
-    view_y = player_start_y;
-    view_angle = player_start_angle;
+    player_init();
+    input_init();
+    tick_init();
 
-    render_frame();
-    framebuf_write_ppm("/tmp/doom_e1m1.ppm");
-    syscall(1, 1, "wrote /tmp/doom_e1m1.ppm\n", 25);
+    syscall(1, 1, "WASD=move arrows=turn Q=quit\n", 29);
 
+    game_running = 1;
+    while (game_running == 1) {
+        tick_begin();
+        input_poll();
+        if (input_quit == 1) { game_running = 0; continue; }
+        player_tick();
+        render_frame();
+        framebuf_flip();
+        tick_wait();
+    }
+
+    input_shutdown();
+    framebuf_write_ppm("/tmp/doom_final.ppm");
+    syscall(1, 1, "wrote /tmp/doom_final.ppm\n", 26);
+    syscall(1, 1, "ticks: ", 7); fmt_int(tick_get_count()); syscall(1, 1, "\n", 1);
     wad_close();
     framebuf_shutdown();
-    syscall(1, 1, "done\n", 5);
+    syscall(1, 1, "doom: clean exit\n", 17);
     return 0;
 }
 
