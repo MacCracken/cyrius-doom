@@ -1,0 +1,171 @@
+# tables.cyr -- precomputed trig lookup tables for DOOM
+# Usage: include "src/tables.cyr" (after fixed.cyr)
+#
+# 1024-entry sine table in 16.16 fixed-point.
+# Covers full circle: 0..1023 maps to 0..360 degrees.
+# Cosine is just sine shifted by 256 entries (90 degrees).
+#
+# Original DOOM used FINEANGLES (8192 entries). We use 1024
+# for size budget -- sufficient for 320x200 rendering.
+#
+# Each entry: sin(i * 2*PI / 1024) * 65536, stored as i64.
+# Table size: 1024 * 8 = 8192 bytes.
+
+# Sine table: 1024 entries, 16.16 fixed-point
+# Index 0 = 0 degrees, 256 = 90, 512 = 180, 768 = 270
+var sine_table[8192];
+
+# Initialize the sine table with precomputed values.
+# Called once at startup.
+#
+# We build the table by computing integer approximations
+# of sin(i * 2*PI / 1024) * 65536 for i = 0..1023.
+#
+# Since we have no FPU, we use a polynomial approximation
+# for the first quadrant (0..256) and mirror for the rest.
+#
+# Third-order Bhaskara I approximation for sin(x) on [0, PI]:
+#   sin(x) ~ 16*x*(PI-x) / (5*PI^2 - 4*x*(PI-x))
+# Adapted for our fixed-point integer domain.
+fn tables_init() {
+    # First quadrant: indices 0..256 (0..90 degrees)
+    # We approximate sin for angle 0..256 mapping to 0..PI/2
+    #
+    # Using a precomputed approach: for each index i (0..256),
+    # sin(i) = i * 65536 / 256 adjusted by the sine curve.
+    #
+    # Bhaskara approximation adapted for integer quarter-wave:
+    # For index i in [0..256] representing angle [0..PI/2]:
+    #   Let h = i (0..256 = half-period index, we use quarter)
+    #   Map to half-period: x = i, half = 512
+    #   sin(x) ~ 16 * x * (512 - x) / (5 * 512^2 - 4 * x * (512 - x)) * 65536
+    #
+    # But simpler: use a hand-tuned quadratic/cubic that hits
+    # key points: sin(0)=0, sin(256)=65536, sin(128)=46341 (sin(45)*65536)
+
+    # Method: third-order polynomial fit for quarter-wave
+    # sin(i) for i in 0..256, output in 0..65536
+    # Using the identity: sin(x) ~ x*(512-x)*4/262144 * 65536
+    # This gives a parabolic approximation, then we correct.
+
+    for (var i = 0; i < 256; i = i + 1) {
+        # Parabolic approximation for quarter sine wave
+        # Maps i=0..256 to sin=0..65536
+        # sin(i) ~ 4 * i * (256 - i) * 65536 / (256 * 256)
+        # Simplified: i * (256 - i) * 4 * 65536 / 65536
+        #           = i * (256 - i) * 4
+        # But this peaks at 65536 at i=128 and is 0 at endpoints.
+        # Actual sin peaks at i=256, so we need to adjust.
+        #
+        # Better: use the Bhaskara I formula properly.
+        # For angle theta = i * PI / 512 (half period = 512 indices):
+        # sin(theta) = 16*theta*(PI - theta) / (5*PI^2 - 4*theta*(PI-theta))
+        #
+        # In our units: theta maps to [0..512], PI maps to 512
+        # sin_approx(i) = 16 * i * (512 - i) / (5 * 512 * 512 - 4 * i * (512 - i))
+        # Scale result to 0..65536.
+        #
+        # For i in [0..256] (quarter wave), mirror = 512 - i
+        var x = i;
+        var half = 512;
+        var xmirror = half - x;
+        var num = 16 * x * xmirror;
+        var denom = 5 * half * half - 4 * x * xmirror;
+        if (denom == 0) { denom = 1; }
+        var sine_val = num * 65536 / denom;
+
+        store64(&sine_table + i * 8, sine_val);
+    }
+
+    # Index 256 = exactly 90 degrees = sin(90) = 1.0 = 65536
+    store64(&sine_table + 256 * 8, 65536);
+
+    # Second quadrant: indices 257..511 (91..179 degrees)
+    # sin(256 + i) = sin(256 - i) -- mirror of first quadrant
+    for (var i = 1; i < 256; i = i + 1) {
+        var val = load64(&sine_table + (256 - i) * 8);
+        store64(&sine_table + (256 + i) * 8, val);
+    }
+
+    # Index 512 = exactly 180 degrees = sin(180) = 0
+    store64(&sine_table + 512 * 8, 0);
+
+    # Third and fourth quadrants: indices 513..1023 (181..359 degrees)
+    # sin(512 + i) = -sin(i)
+    for (var i = 1; i < 512; i = i + 1) {
+        var val = load64(&sine_table + i * 8);
+        store64(&sine_table + (512 + i) * 8, 0 - val);
+    }
+
+    return 0;
+}
+
+# ================================================================
+# Angle-from-slope table for atan2 approximation
+# ================================================================
+# DOOM's R_PointToAngle2 uses a slope-to-angle lookup.
+# We provide a simpler atan2 using quadrant logic + table.
+
+# atan2 approximation: returns angle index 0..1023
+# Uses octant decomposition + linear interpolation
+fn fixed_atan2(y, x) {
+    var ax = fixed_abs(x);
+    var ay = fixed_abs(y);
+
+    # Handle zero cases
+    if (ax == 0) {
+        if (ay == 0) { return 0; }
+        if (y > 0) { return ANG90; }
+        return ANG270;
+    }
+    if (ay == 0) {
+        if (x > 0) { return 0; }
+        return ANG180;
+    }
+
+    # Compute angle in first octant (0..45 degrees = indices 0..128)
+    # atan(y/x) ~ 128 * y / (x + y) for the first octant (y <= x)
+    var ang = 0;
+    if (ax >= ay) {
+        # First octant: 0..45 degrees
+        ang = 128 * ay / (ax + ay);
+    } else {
+        # Second octant: 45..90 degrees
+        ang = 256 - 128 * ax / (ax + ay);
+    }
+
+    # Map to correct quadrant
+    if (x < 0) {
+        if (y >= 0) {
+            ang = ANG180 - ang;
+        } else {
+            ang = ANG180 + ang;
+        }
+    } else {
+        if (y < 0) {
+            ang = ANG360 - ang;
+        }
+    }
+
+    return angle_normalize(ang);
+}
+
+# ================================================================
+# Tangent table (optional, for slope calculations)
+# ================================================================
+# Not pre-stored -- computed on demand via fixed_tan() in fixed.cyr.
+# Original DOOM precomputed finetangent[4096] but we save memory
+# by computing from sine_table on the fly.
+
+# ================================================================
+# View angle to screen column mapping
+# ================================================================
+# Maps angle offset from center to screen X column (0..319)
+# Used by R_RenderBSPNode for wall clipping
+# Populated by render.cyr at startup based on FOV
+
+var viewangle_to_x[2560];
+
+# Screen column to view angle mapping (inverse)
+# Maps X column (0..319) to angle offset from center view
+var x_to_viewangle[2560];

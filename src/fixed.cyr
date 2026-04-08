@@ -1,0 +1,203 @@
+# fixed.cyr -- 16.16 fixed-point math for DOOM
+# Usage: include "src/fixed.cyr"
+#
+# All DOOM math uses 16.16 fixed-point: upper 16 bits = integer,
+# lower 16 bits = fraction. This matches the original 386 DOOM engine.
+#
+# FIXED_ONE  = 0x10000 = 65536 = 1.0
+# FIXED_HALF = 0x08000 = 32768 = 0.5
+# Range: -32768.0 to +32767.99998 (signed 32-bit with 16-bit fraction)
+#
+# Convention: all fixed values stored as i64 but only lower 32 bits
+# are meaningful. Operations preserve this invariant.
+
+# Constants
+var FIXED_ZERO = 0;
+var FIXED_ONE = 65536;
+var FIXED_HALF = 32768;
+var FIXED_TWO = 131072;
+var FIXED_NEG_ONE = 0 - 65536;
+var FIXED_FRAC_MASK = 65535;
+var FIXED_INT_MASK = 0 - 65536;
+var FIXED_SHIFT = 16;
+
+# Maximum and minimum representable values
+var FIXED_MAX = 2147483647;
+var FIXED_MIN = 0 - 2147483648;
+
+# PI in 16.16 fixed-point: 3.14159265 * 65536 = 205887
+var FIXED_PI = 205887;
+# 2*PI = 411775
+var FIXED_2PI = 411775;
+# PI/2 = 102944
+var FIXED_PI_HALF = 102944;
+# PI/4 = 51472
+var FIXED_PI_QUARTER = 51472;
+
+# ================================================================
+# Conversion
+# ================================================================
+
+# Integer to fixed-point: n << 16
+fn fixed_from_int(n) {
+    return n << 16;
+}
+
+# Fixed-point to integer (truncate toward zero)
+fn fixed_to_int(f) {
+    if (f >= 0) {
+        return f >> 16;
+    }
+    # For negative: shift arithmetic, then mask
+    return (f >> 16) | (0 - 1 << 48);
+}
+
+# Fixed-point to integer (round to nearest)
+fn fixed_round(f) {
+    return (f + FIXED_HALF) >> 16;
+}
+
+# ================================================================
+# Basic arithmetic
+# ================================================================
+
+# Addition: a + b (just integer add, no overflow check)
+fn fixed_add(a, b) {
+    return a + b;
+}
+
+# Subtraction: a - b
+fn fixed_sub(a, b) {
+    return a - b;
+}
+
+# Multiply two 16.16 fixed-point values
+# (a * b) >> 16
+# Uses i64 intermediate to avoid overflow
+fn fixed_mul(a, b) {
+    return (a * b) >> 16;
+}
+
+# Divide two 16.16 fixed-point values
+# (a << 16) / b
+# Uses i64 intermediate for precision
+fn fixed_div(a, b) {
+    if (b == 0) { return FIXED_MAX; }
+    return (a << 16) / b;
+}
+
+# ================================================================
+# Comparison
+# ================================================================
+
+# Absolute value
+fn fixed_abs(f) {
+    if (f < 0) { return 0 - f; }
+    return f;
+}
+
+# Sign: returns -1, 0, or 1 in fixed-point
+fn fixed_sign(f) {
+    if (f < 0) { return FIXED_NEG_ONE; }
+    if (f > 0) { return FIXED_ONE; }
+    return 0;
+}
+
+# Minimum of two fixed values
+fn fixed_min(a, b) {
+    if (a < b) { return a; }
+    return b;
+}
+
+# Maximum of two fixed values
+fn fixed_max(a, b) {
+    if (a > b) { return a; }
+    return b;
+}
+
+# Clamp value to [lo, hi]
+fn fixed_clamp(f, lo, hi) {
+    if (f < lo) { return lo; }
+    if (f > hi) { return hi; }
+    return f;
+}
+
+# ================================================================
+# DOOM-specific angle math
+# ================================================================
+# DOOM uses BAM (Binary Angle Measurement):
+# Full circle = 0x100000000 (32-bit unsigned)
+# But for table lookups, angles map to 0..8191 (FINEANGLES)
+# Our tables use 1024 entries (ANG90 = 256 entries)
+
+var ANG_COUNT = 1024;
+var ANG90 = 256;
+var ANG180 = 512;
+var ANG270 = 768;
+var ANG360 = 1024;
+var ANG_MASK = 1023;
+
+# Normalize angle to 0..1023
+fn angle_normalize(ang) {
+    return ang & ANG_MASK;
+}
+
+# Add two angles (wrapping)
+fn angle_add(a, b) {
+    return (a + b) & ANG_MASK;
+}
+
+# Subtract two angles (wrapping)
+fn angle_sub(a, b) {
+    return (a - b) & ANG_MASK;
+}
+
+# ================================================================
+# Trig functions (require tables.cyr to be loaded)
+# These index into sine_table[] / cosine is sine + 256
+# ================================================================
+
+# Forward declarations -- these reference tables.cyr data
+# sine_table must be populated before calling these
+
+# sin(angle) where angle is 0..1023
+fn fixed_sin(ang) {
+    return load64(&sine_table + (angle_normalize(ang)) * 8);
+}
+
+# cos(angle) = sin(angle + 90)
+fn fixed_cos(ang) {
+    return load64(&sine_table + (angle_normalize(ang + ANG90)) * 8);
+}
+
+# tan(angle) = sin/cos (avoid divide by zero near 90/270)
+fn fixed_tan(ang) {
+    var c = fixed_cos(ang);
+    if (c == 0) { return FIXED_MAX; }
+    return fixed_div(fixed_sin(ang), c);
+}
+
+# ================================================================
+# Distance / vector math
+# ================================================================
+
+# Approximate distance: max(|dx|,|dy|) + min(|dx|,|dy|)/2
+# Fast approximation used by original DOOM (P_AproxDistance)
+fn fixed_approx_dist(dx, dy) {
+    var adx = fixed_abs(dx);
+    var ady = fixed_abs(dy);
+    if (adx > ady) {
+        return adx + (ady >> 1);
+    }
+    return ady + (adx >> 1);
+}
+
+# Dot product of two 2D vectors (returns fixed-point scalar)
+fn fixed_dot2(ax, ay, bx, by) {
+    return fixed_mul(ax, bx) + fixed_mul(ay, by);
+}
+
+# Linear interpolation: a + t*(b-a) where t is 0..FIXED_ONE
+fn fixed_lerp(a, b, t) {
+    return a + fixed_mul(t, b - a);
+}
