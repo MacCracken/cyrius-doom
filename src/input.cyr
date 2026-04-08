@@ -13,46 +13,55 @@
 # ================================================================
 # Key state array (256 entries, 1 = pressed, 0 = released)
 # ================================================================
-var key_state[2048];
+var key_state = 0;
 
-# ================================================================
-# Game action flags (polled each tick by player.cyr)
-# ================================================================
-var input_forward = 0;
-var input_backward = 0;
-var input_turn_left = 0;
-var input_turn_right = 0;
-var input_strafe_left = 0;
-var input_strafe_right = 0;
-var input_run = 0;
-var input_fire = 0;
-var input_use = 0;
-var input_quit = 0;
+# Game action flags: packed into a single i64 bitmask + weapon var
+var input_flags = 0;
 var input_weapon = 0;
+var input_quit = 0;
 
-# ================================================================
-# Key codes (Linux terminal escape sequences)
-# ================================================================
-# Arrow keys come as ESC [ A/B/C/D
-var KEY_ESC = 27;
-var KEY_UP = 128;
-var KEY_DOWN = 129;
-var KEY_LEFT = 130;
-var KEY_RIGHT = 131;
-var KEY_SPACE = 32;
-var KEY_CTRL = 132;
-var KEY_SHIFT = 133;
-var KEY_ENTER = 10;
+enum InputBit {
+    INP_FORWARD = 1;
+    INP_BACKWARD = 2;
+    INP_TURN_LEFT = 4;
+    INP_TURN_RIGHT = 8;
+    INP_STRAFE_LEFT = 16;
+    INP_STRAFE_RIGHT = 32;
+    INP_RUN = 64;
+    INP_FIRE = 128;
+    INP_USE = 256;
+}
 
-# ASCII keys
-var KEY_W = 119;
-var KEY_A = 97;
-var KEY_S = 115;
-var KEY_D = 100;
-var KEY_Q = 113;
-var KEY_E = 101;
-var KEY_R = 114;
-var KEY_TAB = 9;
+# Convenience accessors (read-only, derived from input_flags)
+fn input_forward() { return (input_flags & INP_FORWARD) != 0; }
+fn input_backward() { return (input_flags & INP_BACKWARD) != 0; }
+fn input_turn_left() { return (input_flags & INP_TURN_LEFT) != 0; }
+fn input_turn_right() { return (input_flags & INP_TURN_RIGHT) != 0; }
+fn input_strafe_left() { return (input_flags & INP_STRAFE_LEFT) != 0; }
+fn input_strafe_right() { return (input_flags & INP_STRAFE_RIGHT) != 0; }
+fn input_run() { return (input_flags & INP_RUN) != 0; }
+fn input_fire() { return (input_flags & INP_FIRE) != 0; }
+fn input_use() { return (input_flags & INP_USE) != 0; }
+
+enum KeyCode {
+    KEY_ESC = 27;
+    KEY_UP = 128;
+    KEY_DOWN = 129;
+    KEY_LEFT = 130;
+    KEY_RIGHT = 131;
+    KEY_SPACE = 32;
+    KEY_CTRL = 132;
+    KEY_SHIFT = 133;
+    KEY_ENTER = 10;
+    KEY_W = 119;
+    KEY_A = 97;
+    KEY_S = 115;
+    KEY_D = 100;
+    KEY_Q = 113;
+    KEY_E = 101;
+    KEY_R = 114;
+    KEY_TAB = 9;
+}
 
 # ================================================================
 # Terminal raw mode (Linux userspace)
@@ -63,11 +72,10 @@ var KEY_TAB = 9;
 var orig_termios[64];
 var raw_mode_active = 0;
 
-# SYS_IOCTL = 16
-# TCGETS = 0x5401 (get termios)
-# TCSETS = 0x5402 (set termios)
-var TCGETS = 0x5401;
-var TCSETS = 0x5402;
+enum TermConst {
+    TCGETS = 0x5401;
+    TCSETS = 0x5402;
+}
 
 # termios offsets (Linux x86_64):
 # c_iflag = 0 (4 bytes)
@@ -121,9 +129,9 @@ fn input_disable_raw_mode() {
 # ================================================================
 
 fn input_init() {
-    # Clear key state
+    key_state = alloc(2048);
     for (var i = 0; i < 256; i = i + 1) {
-        store64(&key_state + i * 8, 0);
+        store64(key_state + i * 8, 0);
     }
 
     # Enable raw terminal input
@@ -144,18 +152,8 @@ fn input_shutdown() {
 # decodes escape sequences, updates key state and action flags.
 
 fn input_poll() {
-    # Clear action flags (re-derive from key state)
-    input_forward = 0;
-    input_backward = 0;
-    input_turn_left = 0;
-    input_turn_right = 0;
-    input_strafe_left = 0;
-    input_strafe_right = 0;
-    input_run = 0;
-    input_fire = 0;
-    input_use = 0;
+    input_flags = 0;
 
-    # Read available bytes (non-blocking since VMIN=0)
     var buf[32];
     var n = syscall(0, 0, &buf, 32);
 
@@ -163,70 +161,43 @@ fn input_poll() {
         var pos = 0;
         while (pos < n) {
             var ch = load8(&buf + pos);
-
             if (ch == KEY_ESC) {
-                # Check for escape sequence
                 if (pos + 2 < n) {
                     var seq1 = load8(&buf + pos + 1);
                     var seq2 = load8(&buf + pos + 2);
                     if (seq1 == 91) {
-                        # ESC [ X -- arrow keys
-                        if (seq2 == 65) { store64(&key_state + KEY_UP * 8, 1); }
-                        if (seq2 == 66) { store64(&key_state + KEY_DOWN * 8, 1); }
-                        if (seq2 == 67) { store64(&key_state + KEY_RIGHT * 8, 1); }
-                        if (seq2 == 68) { store64(&key_state + KEY_LEFT * 8, 1); }
+                        if (seq2 == 65) { store64(key_state + KEY_UP * 8, 1); }
+                        if (seq2 == 66) { store64(key_state + KEY_DOWN * 8, 1); }
+                        if (seq2 == 67) { store64(key_state + KEY_RIGHT * 8, 1); }
+                        if (seq2 == 68) { store64(key_state + KEY_LEFT * 8, 1); }
                         pos = pos + 3;
                         continue;
                     }
                 }
-                # Bare ESC = quit
                 input_quit = 1;
                 pos = pos + 1;
             } else {
-                # Regular key press
-                if (ch < 256) {
-                    store64(&key_state + ch * 8, 1);
-                }
+                if (ch < 256) { store64(key_state + ch * 8, 1); }
                 pos = pos + 1;
             }
         }
     }
 
-    # Map key state to game actions
-    # WASD + arrow keys
-    if (load64(&key_state + KEY_W * 8) == 1) { input_forward = 1; }
-    if (load64(&key_state + KEY_UP * 8) == 1) { input_forward = 1; }
-    if (load64(&key_state + KEY_S * 8) == 1) { input_backward = 1; }
-    if (load64(&key_state + KEY_DOWN * 8) == 1) { input_backward = 1; }
-    if (load64(&key_state + KEY_LEFT * 8) == 1) { input_turn_left = 1; }
-    if (load64(&key_state + KEY_RIGHT * 8) == 1) { input_turn_right = 1; }
-    if (load64(&key_state + KEY_A * 8) == 1) { input_strafe_left = 1; }
-    if (load64(&key_state + KEY_D * 8) == 1) { input_strafe_right = 1; }
+    # Map key state to bitmask
+    if (load64(key_state + KEY_W * 8) == 1) { input_flags = input_flags | INP_FORWARD; }
+    if (load64(key_state + KEY_UP * 8) == 1) { input_flags = input_flags | INP_FORWARD; }
+    if (load64(key_state + KEY_S * 8) == 1) { input_flags = input_flags | INP_BACKWARD; }
+    if (load64(key_state + KEY_DOWN * 8) == 1) { input_flags = input_flags | INP_BACKWARD; }
+    if (load64(key_state + KEY_LEFT * 8) == 1) { input_flags = input_flags | INP_TURN_LEFT; }
+    if (load64(key_state + KEY_RIGHT * 8) == 1) { input_flags = input_flags | INP_TURN_RIGHT; }
+    if (load64(key_state + KEY_A * 8) == 1) { input_flags = input_flags | INP_STRAFE_LEFT; }
+    if (load64(key_state + KEY_D * 8) == 1) { input_flags = input_flags | INP_STRAFE_RIGHT; }
+    if (load64(key_state + KEY_SPACE * 8) == 1) { input_flags = input_flags | INP_USE; }
+    if (load64(key_state + KEY_E * 8) == 1) { input_flags = input_flags | INP_USE; }
+    if (load64(key_state + 102 * 8) == 1) { input_flags = input_flags | INP_FIRE; }
+    if (load64(key_state + KEY_R * 8) == 1) { input_flags = input_flags | INP_RUN; }
+    if (load64(key_state + KEY_Q * 8) == 1) { input_quit = 1; }
 
-    # Action keys
-    if (load64(&key_state + KEY_SPACE * 8) == 1) { input_use = 1; }
-    if (load64(&key_state + KEY_E * 8) == 1) { input_use = 1; }
-
-    # Fire (ctrl or f key)
-    if (load64(&key_state + 102 * 8) == 1) { input_fire = 1; }
-
-    # Run (shift = r key in terminal since we can't detect modifier)
-    if (load64(&key_state + KEY_R * 8) == 1) { input_run = 1; }
-
-    # Quit
-    if (load64(&key_state + KEY_Q * 8) == 1) { input_quit = 1; }
-
-    # Weapon select (1-7)
-    for (var wi = 1; wi <= 7; wi = wi + 1) {
-        if (load64(&key_state + (48 + wi) * 8) == 1) {
-            input_weapon = wi;
-        }
-    }
-
-    # Clear key state for next poll (keys are instant, not held in terminal mode)
-    for (var i = 0; i < 256; i = i + 1) {
-        store64(&key_state + i * 8, 0);
-    }
-
+    for (var i = 0; i < 256; i = i + 1) { store64(key_state + i * 8, 0); }
     return 0;
 }

@@ -1,69 +1,41 @@
 # tick.cyr -- 35Hz game tick timer
 # Usage: include "src/tick.cyr"
-#
-# Original DOOM runs at 35 tics per second (28.57ms per tick).
-# The game loop: poll input, update state, render, wait for next tick.
-#
-# On Linux: uses clock_gettime(CLOCK_MONOTONIC) for timing.
-# On AGNOS: uses kernel timer or PIT.
 
-# ================================================================
-# Timing constants
-# ================================================================
+enum TickConst {
+    TICK_NS = 28571428;
+    SYS_CLOCK_GETTIME = 228;
+    SYS_NANOSLEEP = 35;
+    CLOCK_MONOTONIC = 1;
+}
 
-# 35 Hz = 28571428 nanoseconds per tick
-var TICK_NS = 28571428;
-var TICK_RATE = 35;
-
-# clock_gettime syscall
-var SYS_CLOCK_GETTIME = 228;
-var SYS_NANOSLEEP = 35;
-var CLOCK_MONOTONIC = 1;
-
-# Current tick count (frames since start)
-var tick_count = 0;
-
-# Timing state
-var tick_start_sec = 0;
-var tick_start_nsec = 0;
-
-# ================================================================
-# Get current time (monotonic clock)
-# ================================================================
-# struct timespec { time_t tv_sec; long tv_nsec; } = 16 bytes
+# Packed: [0]=count [8]=start_sec [16]=start_nsec
+var tick_state = 0;
 
 fn tick_get_time_ns() {
     var ts[16];
     syscall(SYS_CLOCK_GETTIME, CLOCK_MONOTONIC, &ts);
-    var sec = load64(&ts);
-    var nsec = load64(&ts + 8);
-    return sec * 1000000000 + nsec;
+    return load64(&ts) * 1000000000 + load64(&ts + 8);
 }
 
-# ================================================================
-# Tick management
-# ================================================================
-
 fn tick_init() {
-    tick_count = 0;
-    tick_start_sec = 0;
-    tick_start_nsec = 0;
+    tick_state = alloc(24);
+    store64(tick_state, 0);
+    store64(tick_state + 8, 0);
+    store64(tick_state + 16, 0);
     return 0;
 }
 
-# Mark the start of a tick
 fn tick_begin() {
     var ts[16];
     syscall(SYS_CLOCK_GETTIME, CLOCK_MONOTONIC, &ts);
-    tick_start_sec = load64(&ts);
-    tick_start_nsec = load64(&ts + 8);
+    store64(tick_state + 8, load64(&ts));
+    store64(tick_state + 16, load64(&ts + 8));
     return 0;
 }
 
-# Wait until the tick period has elapsed
 fn tick_wait() {
     var now_ns = tick_get_time_ns();
-    var start_ns = tick_start_sec * 1000000000 + tick_start_nsec;
+    var start_ns = load64(tick_state + 8) * 1000000000 + load64(tick_state + 16);
     var elapsed = now_ns - start_ns;
 
     if (elapsed < TICK_NS) {
@@ -74,18 +46,10 @@ fn tick_wait() {
         syscall(SYS_NANOSLEEP, &sleep_ts, 0);
     }
 
-    tick_count = tick_count + 1;
+    store64(tick_state, load64(tick_state) + 1);
     return 0;
 }
 
-# Get ticks elapsed since start
 fn tick_get_count() {
-    return tick_count;
-}
-
-# Get elapsed milliseconds for the current tick (for profiling)
-fn tick_elapsed_ms() {
-    var now_ns = tick_get_time_ns();
-    var start_ns = tick_start_sec * 1000000000 + tick_start_nsec;
-    return (now_ns - start_ns) / 1000000;
+    return load64(tick_state);
 }

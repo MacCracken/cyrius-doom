@@ -1,110 +1,52 @@
 # framebuf.cyr -- direct framebuffer output for DOOM
-# Usage: include "src/framebuf.cyr"
-# Requires: lib/io.cyr, lib/string.cyr
+# Usage: include "src/framebuf.cyr" (after lib/alloc.cyr, lib/io.cyr)
 #
-# 320x200 resolution, 8-bit palette indexed.
-# On AGNOS: direct VGA framebuffer write
-# On Linux: /dev/fb0 with FBIOGET_VSCREENINFO/FSCREENINFO
-#
-# The screen buffer is palette-indexed (1 byte per pixel).
-# At flip time, we convert to RGB and write to the framebuffer device.
-#
-# Original DOOM used 320x200 VGA mode 13h (256 colors).
-# The palette comes from the WAD PLAYPAL lump (768 bytes: 256 * RGB).
+# 320x200, 8-bit palette indexed. Heap-allocated buffers.
 
-# ================================================================
-# Screen dimensions
-# ================================================================
+enum Screen {
+    SCREEN_WIDTH = 320;
+    SCREEN_HEIGHT = 200;
+    SCREEN_SIZE = 64000;
+}
 
-var SCREEN_WIDTH = 320;
-var SCREEN_HEIGHT = 200;
-var SCREEN_SIZE = 64000;
+# Heap pointers (allocated in framebuf_init)
+var screen_buf = 0;
+var rgb_buf = 0;
+var palette = 0;
 
-# ================================================================
-# Screen buffer (palette indexed, 1 byte per pixel)
-# ================================================================
-# 320 * 200 = 64000 bytes
-var screen_buf[64000];
-
-# ================================================================
-# Palette (256 entries, each 3 bytes: R, G, B)
-# ================================================================
-# 256 * 3 = 768 bytes
-var palette[768];
-
-# ================================================================
-# RGB framebuffer for output (320 * 200 * 4 = 256000 bytes)
-# ================================================================
-# When writing to /dev/fb0, we need 32-bit BGRA per pixel
-var rgb_buf[256000];
-
-# Framebuffer device fd
 var fb_fd = 0 - 1;
 
-# Framebuffer info
-var fb_width = 320;
-var fb_height = 200;
-var fb_bpp = 32;
-var fb_line_length = 1280;
-
-# ================================================================
-# Initialization
-# ================================================================
-
-# Open the framebuffer device.
-# Returns 0 on success, -1 on failure.
 fn framebuf_init() {
+    screen_buf = alloc(64000);
+    rgb_buf = alloc(256000);
+    palette = alloc(768);
+
     fb_fd = file_open("/dev/fb0", 2, 0);
     if (fb_fd < 0) {
-        file_write(2, "warn: /dev/fb0 not available, using stdout\n", 43);
         fb_fd = 0 - 1;
-        return 0;
     }
-
-    # TODO: ioctl to get actual screen info
-    # For now assume 320x200x32bpp or handle in AGNOS kernel mode
-
     return 0;
 }
 
-# Load palette from WAD PLAYPAL lump.
-# data = pointer to 768 bytes of RGB data.
 fn framebuf_set_palette(data) {
-    memcpy(&palette, data, 768);
+    memcpy(palette, data, 768);
     return 0;
 }
 
-# ================================================================
-# Drawing primitives
-# ================================================================
-
-# Clear screen to a palette color
 fn framebuf_clear(color) {
-    memset(&screen_buf, color, SCREEN_SIZE);
+    memset(screen_buf, color, SCREEN_SIZE);
     return 0;
 }
 
-# Set a single pixel (palette index)
 fn framebuf_pixel(x, y, color) {
     if (x < 0) { return 0; }
     if (y < 0) { return 0; }
     if (x >= SCREEN_WIDTH) { return 0; }
     if (y >= SCREEN_HEIGHT) { return 0; }
-    store8(&screen_buf + y * SCREEN_WIDTH + x, color);
+    store8(screen_buf + y * SCREEN_WIDTH + x, color);
     return 0;
 }
 
-# Get pixel at (x, y)
-fn framebuf_get_pixel(x, y) {
-    if (x < 0) { return 0; }
-    if (y < 0) { return 0; }
-    if (x >= SCREEN_WIDTH) { return 0; }
-    if (y >= SCREEN_HEIGHT) { return 0; }
-    return load8(&screen_buf + y * SCREEN_WIDTH + x);
-}
-
-# Draw a vertical line (column) -- the core DOOM rendering primitive.
-# DOOM renders walls column by column.
 fn framebuf_vline(x, y1, y2, color) {
     if (x < 0) { return 0; }
     if (x >= SCREEN_WIDTH) { return 0; }
@@ -114,13 +56,12 @@ fn framebuf_vline(x, y1, y2, color) {
 
     var offset = y1 * SCREEN_WIDTH + x;
     for (var y = y1; y <= y2; y = y + 1) {
-        store8(&screen_buf + offset, color);
+        store8(screen_buf + offset, color);
         offset = offset + SCREEN_WIDTH;
     }
     return 0;
 }
 
-# Draw a horizontal line (span) -- used for floors/ceilings
 fn framebuf_hline(x1, x2, y, color) {
     if (y < 0) { return 0; }
     if (y >= SCREEN_HEIGHT) { return 0; }
@@ -130,13 +71,12 @@ fn framebuf_hline(x1, x2, y, color) {
 
     var offset = y * SCREEN_WIDTH + x1;
     for (var x = x1; x <= x2; x = x + 1) {
-        store8(&screen_buf + offset, color);
+        store8(screen_buf + offset, color);
         offset = offset + 1;
     }
     return 0;
 }
 
-# Fill a rectangle with a solid color
 fn framebuf_fill_rect(x, y, w, h, color) {
     for (var row = y; row < y + h; row = row + 1) {
         framebuf_hline(x, x + w - 1, row, color);
@@ -144,8 +84,6 @@ fn framebuf_fill_rect(x, y, w, h, color) {
     return 0;
 }
 
-# Copy a block of palette-indexed pixels directly into the screen buffer.
-# Used for status bar, menu backgrounds, etc.
 fn framebuf_blit(src, dst_x, dst_y, w, h) {
     for (var row = 0; row < h; row = row + 1) {
         var sy = dst_y + row;
@@ -155,7 +93,7 @@ fn framebuf_blit(src, dst_x, dst_y, w, h) {
             for (var col = 0; col < w; col = col + 1) {
                 var sx = dst_x + col;
                 if (sx >= 0) { if (sx < SCREEN_WIDTH) {
-                    store8(&screen_buf + dst_off + col, load8(src + src_off + col));
+                    store8(screen_buf + dst_off + col, load8(src + src_off + col));
                 } }
             }
         } }
@@ -163,74 +101,49 @@ fn framebuf_blit(src, dst_x, dst_y, w, h) {
     return 0;
 }
 
-# ================================================================
-# Framebuffer output
-# ================================================================
-
-# Convert palette-indexed screen buffer to RGB and write to framebuffer.
-# This is the "flip" operation -- called once per frame.
 fn framebuf_flip() {
-    # Convert palette-indexed to 32-bit BGRA
     for (var i = 0; i < SCREEN_SIZE; i = i + 1) {
-        var ci = load8(&screen_buf + i);
+        var ci = load8(screen_buf + i);
         var pal_off = ci * 3;
-        var r = load8(&palette + pal_off);
-        var g = load8(&palette + pal_off + 1);
-        var b = load8(&palette + pal_off + 2);
-
-        # BGRA format for /dev/fb0
+        var r = load8(palette + pal_off);
+        var g = load8(palette + pal_off + 1);
+        var b = load8(palette + pal_off + 2);
         var rgb_off = i * 4;
-        store8(&rgb_buf + rgb_off, b);
-        store8(&rgb_buf + rgb_off + 1, g);
-        store8(&rgb_buf + rgb_off + 2, r);
-        store8(&rgb_buf + rgb_off + 3, 255);
+        store8(rgb_buf + rgb_off, b);
+        store8(rgb_buf + rgb_off + 1, g);
+        store8(rgb_buf + rgb_off + 2, r);
+        store8(rgb_buf + rgb_off + 3, 255);
     }
 
     if (fb_fd >= 0) {
-        # Seek to beginning of framebuffer
         syscall(8, fb_fd, 0, 0);
-        # Write RGB data
-        file_write(fb_fd, &rgb_buf, SCREEN_SIZE * 4);
+        file_write(fb_fd, rgb_buf, SCREEN_SIZE * 4);
     }
-
     return 0;
 }
 
-# ================================================================
-# PPM output (for testing without framebuffer device)
-# ================================================================
-
-# Write current screen buffer as a PPM image to a file.
-# Useful for testing rendering without /dev/fb0.
 fn framebuf_write_ppm(path) {
     var fd = file_open(path, 65, 0x1A4);
     if (fd < 0) { return 0 - 1; }
 
-    # PPM header: "P6\n320 200\n255\n"
     file_write(fd, "P6\n320 200\n255\n", 15);
 
-    # Convert and write pixel data (RGB, 3 bytes per pixel)
-    var row_buf[960];
+    var row_buf = alloc(960);
     for (var y = 0; y < SCREEN_HEIGHT; y = y + 1) {
         for (var x = 0; x < SCREEN_WIDTH; x = x + 1) {
-            var ci = load8(&screen_buf + y * SCREEN_WIDTH + x);
+            var ci = load8(screen_buf + y * SCREEN_WIDTH + x);
             var pal_off = ci * 3;
-            store8(&row_buf + x * 3, load8(&palette + pal_off));
-            store8(&row_buf + x * 3 + 1, load8(&palette + pal_off + 1));
-            store8(&row_buf + x * 3 + 2, load8(&palette + pal_off + 2));
+            store8(row_buf + x * 3, load8(palette + pal_off));
+            store8(row_buf + x * 3 + 1, load8(palette + pal_off + 1));
+            store8(row_buf + x * 3 + 2, load8(palette + pal_off + 2));
         }
-        file_write(fd, &row_buf, 960);
+        file_write(fd, row_buf, 960);
     }
-
     file_close(fd);
     return 0;
 }
 
-# Cleanup
 fn framebuf_shutdown() {
-    if (fb_fd >= 0) {
-        file_close(fb_fd);
-        fb_fd = 0 - 1;
-    }
+    if (fb_fd >= 0) { file_close(fb_fd); fb_fd = 0 - 1; }
     return 0;
 }

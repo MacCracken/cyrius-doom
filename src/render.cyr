@@ -21,21 +21,14 @@ var view_angle = 0;
 var view_cos = 0;
 var view_sin = 0;
 
-# Player eye height above floor (41 pixels in original DOOM = 41 << 16)
-var VIEW_HEIGHT = 2686976;
-
-# Horizontal FOV: 90 degrees = 256 angle units
-var VIEW_FOV = 256;
-var VIEW_FOV_HALF = 128;
-
-# Projection: distance from eye to projection plane
-# For 320-wide screen and 90 FOV: proj_dist = 160 (half-width)
-# In fixed-point: 160 << 16 = 10485760
-var PROJ_DIST = 10485760;
-
-# Half screen dimensions (for centering)
-var HALF_WIDTH = 160;
-var HALF_HEIGHT = 100;
+enum ViewConst {
+    VIEW_HEIGHT = 2686976;
+    VIEW_FOV = 256;
+    VIEW_FOV_HALF = 128;
+    PROJ_DIST = 10485760;
+    HALF_WIDTH = 160;
+    HALF_HEIGHT = 100;
+}
 
 # ================================================================
 # Column clipping
@@ -43,20 +36,23 @@ var HALF_HEIGHT = 100;
 # Track the top and bottom of each rendered column (0..319)
 # As walls are drawn, these narrow. When top >= bottom, column is done.
 # 320 entries * 8 bytes = 2560 bytes each
-var clip_top[2560];
-var clip_bottom[2560];
-
-# Solid column tracker: 1 = fully occluded, 0 = open
-var clip_solid[2560];
+var clip_top = 0;
+var clip_bottom = 0;
+var clip_solid = 0;
 
 # Number of fully occluded columns (early-out when all 320 are done)
 var clip_count = 0;
 
 fn render_init_clip() {
+    if (clip_top == 0) {
+        clip_top = alloc(2560);
+        clip_bottom = alloc(2560);
+        clip_solid = alloc(2560);
+    }
     for (var i = 0; i < SCREEN_WIDTH; i = i + 1) {
-        store64(&clip_top + i * 8, 0);
-        store64(&clip_bottom + i * 8, SCREEN_HEIGHT - 1);
-        store64(&clip_solid + i * 8, 0);
+        store64(clip_top + i * 8, 0);
+        store64(clip_bottom + i * 8, SCREEN_HEIGHT - 1);
+        store64(clip_solid + i * 8, 0);
     }
     clip_count = 0;
     return 0;
@@ -220,10 +216,10 @@ fn render_seg(seg_idx) {
     # Draw columns from sx1 to sx2
     for (var col = sx1; col <= sx2; col = col + 1) {
         # Skip fully occluded columns
-        if (load64(&clip_solid + col * 8) == 1) { continue; }
+        if (load64(clip_solid + col * 8) == 1) { continue; }
 
-        var ct = load64(&clip_top + col * 8);
-        var cb = load64(&clip_bottom + col * 8);
+        var ct = load64(clip_top + col * 8);
+        var cb = load64(clip_bottom + col * 8);
         if (ct > cb) { continue; }
 
         # Interpolate depth for this column
@@ -276,17 +272,17 @@ fn render_seg(seg_idx) {
 
             # Update clip to the portal opening
             if (back_ceil_screen > ct) {
-                store64(&clip_top + col * 8, back_ceil_screen);
+                store64(clip_top + col * 8, back_ceil_screen);
             }
             if (back_floor_screen < cb) {
-                store64(&clip_bottom + col * 8, back_floor_screen);
+                store64(clip_bottom + col * 8, back_floor_screen);
             }
         } else {
             # One-sided: solid wall fills the whole opening
             framebuf_vline(col, ceil_screen, floor_screen, wall_color);
 
             # Mark column as fully occluded
-            store64(&clip_solid + col * 8, 1);
+            store64(clip_solid + col * 8, 1);
             clip_count = clip_count + 1;
         }
     }

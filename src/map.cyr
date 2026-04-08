@@ -1,397 +1,300 @@
 # map.cyr -- DOOM map geometry loader
-# Usage: include "src/map.cyr" (after wad.cyr, fixed.cyr)
+# Usage: include "src/map.cyr" (after wad.cyr, fixed.cyr, lib/alloc.cyr)
 #
-# Loads map data from WAD lumps. A DOOM map consists of 10 lumps
-# following the map marker (e.g., E1M1):
-#
-#   THINGS    - monsters, items, player starts (10 bytes each)
-#   LINEDEFS  - wall lines connecting vertices (14 bytes each)
-#   SIDEDEFS  - wall textures and sector refs (30 bytes each)
-#   VERTEXES  - 2D coordinates (4 bytes each)
-#   SEGS      - BSP wall segments (12 bytes each)
-#   SSECTORS  - subsectors: convex leaf regions (4 bytes each)
-#   NODES     - BSP tree nodes (28 bytes each)
-#   SECTORS   - floor/ceiling heights, light, textures (26 bytes each)
-#   REJECT    - PVS reject table (variable)
-#   BLOCKMAP  - collision grid (variable)
-#
-# All values in WAD are little-endian 16-bit signed unless noted.
-# We expand everything to i64 on load for Cyrius native operations.
+# All arrays heap-allocated to keep binary under 256KB.
 
-# ================================================================
-# Capacity limits
-# ================================================================
+enum MapMax {
+    MAP_MAX_VERTEXES = 2048;
+    MAP_MAX_LINEDEFS = 2048;
+    MAP_MAX_SIDEDEFS = 2048;
+    MAP_MAX_SECTORS = 256;
+    MAP_MAX_SEGS = 4096;
+    MAP_MAX_SSECTORS = 512;
+    MAP_MAX_NODES = 1024;
+    MAP_MAX_THINGS = 512;
+}
 
-var MAP_MAX_VERTEXES = 2048;
-var MAP_MAX_LINEDEFS = 2048;
-var MAP_MAX_SIDEDEFS = 2048;
-var MAP_MAX_SECTORS = 256;
-var MAP_MAX_SEGS = 4096;
-var MAP_MAX_SSECTORS = 512;
-var MAP_MAX_NODES = 1024;
-var MAP_MAX_THINGS = 512;
+# Heap pointers (initialized in map_alloc)
+var map_vertexes = 0;
+var map_linedefs = 0;
+var map_sidedefs = 0;
+var map_sectors = 0;
+var map_segs = 0;
+var map_ssectors = 0;
+var map_nodes = 0;
+var map_things = 0;
 
-# ================================================================
-# Vertex: x, y (fixed-point 16.16)
-# ================================================================
-# WAD stores as i16 pixels; we convert to 16.16 fixed-point on load.
-# Layout: x(8) + y(8) = 16 bytes per vertex
-var map_vertexes[32768];
 var map_num_vertexes = 0;
-var MAP_VERTEX_SIZE = 16;
-
-fn map_vertex_x(idx) { return load64(&map_vertexes + idx * MAP_VERTEX_SIZE); }
-fn map_vertex_y(idx) { return load64(&map_vertexes + idx * MAP_VERTEX_SIZE + 8); }
-
-# ================================================================
-# Linedef: vertex1, vertex2, flags, special, tag, sidenum[2]
-# ================================================================
-# WAD format: v1(2) v2(2) flags(2) special(2) tag(2) side_r(2) side_l(2) = 14 bytes
-# Our format: 7 fields * 8 bytes = 56 bytes per linedef
-var map_linedefs[114688];
 var map_num_linedefs = 0;
-var MAP_LINEDEF_SIZE = 56;
-
-# Linedef flags
-var ML_BLOCKING = 1;
-var ML_BLOCKMONSTERS = 2;
-var ML_TWOSIDED = 4;
-var ML_DONTPEGTOP = 8;
-var ML_DONTPEGBOTTOM = 16;
-var ML_SECRET = 32;
-var ML_SOUNDBLOCK = 64;
-var ML_DONTDRAW = 128;
-var ML_MAPPED = 256;
-
-fn map_linedef_v1(idx) { return load64(&map_linedefs + idx * MAP_LINEDEF_SIZE); }
-fn map_linedef_v2(idx) { return load64(&map_linedefs + idx * MAP_LINEDEF_SIZE + 8); }
-fn map_linedef_flags(idx) { return load64(&map_linedefs + idx * MAP_LINEDEF_SIZE + 16); }
-fn map_linedef_special(idx) { return load64(&map_linedefs + idx * MAP_LINEDEF_SIZE + 24); }
-fn map_linedef_tag(idx) { return load64(&map_linedefs + idx * MAP_LINEDEF_SIZE + 32); }
-fn map_linedef_side_right(idx) { return load64(&map_linedefs + idx * MAP_LINEDEF_SIZE + 40); }
-fn map_linedef_side_left(idx) { return load64(&map_linedefs + idx * MAP_LINEDEF_SIZE + 48); }
-
-# ================================================================
-# Sidedef: x_offset, y_offset, upper_tex, lower_tex, mid_tex, sector
-# ================================================================
-# WAD format: xoff(2) yoff(2) upper(8) lower(8) mid(8) sector(2) = 30 bytes
-# Our format: xoff(8) yoff(8) upper_name(8) lower_name(8) mid_name(8) sector(8) = 48 bytes
-var map_sidedefs[98304];
 var map_num_sidedefs = 0;
-var MAP_SIDEDEF_SIZE = 48;
-
-fn map_sidedef_xoff(idx) { return load64(&map_sidedefs + idx * MAP_SIDEDEF_SIZE); }
-fn map_sidedef_yoff(idx) { return load64(&map_sidedefs + idx * MAP_SIDEDEF_SIZE + 8); }
-fn map_sidedef_sector(idx) { return load64(&map_sidedefs + idx * MAP_SIDEDEF_SIZE + 40); }
-
-# ================================================================
-# Sector: floor_height, ceil_height, floor_tex, ceil_tex, light, special, tag
-# ================================================================
-# WAD format: floorh(2) ceilh(2) floortex(8) ceiltex(8) light(2) special(2) tag(2) = 26 bytes
-# Our format: floorh(8) ceilh(8) floortex(8) ceiltex(8) light(8) special(8) tag(8) = 56 bytes
-var map_sectors[14336];
 var map_num_sectors = 0;
-var MAP_SECTOR_SIZE = 56;
-
-fn map_sector_floorh(idx) { return load64(&map_sectors + idx * MAP_SECTOR_SIZE); }
-fn map_sector_ceilh(idx) { return load64(&map_sectors + idx * MAP_SECTOR_SIZE + 8); }
-fn map_sector_light(idx) { return load64(&map_sectors + idx * MAP_SECTOR_SIZE + 32); }
-fn map_sector_special(idx) { return load64(&map_sectors + idx * MAP_SECTOR_SIZE + 40); }
-fn map_sector_tag(idx) { return load64(&map_sectors + idx * MAP_SECTOR_SIZE + 48); }
-
-# ================================================================
-# Seg: vertex1, vertex2, angle, linedef, side, offset
-# ================================================================
-# WAD format: v1(2) v2(2) angle(2) linedef(2) side(2) offset(2) = 12 bytes
-# Our format: 6 fields * 8 bytes = 48 bytes per seg
-var map_segs[196608];
 var map_num_segs = 0;
-var MAP_SEG_SIZE = 48;
-
-fn map_seg_v1(idx) { return load64(&map_segs + idx * MAP_SEG_SIZE); }
-fn map_seg_v2(idx) { return load64(&map_segs + idx * MAP_SEG_SIZE + 8); }
-fn map_seg_angle(idx) { return load64(&map_segs + idx * MAP_SEG_SIZE + 16); }
-fn map_seg_linedef(idx) { return load64(&map_segs + idx * MAP_SEG_SIZE + 24); }
-fn map_seg_side(idx) { return load64(&map_segs + idx * MAP_SEG_SIZE + 32); }
-fn map_seg_offset(idx) { return load64(&map_segs + idx * MAP_SEG_SIZE + 40); }
-
-# ================================================================
-# Subsector: seg_count, first_seg
-# ================================================================
-# WAD format: count(2) first(2) = 4 bytes
-# Our format: count(8) first(8) = 16 bytes
-var map_ssectors[8192];
 var map_num_ssectors = 0;
-var MAP_SSECTOR_SIZE = 16;
-
-fn map_ssector_count(idx) { return load64(&map_ssectors + idx * MAP_SSECTOR_SIZE); }
-fn map_ssector_first(idx) { return load64(&map_ssectors + idx * MAP_SSECTOR_SIZE + 8); }
-
-# ================================================================
-# BSP Node: partition line, child bboxes, child indices
-# ================================================================
-# WAD format: x(2) y(2) dx(2) dy(2) bbox_r(8) bbox_l(8) child_r(2) child_l(2) = 28 bytes
-# Partition line: (x,y) + direction (dx,dy) splits space into right/left
-# Child index: bit 15 set = subsector, bits 0-14 = index
-# Our format: x(8) y(8) dx(8) dy(8) bbox_r(32) bbox_l(32) child_r(8) child_l(8) = 112 bytes
-var map_nodes[114688];
 var map_num_nodes = 0;
-var MAP_NODE_SIZE = 112;
+var map_num_things = 0;
 
-# BSP node accessors
-fn map_node_x(idx) { return load64(&map_nodes + idx * MAP_NODE_SIZE); }
-fn map_node_y(idx) { return load64(&map_nodes + idx * MAP_NODE_SIZE + 8); }
-fn map_node_dx(idx) { return load64(&map_nodes + idx * MAP_NODE_SIZE + 16); }
-fn map_node_dy(idx) { return load64(&map_nodes + idx * MAP_NODE_SIZE + 24); }
-
-# Bounding box: top(8) bottom(8) left(8) right(8) = 32 bytes
-# Right child bbox starts at offset 32, left at offset 64
-fn map_node_bbox_r(idx, field) {
-    return load64(&map_nodes + idx * MAP_NODE_SIZE + 32 + field * 8);
-}
-fn map_node_bbox_l(idx, field) {
-    return load64(&map_nodes + idx * MAP_NODE_SIZE + 64 + field * 8);
+enum MapSize {
+    MAP_VERTEX_SIZE = 16;
+    MAP_LINEDEF_SIZE = 56;
+    MAP_SIDEDEF_SIZE = 48;
+    MAP_SECTOR_SIZE = 56;
+    MAP_SEG_SIZE = 48;
+    MAP_SSECTOR_SIZE = 16;
+    MAP_NODE_SIZE = 112;
+    MAP_THING_SIZE = 40;
 }
 
-# Child indices (bit 15 = subsector flag)
-fn map_node_child_r(idx) { return load64(&map_nodes + idx * MAP_NODE_SIZE + 96); }
-fn map_node_child_l(idx) { return load64(&map_nodes + idx * MAP_NODE_SIZE + 104); }
+enum MapLineFlag {
+    ML_BLOCKING = 1;
+    ML_BLOCKMONSTERS = 2;
+    ML_TWOSIDED = 4;
+    ML_DONTPEGTOP = 8;
+    ML_DONTPEGBOTTOM = 16;
+    ML_SECRET = 32;
+    ML_DONTDRAW = 128;
+    ML_MAPPED = 256;
+}
 
-# Bbox field indices
-var BB_TOP = 0;
-var BB_BOTTOM = 1;
-var BB_LEFT = 2;
-var BB_RIGHT = 3;
+enum MapMisc {
+    BB_TOP = 0;
+    BB_BOTTOM = 1;
+    BB_LEFT = 2;
+    BB_RIGHT = 3;
+    NF_SUBSECTOR = 0x8000;
+    THING_PLAYER1 = 1;
+}
 
-# Subsector flag (bit 15 in WAD, we use bit 15 in our representation)
-var NF_SUBSECTOR = 0x8000;
+fn map_alloc() {
+    map_vertexes = alloc(MAP_MAX_VERTEXES * MAP_VERTEX_SIZE);
+    map_linedefs = alloc(MAP_MAX_LINEDEFS * MAP_LINEDEF_SIZE);
+    map_sidedefs = alloc(MAP_MAX_SIDEDEFS * MAP_SIDEDEF_SIZE);
+    map_sectors = alloc(MAP_MAX_SECTORS * MAP_SECTOR_SIZE);
+    map_segs = alloc(MAP_MAX_SEGS * MAP_SEG_SIZE);
+    map_ssectors = alloc(MAP_MAX_SSECTORS * MAP_SSECTOR_SIZE);
+    map_nodes = alloc(MAP_MAX_NODES * MAP_NODE_SIZE);
+    map_things = alloc(MAP_MAX_THINGS * MAP_THING_SIZE);
+    return 0;
+}
+
+# Accessors
+fn map_vertex_x(idx) { return load64(map_vertexes + idx * MAP_VERTEX_SIZE); }
+fn map_vertex_y(idx) { return load64(map_vertexes + idx * MAP_VERTEX_SIZE + 8); }
+
+fn map_linedef_v1(idx) { return load64(map_linedefs + idx * MAP_LINEDEF_SIZE); }
+fn map_linedef_v2(idx) { return load64(map_linedefs + idx * MAP_LINEDEF_SIZE + 8); }
+fn map_linedef_flags(idx) { return load64(map_linedefs + idx * MAP_LINEDEF_SIZE + 16); }
+fn map_linedef_special(idx) { return load64(map_linedefs + idx * MAP_LINEDEF_SIZE + 24); }
+fn map_linedef_tag(idx) { return load64(map_linedefs + idx * MAP_LINEDEF_SIZE + 32); }
+fn map_linedef_side_right(idx) { return load64(map_linedefs + idx * MAP_LINEDEF_SIZE + 40); }
+fn map_linedef_side_left(idx) { return load64(map_linedefs + idx * MAP_LINEDEF_SIZE + 48); }
+
+fn map_sidedef_xoff(idx) { return load64(map_sidedefs + idx * MAP_SIDEDEF_SIZE); }
+fn map_sidedef_yoff(idx) { return load64(map_sidedefs + idx * MAP_SIDEDEF_SIZE + 8); }
+fn map_sidedef_sector(idx) { return load64(map_sidedefs + idx * MAP_SIDEDEF_SIZE + 40); }
+
+fn map_sector_floorh(idx) { return load64(map_sectors + idx * MAP_SECTOR_SIZE); }
+fn map_sector_ceilh(idx) { return load64(map_sectors + idx * MAP_SECTOR_SIZE + 8); }
+fn map_sector_light(idx) { return load64(map_sectors + idx * MAP_SECTOR_SIZE + 32); }
+fn map_sector_special(idx) { return load64(map_sectors + idx * MAP_SECTOR_SIZE + 40); }
+fn map_sector_tag(idx) { return load64(map_sectors + idx * MAP_SECTOR_SIZE + 48); }
+
+fn map_seg_v1(idx) { return load64(map_segs + idx * MAP_SEG_SIZE); }
+fn map_seg_v2(idx) { return load64(map_segs + idx * MAP_SEG_SIZE + 8); }
+fn map_seg_angle(idx) { return load64(map_segs + idx * MAP_SEG_SIZE + 16); }
+fn map_seg_linedef(idx) { return load64(map_segs + idx * MAP_SEG_SIZE + 24); }
+fn map_seg_side(idx) { return load64(map_segs + idx * MAP_SEG_SIZE + 32); }
+fn map_seg_offset(idx) { return load64(map_segs + idx * MAP_SEG_SIZE + 40); }
+
+fn map_ssector_count(idx) { return load64(map_ssectors + idx * MAP_SSECTOR_SIZE); }
+fn map_ssector_first(idx) { return load64(map_ssectors + idx * MAP_SSECTOR_SIZE + 8); }
+
+fn map_node_x(idx) { return load64(map_nodes + idx * MAP_NODE_SIZE); }
+fn map_node_y(idx) { return load64(map_nodes + idx * MAP_NODE_SIZE + 8); }
+fn map_node_dx(idx) { return load64(map_nodes + idx * MAP_NODE_SIZE + 16); }
+fn map_node_dy(idx) { return load64(map_nodes + idx * MAP_NODE_SIZE + 24); }
+fn map_node_bbox_r(idx, field) { return load64(map_nodes + idx * MAP_NODE_SIZE + 32 + field * 8); }
+fn map_node_bbox_l(idx, field) { return load64(map_nodes + idx * MAP_NODE_SIZE + 64 + field * 8); }
+fn map_node_child_r(idx) { return load64(map_nodes + idx * MAP_NODE_SIZE + 96); }
+fn map_node_child_l(idx) { return load64(map_nodes + idx * MAP_NODE_SIZE + 104); }
+
+fn map_thing_x(idx) { return load64(map_things + idx * MAP_THING_SIZE); }
+fn map_thing_y(idx) { return load64(map_things + idx * MAP_THING_SIZE + 8); }
+fn map_thing_angle(idx) { return load64(map_things + idx * MAP_THING_SIZE + 16); }
+fn map_thing_type(idx) { return load64(map_things + idx * MAP_THING_SIZE + 24); }
+fn map_thing_flags(idx) { return load64(map_things + idx * MAP_THING_SIZE + 32); }
 
 fn map_is_subsector(child) {
     if ((child & NF_SUBSECTOR) != 0) { return 1; }
     return 0;
 }
+fn map_subsector_idx(child) { return child & 0x7FFF; }
 
-fn map_subsector_idx(child) {
-    return child & 0x7FFF;
-}
-
-# ================================================================
-# Things: x, y, angle, type, flags
-# ================================================================
-# WAD format: x(2) y(2) angle(2) type(2) flags(2) = 10 bytes
-# Our format: 5 fields * 8 bytes = 40 bytes per thing
-var map_things[20480];
-var map_num_things = 0;
-var MAP_THING_SIZE = 40;
-
-fn map_thing_x(idx) { return load64(&map_things + idx * MAP_THING_SIZE); }
-fn map_thing_y(idx) { return load64(&map_things + idx * MAP_THING_SIZE + 8); }
-fn map_thing_angle(idx) { return load64(&map_things + idx * MAP_THING_SIZE + 16); }
-fn map_thing_type(idx) { return load64(&map_things + idx * MAP_THING_SIZE + 24); }
-fn map_thing_flags(idx) { return load64(&map_things + idx * MAP_THING_SIZE + 32); }
-
-# Player 1 start thing type
-var THING_PLAYER1 = 1;
-
-# ================================================================
-# Sign-extend a 16-bit value to i64
-# ================================================================
 fn sign_extend_16(val) {
-    if ((val & 0x8000) != 0) {
-        return val | (0 - 65536);
-    }
+    if ((val & 0x8000) != 0) { return val | (0 - 65536); }
     return val;
 }
 
-# ================================================================
-# Map loading
-# ================================================================
-
-# Load a map from the WAD. map_name is e.g. "E1M1" or "MAP01".
-# Returns 0 on success, -1 on failure.
+# Load a map from the WAD
 fn map_load(map_name) {
+    map_alloc();
+
     var marker = wad_find_lump(map_name);
     if (marker < 0) {
         file_write(2, "error: map not found\n", 21);
         return 0 - 1;
     }
 
-    # Map lumps follow the marker in this order:
-    # marker+1=THINGS, +2=LINEDEFS, +3=SIDEDEFS, +4=VERTEXES,
-    # +5=SEGS, +6=SSECTORS, +7=NODES, +8=SECTORS, +9=REJECT, +10=BLOCKMAP
-
-    # --- Load VERTEXES (marker + 4) ---
+    # VERTEXES (marker + 4)
     var lump_idx = marker + 4;
     var lump_size = wad_lump_size(lump_idx);
     var data = wad_read_lump(lump_idx);
     if (data == 0) { return 0 - 1; }
     map_num_vertexes = lump_size / 4;
     if (map_num_vertexes > MAP_MAX_VERTEXES) { map_num_vertexes = MAP_MAX_VERTEXES; }
-
     for (var i = 0; i < map_num_vertexes; i = i + 1) {
         var src = data + i * 4;
-        var x = sign_extend_16(read_le16(src));
-        var y = sign_extend_16(read_le16(src + 2));
-        # Convert to 16.16 fixed-point
-        store64(&map_vertexes + i * MAP_VERTEX_SIZE, x << 16);
-        store64(&map_vertexes + i * MAP_VERTEX_SIZE + 8, y << 16);
+        var dst = map_vertexes + i * MAP_VERTEX_SIZE;
+        store64(dst, sign_extend_16(read_le16(src)) << 16);
+        store64(dst + 8, sign_extend_16(read_le16(src + 2)) << 16);
     }
 
-    # --- Load LINEDEFS (marker + 2) ---
+    # LINEDEFS (marker + 2)
     lump_idx = marker + 2;
     lump_size = wad_lump_size(lump_idx);
     data = wad_read_lump(lump_idx);
     if (data == 0) { return 0 - 1; }
     map_num_linedefs = lump_size / 14;
     if (map_num_linedefs > MAP_MAX_LINEDEFS) { map_num_linedefs = MAP_MAX_LINEDEFS; }
-
     for (var i = 0; i < map_num_linedefs; i = i + 1) {
         var src = data + i * 14;
-        var base = &map_linedefs + i * MAP_LINEDEF_SIZE;
-        store64(base, read_le16(src));           # v1
-        store64(base + 8, read_le16(src + 2));   # v2
-        store64(base + 16, read_le16(src + 4));  # flags
-        store64(base + 24, read_le16(src + 6));  # special
-        store64(base + 32, read_le16(src + 8));  # tag
-        store64(base + 40, read_le16(src + 10)); # right sidedef
-        var left_side = read_le16(src + 12);
-        # 0xFFFF means no left side
-        if (left_side == 65535) { left_side = 0 - 1; }
-        store64(base + 48, left_side);           # left sidedef
+        var base = map_linedefs + i * MAP_LINEDEF_SIZE;
+        store64(base, read_le16(src));
+        store64(base + 8, read_le16(src + 2));
+        store64(base + 16, read_le16(src + 4));
+        store64(base + 24, read_le16(src + 6));
+        store64(base + 32, read_le16(src + 8));
+        store64(base + 40, read_le16(src + 10));
+        var left = read_le16(src + 12);
+        if (left == 65535) { left = 0 - 1; }
+        store64(base + 48, left);
     }
 
-    # --- Load SIDEDEFS (marker + 3) ---
+    # SIDEDEFS (marker + 3)
     lump_idx = marker + 3;
     lump_size = wad_lump_size(lump_idx);
     data = wad_read_lump(lump_idx);
     if (data == 0) { return 0 - 1; }
     map_num_sidedefs = lump_size / 30;
     if (map_num_sidedefs > MAP_MAX_SIDEDEFS) { map_num_sidedefs = MAP_MAX_SIDEDEFS; }
-
     for (var i = 0; i < map_num_sidedefs; i = i + 1) {
         var src = data + i * 30;
-        var base = &map_sidedefs + i * MAP_SIDEDEF_SIZE;
-        store64(base, sign_extend_16(read_le16(src)));       # x offset
-        store64(base + 8, sign_extend_16(read_le16(src + 2))); # y offset
-        # Copy texture names (8 bytes each) as raw bytes
-        store64(base + 16, load64(src + 4));   # upper texture name
-        store64(base + 24, load64(src + 12));  # lower texture name
-        store64(base + 32, load64(src + 20));  # mid texture name
-        store64(base + 40, read_le16(src + 28)); # sector number
+        var base = map_sidedefs + i * MAP_SIDEDEF_SIZE;
+        store64(base, sign_extend_16(read_le16(src)));
+        store64(base + 8, sign_extend_16(read_le16(src + 2)));
+        store64(base + 16, load64(src + 4));
+        store64(base + 24, load64(src + 12));
+        store64(base + 32, load64(src + 20));
+        store64(base + 40, read_le16(src + 28));
     }
 
-    # --- Load SECTORS (marker + 8) ---
+    # SECTORS (marker + 8)
     lump_idx = marker + 8;
     lump_size = wad_lump_size(lump_idx);
     data = wad_read_lump(lump_idx);
     if (data == 0) { return 0 - 1; }
     map_num_sectors = lump_size / 26;
     if (map_num_sectors > MAP_MAX_SECTORS) { map_num_sectors = MAP_MAX_SECTORS; }
-
     for (var i = 0; i < map_num_sectors; i = i + 1) {
         var src = data + i * 26;
-        var base = &map_sectors + i * MAP_SECTOR_SIZE;
-        store64(base, sign_extend_16(read_le16(src)));       # floor height
-        store64(base + 8, sign_extend_16(read_le16(src + 2))); # ceil height
-        store64(base + 16, load64(src + 4));   # floor texture name
-        store64(base + 24, load64(src + 12));  # ceiling texture name
-        store64(base + 32, read_le16(src + 20));  # light level
-        store64(base + 40, read_le16(src + 22));  # special
-        store64(base + 48, read_le16(src + 24));  # tag
+        var base = map_sectors + i * MAP_SECTOR_SIZE;
+        store64(base, sign_extend_16(read_le16(src)));
+        store64(base + 8, sign_extend_16(read_le16(src + 2)));
+        store64(base + 16, load64(src + 4));
+        store64(base + 24, load64(src + 12));
+        store64(base + 32, read_le16(src + 20));
+        store64(base + 40, read_le16(src + 22));
+        store64(base + 48, read_le16(src + 24));
     }
 
-    # --- Load SEGS (marker + 5) ---
+    # SEGS (marker + 5)
     lump_idx = marker + 5;
     lump_size = wad_lump_size(lump_idx);
     data = wad_read_lump(lump_idx);
     if (data == 0) { return 0 - 1; }
     map_num_segs = lump_size / 12;
     if (map_num_segs > MAP_MAX_SEGS) { map_num_segs = MAP_MAX_SEGS; }
-
     for (var i = 0; i < map_num_segs; i = i + 1) {
         var src = data + i * 12;
-        var base = &map_segs + i * MAP_SEG_SIZE;
-        store64(base, read_le16(src));              # v1
-        store64(base + 8, read_le16(src + 2));      # v2
-        store64(base + 16, read_le16(src + 4));     # angle (BAM)
-        store64(base + 24, read_le16(src + 6));     # linedef
-        store64(base + 32, read_le16(src + 8));     # side (0=right, 1=left)
-        store64(base + 40, read_le16(src + 10));    # offset
+        var base = map_segs + i * MAP_SEG_SIZE;
+        store64(base, read_le16(src));
+        store64(base + 8, read_le16(src + 2));
+        store64(base + 16, read_le16(src + 4));
+        store64(base + 24, read_le16(src + 6));
+        store64(base + 32, read_le16(src + 8));
+        store64(base + 40, read_le16(src + 10));
     }
 
-    # --- Load SSECTORS (marker + 6) ---
+    # SSECTORS (marker + 6)
     lump_idx = marker + 6;
     lump_size = wad_lump_size(lump_idx);
     data = wad_read_lump(lump_idx);
     if (data == 0) { return 0 - 1; }
     map_num_ssectors = lump_size / 4;
     if (map_num_ssectors > MAP_MAX_SSECTORS) { map_num_ssectors = MAP_MAX_SSECTORS; }
-
     for (var i = 0; i < map_num_ssectors; i = i + 1) {
         var src = data + i * 4;
-        var base = &map_ssectors + i * MAP_SSECTOR_SIZE;
-        store64(base, read_le16(src));         # seg count
-        store64(base + 8, read_le16(src + 2)); # first seg
+        var base = map_ssectors + i * MAP_SSECTOR_SIZE;
+        store64(base, read_le16(src));
+        store64(base + 8, read_le16(src + 2));
     }
 
-    # --- Load NODES (marker + 7) ---
+    # NODES (marker + 7)
     lump_idx = marker + 7;
     lump_size = wad_lump_size(lump_idx);
     data = wad_read_lump(lump_idx);
     if (data == 0) { return 0 - 1; }
     map_num_nodes = lump_size / 28;
     if (map_num_nodes > MAP_MAX_NODES) { map_num_nodes = MAP_MAX_NODES; }
-
     for (var i = 0; i < map_num_nodes; i = i + 1) {
         var src = data + i * 28;
-        var base = &map_nodes + i * MAP_NODE_SIZE;
-        # Partition line origin and direction (convert to fixed-point)
-        store64(base, sign_extend_16(read_le16(src)) << 16);       # x
-        store64(base + 8, sign_extend_16(read_le16(src + 2)) << 16); # y
-        store64(base + 16, sign_extend_16(read_le16(src + 4)) << 16); # dx
-        store64(base + 24, sign_extend_16(read_le16(src + 6)) << 16); # dy
-        # Right child bounding box: top, bottom, left, right
+        var base = map_nodes + i * MAP_NODE_SIZE;
+        store64(base, sign_extend_16(read_le16(src)) << 16);
+        store64(base + 8, sign_extend_16(read_le16(src + 2)) << 16);
+        store64(base + 16, sign_extend_16(read_le16(src + 4)) << 16);
+        store64(base + 24, sign_extend_16(read_le16(src + 6)) << 16);
         store64(base + 32, sign_extend_16(read_le16(src + 8)) << 16);
         store64(base + 40, sign_extend_16(read_le16(src + 10)) << 16);
         store64(base + 48, sign_extend_16(read_le16(src + 12)) << 16);
         store64(base + 56, sign_extend_16(read_le16(src + 14)) << 16);
-        # Left child bounding box
         store64(base + 64, sign_extend_16(read_le16(src + 16)) << 16);
         store64(base + 72, sign_extend_16(read_le16(src + 18)) << 16);
         store64(base + 80, sign_extend_16(read_le16(src + 20)) << 16);
         store64(base + 88, sign_extend_16(read_le16(src + 22)) << 16);
-        # Child references
-        store64(base + 96, read_le16(src + 24));   # right child
-        store64(base + 104, read_le16(src + 26));  # left child
+        store64(base + 96, read_le16(src + 24));
+        store64(base + 104, read_le16(src + 26));
     }
 
-    # --- Load THINGS (marker + 1) ---
+    # THINGS (marker + 1)
     lump_idx = marker + 1;
     lump_size = wad_lump_size(lump_idx);
     data = wad_read_lump(lump_idx);
     if (data == 0) { return 0 - 1; }
     map_num_things = lump_size / 10;
     if (map_num_things > MAP_MAX_THINGS) { map_num_things = MAP_MAX_THINGS; }
-
     for (var i = 0; i < map_num_things; i = i + 1) {
         var src = data + i * 10;
-        var base = &map_things + i * MAP_THING_SIZE;
-        store64(base, sign_extend_16(read_le16(src)) << 16);       # x (fixed)
-        store64(base + 8, sign_extend_16(read_le16(src + 2)) << 16); # y (fixed)
-        store64(base + 16, read_le16(src + 4));  # angle (degrees)
-        store64(base + 24, read_le16(src + 6));  # type
-        store64(base + 32, read_le16(src + 8));  # flags
+        var base = map_things + i * MAP_THING_SIZE;
+        store64(base, sign_extend_16(read_le16(src)) << 16);
+        store64(base + 8, sign_extend_16(read_le16(src + 2)) << 16);
+        store64(base + 16, read_le16(src + 4));
+        store64(base + 24, read_le16(src + 6));
+        store64(base + 32, read_le16(src + 8));
     }
 
     return 0;
 }
 
-# ================================================================
-# Player start position
-# ================================================================
-
-# Find player 1 start position. Sets px, py (fixed-point) and pangle.
-# Returns 0 on success, -1 if not found.
+# Player start
 var player_start_x = 0;
 var player_start_y = 0;
 var player_start_angle = 0;
@@ -401,51 +304,28 @@ fn map_find_player_start() {
         if (map_thing_type(i) == THING_PLAYER1) {
             player_start_x = map_thing_x(i);
             player_start_y = map_thing_y(i);
-            # Convert degrees (0-359) to our angle system (0-1023)
-            # angle_idx = degrees * 1024 / 360
-            var deg = map_thing_angle(i);
-            player_start_angle = deg * 1024 / 360;
+            player_start_angle = map_thing_angle(i) * 1024 / 360;
             return 0;
         }
     }
     return 0 - 1;
 }
 
-# ================================================================
-# BSP point-side test
-# ================================================================
-
-# Determine which side of a BSP partition line a point is on.
-# Returns 0 for right (front), 1 for left (back).
-# This is the core BSP traversal decision.
 fn map_point_on_side(x, y, node_idx) {
     var nx = map_node_x(node_idx);
     var ny = map_node_y(node_idx);
     var ndx = map_node_dx(node_idx);
     var ndy = map_node_dy(node_idx);
-
-    # Cross product: (x - nx) * dy - (y - ny) * dx
-    # If positive, point is on the right (front) side
-    # If negative, point is on the left (back) side
     var dx = x - nx;
     var dy = y - ny;
-
-    # Use 64-bit intermediate to avoid overflow
-    # (dx >> 8) * (ndy >> 8) to keep within range
     var left = ((dx >> 8) * (ndy >> 8)) >> 0;
     var right = ((dy >> 8) * (ndx >> 8)) >> 0;
-
     if (left >= right) { return 0; }
     return 1;
 }
 
-# ================================================================
-# Map diagnostics
-# ================================================================
-
 fn map_print_stats() {
-    syscall(1, 1, "map: ", 5);
-    syscall(1, 1, "V=", 2); fmt_int(map_num_vertexes);
+    syscall(1, 1, "map: V=", 7); fmt_int(map_num_vertexes);
     syscall(1, 1, " L=", 3); fmt_int(map_num_linedefs);
     syscall(1, 1, " SD=", 4); fmt_int(map_num_sidedefs);
     syscall(1, 1, " S=", 3); fmt_int(map_num_sectors);

@@ -25,30 +25,20 @@ var player_angle = 0;
 # Movement speeds (fixed-point)
 # Walk: 3 map units per tick << 16 = 196608
 # Run:  6 map units per tick << 16 = 393216
-var PLAYER_WALK_SPEED = 196608;
-var PLAYER_RUN_SPEED = 393216;
-var PLAYER_STRAFE_SPEED = 163840;
-
-# Turn speed in angle units per tick
-# Walk turn: 4 angle units (~1.4 degrees)
-# Run turn: 8 angle units (~2.8 degrees)
-var PLAYER_TURN_SPEED = 4;
-var PLAYER_TURN_SPEED_RUN = 8;
-
-# Maximum step height the player can climb (24 map units)
-var PLAYER_MAX_STEP = 24;
-# Player height (56 map units, eye at 41)
-var PLAYER_HEIGHT = 56;
-# Player radius for collision (16 map units in fixed-point)
-var PLAYER_RADIUS = 1048576;
+enum PlayerConst {
+    PLAYER_WALK_SPEED = 196608;
+    PLAYER_RUN_SPEED = 393216;
+    PLAYER_STRAFE_SPEED = 163840;
+    PLAYER_TURN_SPEED = 4;
+    PLAYER_TURN_SPEED_RUN = 8;
+    PLAYER_MAX_STEP = 24;
+    PLAYER_HEIGHT = 56;
+    PLAYER_RADIUS = 1048576;
+}
 
 # Combat state
 var player_health = 100;
 var player_armor = 0;
-var player_ammo_bullets = 50;
-var player_ammo_shells = 0;
-var player_ammo_rockets = 0;
-var player_ammo_cells = 0;
 var player_weapon = 1;
 
 # ================================================================
@@ -220,16 +210,16 @@ fn player_tick() {
     var speed = PLAYER_WALK_SPEED;
     var turn_speed = PLAYER_TURN_SPEED;
 
-    if (input_run == 1) {
+    if (input_run() == 1) {
         speed = PLAYER_RUN_SPEED;
         turn_speed = PLAYER_TURN_SPEED_RUN;
     }
 
     # Turning
-    if (input_turn_left == 1) {
+    if (input_turn_left() == 1) {
         player_angle = angle_add(player_angle, turn_speed);
     }
-    if (input_turn_right == 1) {
+    if (input_turn_right() == 1) {
         player_angle = angle_sub(player_angle, turn_speed);
     }
 
@@ -241,21 +231,21 @@ fn player_tick() {
     var fwd_sin = fixed_sin(player_angle);
 
     # Forward/backward
-    if (input_forward == 1) {
+    if (input_forward() == 1) {
         move_x = move_x + fixed_mul(fwd_cos, speed);
         move_y = move_y + fixed_mul(fwd_sin, speed);
     }
-    if (input_backward == 1) {
+    if (input_backward() == 1) {
         move_x = move_x - fixed_mul(fwd_cos, speed);
         move_y = move_y - fixed_mul(fwd_sin, speed);
     }
 
     # Strafing (perpendicular to facing direction)
-    if (input_strafe_left == 1) {
+    if (input_strafe_left() == 1) {
         move_x = move_x + fixed_mul(fwd_sin, PLAYER_STRAFE_SPEED);
         move_y = move_y - fixed_mul(fwd_cos, PLAYER_STRAFE_SPEED);
     }
-    if (input_strafe_right == 1) {
+    if (input_strafe_right() == 1) {
         move_x = move_x - fixed_mul(fwd_sin, PLAYER_STRAFE_SPEED);
         move_y = move_y + fixed_mul(fwd_cos, PLAYER_STRAFE_SPEED);
     }

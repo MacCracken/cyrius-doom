@@ -1,0 +1,591 @@
+# things.cyr -- monsters, items, projectiles, AI state machine
+# Usage: include "src/things.cyr" (after map.cyr, fixed.cyr, player.cyr)
+#
+# DOOM "things" = every object in the world that isn't geometry:
+#   - Monsters (imps, demons, zombies, barons, etc.)
+#   - Items (health, armor, ammo, weapons, keys)
+#   - Projectiles (fireballs, rockets, plasma)
+#   - Decorations (barrels, lights, corpses)
+#
+# Each thing has position, state, health, and a state machine for AI.
+# Original DOOM uses a "thinker" linked list -- we use a flat array.
+#
+# Monster AI states (from DOOM source):
+#   SPAWN   - idle, waiting to see player
+#   SEE     - spotted player, start chasing
+#   CHASE   - moving toward player
+#   ATTACK  - in range, attacking
+#   PAIN    - took damage, flinch
+#   DIE     - dying animation
+#   DEAD    - corpse on floor
+
+# ================================================================
+# Thing type definitions (DoomEd numbers from WAD THINGS lump)
+# ================================================================
+
+# Player starts
+var TTYPE_PLAYER1 = 1;
+var TTYPE_PLAYER2 = 2;
+var TTYPE_PLAYER3 = 3;
+var TTYPE_PLAYER4 = 4;
+
+# Monsters
+var TTYPE_ZOMBIEMAN = 3004;
+var TTYPE_SHOTGUY = 9;
+var TTYPE_IMP = 3001;
+var TTYPE_DEMON = 3002;
+var TTYPE_SPECTRE = 58;
+var TTYPE_CACODEMON = 3005;
+var TTYPE_BARON = 3003;
+var TTYPE_CYBERDEMON = 16;
+var TTYPE_SPIDER = 7;
+var TTYPE_LOSTSOUL = 3006;
+
+# Items - health
+var TTYPE_HEALTH_POTION = 2014;
+var TTYPE_STIMPACK = 2011;
+var TTYPE_MEDIKIT = 2012;
+var TTYPE_SOULSPHERE = 2013;
+
+# Items - armor
+var TTYPE_ARMOR_GREEN = 2018;
+var TTYPE_ARMOR_BLUE = 2019;
+var TTYPE_ARMOR_BONUS = 2015;
+
+# Items - ammo
+var TTYPE_CLIP = 2007;
+var TTYPE_CLIPBOX = 2048;
+var TTYPE_SHELLS = 2008;
+var TTYPE_SHELLBOX = 2049;
+var TTYPE_ROCKET = 2010;
+var TTYPE_ROCKETBOX = 2046;
+var TTYPE_CELL = 2047;
+var TTYPE_CELLPACK = 17;
+
+# Items - weapons
+var TTYPE_SHOTGUN = 2001;
+var TTYPE_CHAINGUN = 2002;
+var TTYPE_LAUNCHER = 2003;
+var TTYPE_PLASMA = 2004;
+var TTYPE_CHAINSAW = 2005;
+var TTYPE_BFG = 2006;
+
+# Items - keys
+var TTYPE_KEY_BLUE = 5;
+var TTYPE_KEY_YELLOW = 6;
+var TTYPE_KEY_RED = 13;
+
+# Decorations
+var TTYPE_BARREL = 2035;
+
+# ================================================================
+# AI states
+# ================================================================
+var STATE_NONE = 0;
+var STATE_SPAWN = 1;
+var STATE_SEE = 2;
+var STATE_CHASE = 3;
+var STATE_ATTACK = 4;
+var STATE_PAIN = 5;
+var STATE_DIE = 6;
+var STATE_DEAD = 7;
+var STATE_ITEM = 8;
+var STATE_PICKUP = 9;
+
+var CAT_NONE = 0;
+var CAT_MONSTER = 1;
+var CAT_ITEM = 2;
+var CAT_WEAPON = 3;
+var CAT_KEY = 4;
+var CAT_DECOR = 5;
+var CAT_PROJECTILE = 6;
+
+# ================================================================
+# Runtime thing (mobj_t equivalent)
+# ================================================================
+# Layout per thing: 14 fields * 8 bytes = 112 bytes
+#   0: x (fixed-point)
+#   8: y (fixed-point)
+#  16: z (fixed-point)
+#  24: angle (0..1023)
+#  32: type (DoomEd number)
+#  40: state (ThingState)
+#  48: health
+#  56: category (ThingCategory)
+#  64: move_dx (fixed-point velocity)
+#  72: move_dy (fixed-point velocity)
+#  80: radius (fixed-point)
+#  88: height (fixed-point)
+#  96: tics (countdown for state transitions)
+# 104: flags (active, solid, shootable, etc.)
+
+var THING_SIZE = 112;
+var THING_MAX = 512;
+var things = 0;
+var thing_count = 0;
+
+# Thing flags
+var TF_ACTIVE = 1;
+var TF_SOLID = 2;
+var TF_SHOOTABLE = 4;
+var TF_PICKUP = 8;
+var TF_MISSILE = 16;
+var TF_CORPSE = 32;
+
+# Field accessors
+fn thing_x(idx) { return load64(things + idx * THING_SIZE); }
+fn thing_y(idx) { return load64(things + idx * THING_SIZE + 8); }
+fn thing_z(idx) { return load64(things + idx * THING_SIZE + 16); }
+fn thing_angle(idx) { return load64(things + idx * THING_SIZE + 24); }
+fn thing_type(idx) { return load64(things + idx * THING_SIZE + 32); }
+fn thing_state(idx) { return load64(things + idx * THING_SIZE + 40); }
+fn thing_health(idx) { return load64(things + idx * THING_SIZE + 48); }
+fn thing_category(idx) { return load64(things + idx * THING_SIZE + 56); }
+fn thing_dx(idx) { return load64(things + idx * THING_SIZE + 64); }
+fn thing_dy(idx) { return load64(things + idx * THING_SIZE + 72); }
+fn thing_radius(idx) { return load64(things + idx * THING_SIZE + 80); }
+fn thing_height(idx) { return load64(things + idx * THING_SIZE + 88); }
+fn thing_tics(idx) { return load64(things + idx * THING_SIZE + 96); }
+fn thing_flags(idx) { return load64(things + idx * THING_SIZE + 104); }
+
+fn thing_set_state(idx, st) { store64(things + idx * THING_SIZE + 40, st); return 0; }
+fn thing_set_health(idx, h) { store64(things + idx * THING_SIZE + 48, h); return 0; }
+fn thing_set_dx(idx, v) { store64(things + idx * THING_SIZE + 64, v); return 0; }
+fn thing_set_dy(idx, v) { store64(things + idx * THING_SIZE + 72, v); return 0; }
+fn thing_set_tics(idx, t) { store64(things + idx * THING_SIZE + 96, t); return 0; }
+fn thing_set_flags(idx, f) { store64(things + idx * THING_SIZE + 104, f); return 0; }
+fn thing_set_x(idx, v) { store64(things + idx * THING_SIZE, v); return 0; }
+fn thing_set_y(idx, v) { store64(things + idx * THING_SIZE + 8, v); return 0; }
+fn thing_set_z(idx, v) { store64(things + idx * THING_SIZE + 16, v); return 0; }
+fn thing_set_angle(idx, v) { store64(things + idx * THING_SIZE + 24, v); return 0; }
+
+# ================================================================
+# Classify a DoomEd thing type
+# ================================================================
+
+fn thing_classify(ttype) {
+    # Monsters
+    if (ttype == TTYPE_ZOMBIEMAN) { return CAT_MONSTER; }
+    if (ttype == TTYPE_SHOTGUY) { return CAT_MONSTER; }
+    if (ttype == TTYPE_IMP) { return CAT_MONSTER; }
+    if (ttype == TTYPE_DEMON) { return CAT_MONSTER; }
+    if (ttype == TTYPE_SPECTRE) { return CAT_MONSTER; }
+    if (ttype == TTYPE_CACODEMON) { return CAT_MONSTER; }
+    if (ttype == TTYPE_BARON) { return CAT_MONSTER; }
+    if (ttype == TTYPE_CYBERDEMON) { return CAT_MONSTER; }
+    if (ttype == TTYPE_SPIDER) { return CAT_MONSTER; }
+    if (ttype == TTYPE_LOSTSOUL) { return CAT_MONSTER; }
+
+    # Weapons
+    if (ttype == TTYPE_SHOTGUN) { return CAT_WEAPON; }
+    if (ttype == TTYPE_CHAINGUN) { return CAT_WEAPON; }
+    if (ttype == TTYPE_LAUNCHER) { return CAT_WEAPON; }
+    if (ttype == TTYPE_PLASMA) { return CAT_WEAPON; }
+    if (ttype == TTYPE_CHAINSAW) { return CAT_WEAPON; }
+    if (ttype == TTYPE_BFG) { return CAT_WEAPON; }
+
+    # Keys
+    if (ttype == TTYPE_KEY_BLUE) { return CAT_KEY; }
+    if (ttype == TTYPE_KEY_YELLOW) { return CAT_KEY; }
+    if (ttype == TTYPE_KEY_RED) { return CAT_KEY; }
+
+    # Items
+    if (ttype == TTYPE_HEALTH_POTION) { return CAT_ITEM; }
+    if (ttype == TTYPE_STIMPACK) { return CAT_ITEM; }
+    if (ttype == TTYPE_MEDIKIT) { return CAT_ITEM; }
+    if (ttype == TTYPE_SOULSPHERE) { return CAT_ITEM; }
+    if (ttype == TTYPE_ARMOR_GREEN) { return CAT_ITEM; }
+    if (ttype == TTYPE_ARMOR_BLUE) { return CAT_ITEM; }
+    if (ttype == TTYPE_ARMOR_BONUS) { return CAT_ITEM; }
+    if (ttype == TTYPE_CLIP) { return CAT_ITEM; }
+    if (ttype == TTYPE_CLIPBOX) { return CAT_ITEM; }
+    if (ttype == TTYPE_SHELLS) { return CAT_ITEM; }
+    if (ttype == TTYPE_SHELLBOX) { return CAT_ITEM; }
+    if (ttype == TTYPE_ROCKET) { return CAT_ITEM; }
+    if (ttype == TTYPE_ROCKETBOX) { return CAT_ITEM; }
+    if (ttype == TTYPE_CELL) { return CAT_ITEM; }
+    if (ttype == TTYPE_CELLPACK) { return CAT_ITEM; }
+
+    # Barrel
+    if (ttype == TTYPE_BARREL) { return CAT_DECOR; }
+
+    return CAT_DECOR;
+}
+
+# Get default health for a monster type
+fn thing_default_health(ttype) {
+    if (ttype == TTYPE_ZOMBIEMAN) { return 20; }
+    if (ttype == TTYPE_SHOTGUY) { return 30; }
+    if (ttype == TTYPE_IMP) { return 60; }
+    if (ttype == TTYPE_DEMON) { return 150; }
+    if (ttype == TTYPE_SPECTRE) { return 150; }
+    if (ttype == TTYPE_CACODEMON) { return 400; }
+    if (ttype == TTYPE_BARON) { return 1000; }
+    if (ttype == TTYPE_CYBERDEMON) { return 4000; }
+    if (ttype == TTYPE_SPIDER) { return 3000; }
+    if (ttype == TTYPE_LOSTSOUL) { return 100; }
+    if (ttype == TTYPE_BARREL) { return 20; }
+    return 0;
+}
+
+# Get default radius (in fixed-point, map units << 16)
+fn thing_default_radius(ttype) {
+    if (ttype == TTYPE_CYBERDEMON) { return 40 << 16; }
+    if (ttype == TTYPE_SPIDER) { return 128 << 16; }
+    if (ttype == TTYPE_CACODEMON) { return 31 << 16; }
+    if (ttype == TTYPE_BARON) { return 24 << 16; }
+    if (ttype == TTYPE_BARREL) { return 10 << 16; }
+    # Default monster/item radius: 20 map units
+    return 20 << 16;
+}
+
+# ================================================================
+# Spawn things from map data
+# ================================================================
+
+fn things_spawn_from_map() {
+    if (things == 0) { things = alloc(THING_MAX * THING_SIZE); }
+    thing_count = 0;
+
+    for (var i = 0; i < map_num_things; i = i + 1) {
+        if (thing_count >= THING_MAX) { break; }
+
+        var ttype = map_thing_type(i);
+
+        # Skip player starts
+        if (ttype >= TTYPE_PLAYER1) { if (ttype <= TTYPE_PLAYER4) { continue; } }
+
+        var cat = thing_classify(ttype);
+        var idx = thing_count;
+        var base = things + idx * THING_SIZE;
+
+        # Position
+        store64(base, map_thing_x(i));
+        store64(base + 8, map_thing_y(i));
+        store64(base + 16, 0);
+        # Angle: WAD degrees (0-359) -> angle units (0-1023)
+        var deg = map_thing_angle(i);
+        store64(base + 24, deg * 1024 / 360);
+        store64(base + 32, ttype);
+
+        # State and health
+        if (cat == CAT_MONSTER) {
+            store64(base + 40, STATE_SPAWN);
+            store64(base + 48, thing_default_health(ttype));
+            store64(base + 104, TF_ACTIVE | TF_SOLID | TF_SHOOTABLE);
+        } else {
+            if (cat == CAT_ITEM) {
+                store64(base + 40, STATE_ITEM);
+                store64(base + 48, 0);
+                store64(base + 104, TF_ACTIVE | TF_PICKUP);
+            } else {
+                if (cat == CAT_WEAPON) {
+                    store64(base + 40, STATE_ITEM);
+                    store64(base + 48, 0);
+                    store64(base + 104, TF_ACTIVE | TF_PICKUP);
+                } else {
+                    if (cat == CAT_KEY) {
+                        store64(base + 40, STATE_ITEM);
+                        store64(base + 48, 0);
+                        store64(base + 104, TF_ACTIVE | TF_PICKUP);
+                    } else {
+                        # Decoration
+                        store64(base + 40, STATE_SPAWN);
+                        store64(base + 48, thing_default_health(ttype));
+                        var flags = TF_ACTIVE;
+                        if (ttype == TTYPE_BARREL) { flags = flags | TF_SOLID | TF_SHOOTABLE; }
+                        store64(base + 104, flags);
+                    }
+                }
+            }
+        }
+
+        store64(base + 56, cat);
+        store64(base + 64, 0);
+        store64(base + 72, 0);
+        store64(base + 80, thing_default_radius(ttype));
+        store64(base + 88, 56 << 16);
+        store64(base + 96, 0);
+
+        thing_count = thing_count + 1;
+    }
+
+    return 0;
+}
+
+# ================================================================
+# Monster AI: line of sight check
+# ================================================================
+# Can monster at (mx, my) see point at (tx, ty)?
+# Simplified: check if any one-sided linedef blocks the line.
+
+fn thing_check_sight(mx, my, tx, ty) {
+    var dx = tx - mx;
+    var dy = ty - my;
+
+    for (var i = 0; i < map_num_linedefs; i = i + 1) {
+        var flags = map_linedef_flags(i);
+        # Only one-sided lines block sight
+        if ((flags & ML_TWOSIDED) != 0) { continue; }
+
+        var v1 = map_linedef_v1(i);
+        var v2 = map_linedef_v2(i);
+        var lx1 = map_vertex_x(v1);
+        var ly1 = map_vertex_y(v1);
+        var lx2 = map_vertex_x(v2);
+        var ly2 = map_vertex_y(v2);
+
+        # Line segment intersection test (2D)
+        var ldx = lx2 - lx1;
+        var ldy = ly2 - ly1;
+
+        var denom = fixed_mul(dx >> 8, ldy >> 8) - fixed_mul(dy >> 8, ldx >> 8);
+        if (denom == 0) { continue; }
+
+        var t1_num = fixed_mul((lx1 - mx) >> 8, ldy >> 8) - fixed_mul((ly1 - my) >> 8, ldx >> 8);
+        var t2_num = fixed_mul((lx1 - mx) >> 8, dy >> 8) - fixed_mul((ly1 - my) >> 8, dx >> 8);
+
+        var t1 = fixed_div(t1_num, denom);
+        var t2 = fixed_div(t2_num, denom);
+
+        # Intersection if 0 < t1 < 1 and 0 < t2 < 1
+        if (t1 > 0) { if (t1 < FIXED_ONE) {
+            if (t2 > 0) { if (t2 < FIXED_ONE) {
+                return 0;
+            } }
+        } }
+    }
+
+    return 1;
+}
+
+# ================================================================
+# Monster AI tick
+# ================================================================
+
+var MONSTER_CHASE_SPEED = 65536;
+var MONSTER_ATTACK_RANGE = 4194304;
+var MONSTER_SIGHT_RANGE = 65536000;
+var MONSTER_MELEE_RANGE = 4194304;
+
+fn thing_ai_tick(idx) {
+    var flags = thing_flags(idx);
+    if ((flags & TF_ACTIVE) == 0) { return 0; }
+    if ((flags & TF_SHOOTABLE) == 0) { return 0; }
+
+    var cat = thing_category(idx);
+    if (cat != CAT_MONSTER) { return 0; }
+
+    var state = thing_state(idx);
+    var tx = thing_x(idx);
+    var ty = thing_y(idx);
+
+    var dist = fixed_approx_dist(player_x - tx, player_y - ty);
+
+    # State machine
+    if (state == STATE_SPAWN) {
+        # Idle: check if player is visible and in range
+        if (dist < MONSTER_SIGHT_RANGE) {
+            if (thing_check_sight(tx, ty, player_x, player_y) == 1) {
+                thing_set_state(idx, STATE_SEE);
+                thing_set_tics(idx, 10);
+            }
+        }
+    }
+
+    if (state == STATE_SEE) {
+        # Just spotted player, pause briefly
+        var tics = thing_tics(idx);
+        if (tics > 0) {
+            thing_set_tics(idx, tics - 1);
+        } else {
+            thing_set_state(idx, STATE_CHASE);
+        }
+    }
+
+    if (state == STATE_CHASE) {
+        # Move toward player
+        var ang = fixed_atan2(player_y - ty, player_x - tx);
+        var mx = fixed_mul(fixed_cos(ang), MONSTER_CHASE_SPEED);
+        var my = fixed_mul(fixed_sin(ang), MONSTER_CHASE_SPEED);
+        thing_set_x(idx, tx + mx);
+        thing_set_y(idx, ty + my);
+        thing_set_angle(idx, ang);
+
+        # Check if in attack range
+        if (dist < MONSTER_ATTACK_RANGE) {
+            if (thing_check_sight(tx, ty, player_x, player_y) == 1) {
+                thing_set_state(idx, STATE_ATTACK);
+                thing_set_tics(idx, 15);
+            }
+        }
+
+        # Lost sight? Go back to spawn after timeout
+        if (thing_check_sight(tx, ty, player_x, player_y) == 0) {
+            var tics = thing_tics(idx);
+            thing_set_tics(idx, tics + 1);
+            if (tics > 100) {
+                thing_set_state(idx, STATE_SPAWN);
+            }
+        } else {
+            thing_set_tics(idx, 0);
+        }
+    }
+
+    if (state == STATE_ATTACK) {
+        var tics = thing_tics(idx);
+        if (tics > 0) {
+            thing_set_tics(idx, tics - 1);
+        } else {
+            # Deal damage to player
+            if (dist < MONSTER_MELEE_RANGE) {
+                # Melee: 3-24 damage (approx with fixed range)
+                var dmg = 3 + (tick_count % 22);
+                player_health = player_health - dmg;
+            }
+            # Return to chase
+            thing_set_state(idx, STATE_CHASE);
+        }
+    }
+
+    if (state == STATE_PAIN) {
+        var tics = thing_tics(idx);
+        if (tics > 0) {
+            thing_set_tics(idx, tics - 1);
+        } else {
+            thing_set_state(idx, STATE_CHASE);
+        }
+    }
+
+    if (state == STATE_DIE) {
+        var tics = thing_tics(idx);
+        if (tics > 0) {
+            thing_set_tics(idx, tics - 1);
+        } else {
+            thing_set_state(idx, STATE_DEAD);
+            thing_set_flags(idx, TF_CORPSE);
+        }
+    }
+
+    return 0;
+}
+
+# ================================================================
+# Item pickup check
+# ================================================================
+
+fn things_check_pickups() {
+    var pickup_radius = 20 << 16;
+
+    for (var i = 0; i < thing_count; i = i + 1) {
+        var flags = thing_flags(i);
+        if ((flags & TF_ACTIVE) == 0) { continue; }
+        if ((flags & TF_PICKUP) == 0) { continue; }
+
+        var dist = fixed_approx_dist(player_x - thing_x(i), player_y - thing_y(i));
+        if (dist > pickup_radius) { continue; }
+
+        var ttype = thing_type(i);
+        var picked = 0;
+
+        # Health
+        if (ttype == TTYPE_HEALTH_POTION) { player_health = player_health + 1; picked = 1; }
+        if (ttype == TTYPE_STIMPACK) { player_health = player_health + 10; picked = 1; }
+        if (ttype == TTYPE_MEDIKIT) { player_health = player_health + 25; picked = 1; }
+        if (ttype == TTYPE_SOULSPHERE) { player_health = player_health + 100; picked = 1; }
+
+        # Armor
+        if (ttype == TTYPE_ARMOR_BONUS) { player_armor = player_armor + 1; picked = 1; }
+        if (ttype == TTYPE_ARMOR_GREEN) { if (player_armor < 100) { player_armor = 100; picked = 1; } }
+        if (ttype == TTYPE_ARMOR_BLUE) { if (player_armor < 200) { player_armor = 200; picked = 1; } }
+
+        # Ammo
+        if (ttype == TTYPE_CLIP) { player_ammo_bullets = player_ammo_bullets + 10; picked = 1; }
+        if (ttype == TTYPE_CLIPBOX) { player_ammo_bullets = player_ammo_bullets + 50; picked = 1; }
+        if (ttype == TTYPE_SHELLS) { player_ammo_shells = player_ammo_shells + 4; picked = 1; }
+        if (ttype == TTYPE_SHELLBOX) { player_ammo_shells = player_ammo_shells + 20; picked = 1; }
+        if (ttype == TTYPE_ROCKET) { player_ammo_rockets = player_ammo_rockets + 1; picked = 1; }
+        if (ttype == TTYPE_ROCKETBOX) { player_ammo_rockets = player_ammo_rockets + 5; picked = 1; }
+        if (ttype == TTYPE_CELL) { player_ammo_cells = player_ammo_cells + 20; picked = 1; }
+        if (ttype == TTYPE_CELLPACK) { player_ammo_cells = player_ammo_cells + 100; picked = 1; }
+
+        # Weapons (give weapon + some ammo)
+        if (ttype == TTYPE_SHOTGUN) { player_ammo_shells = player_ammo_shells + 8; picked = 1; }
+        if (ttype == TTYPE_CHAINGUN) { player_ammo_bullets = player_ammo_bullets + 20; picked = 1; }
+        if (ttype == TTYPE_LAUNCHER) { player_ammo_rockets = player_ammo_rockets + 2; picked = 1; }
+        if (ttype == TTYPE_PLASMA) { player_ammo_cells = player_ammo_cells + 40; picked = 1; }
+        if (ttype == TTYPE_BFG) { player_ammo_cells = player_ammo_cells + 40; picked = 1; }
+        if (ttype == TTYPE_CHAINSAW) { picked = 1; }
+
+        # Clamp health
+        if (player_health > 200) { player_health = 200; }
+        if (player_armor > 200) { player_armor = 200; }
+
+        if (picked == 1) {
+            # Remove item
+            thing_set_flags(i, 0);
+            thing_set_state(i, STATE_PICKUP);
+        }
+    }
+
+    return 0;
+}
+
+# ================================================================
+# Damage a thing (from player shooting)
+# ================================================================
+
+fn thing_damage(idx, damage) {
+    var hp = thing_health(idx);
+    hp = hp - damage;
+    thing_set_health(idx, hp);
+
+    if (hp <= 0) {
+        thing_set_state(idx, STATE_DIE);
+        thing_set_tics(idx, 10);
+    } else {
+        thing_set_state(idx, STATE_PAIN);
+        thing_set_tics(idx, 5);
+    }
+    return 0;
+}
+
+# ================================================================
+# Tick all things
+# ================================================================
+
+fn things_tick() {
+    for (var i = 0; i < thing_count; i = i + 1) {
+        thing_ai_tick(i);
+    }
+    things_check_pickups();
+    return 0;
+}
+
+# ================================================================
+# Diagnostics
+# ================================================================
+
+fn things_print_stats() {
+    var monsters = 0;
+    var items = 0;
+    var decor = 0;
+    for (var i = 0; i < thing_count; i = i + 1) {
+        var cat = thing_category(i);
+        if (cat == CAT_MONSTER) { monsters = monsters + 1; }
+        if (cat == CAT_ITEM) { items = items + 1; }
+        if (cat == CAT_WEAPON) { items = items + 1; }
+        if (cat == CAT_KEY) { items = items + 1; }
+        if (cat == CAT_DECOR) { decor = decor + 1; }
+    }
+    syscall(1, 1, "things: ", 8);
+    fmt_int(thing_count);
+    syscall(1, 1, " total (", 8);
+    fmt_int(monsters);
+    syscall(1, 1, " monsters, ", 11);
+    fmt_int(items);
+    syscall(1, 1, " items, ", 8);
+    fmt_int(decor);
+    syscall(1, 1, " decor)\n", 8);
+    return 0;
+}

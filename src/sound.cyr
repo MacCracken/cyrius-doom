@@ -1,0 +1,122 @@
+# sound.cyr -- PC speaker sound effects (optional)
+# Usage: include "src/sound.cyr"
+#
+# DOOM sound: originally used a DSP card or PC speaker fallback.
+# We support:
+#   1. PC speaker via /dev/console ioctl (Linux)
+#   2. AGNOS kernel beep syscall (future)
+#
+# Sound effects are simple tone sequences with frequency and duration.
+# No mixing, no streaming -- just one tone at a time.
+#
+# This is the most optional module. DOOM is DOOM without sound,
+# but it's not the same without the door sounds.
+
+# ================================================================
+# PC speaker control (Linux)
+# ================================================================
+# ioctl(fd, KIOCSOUND, freq) on /dev/console
+# freq = 1193180 / desired_hz (PIT divisor), 0 = silence
+
+var SYS_IOCTL = 16;
+var KIOCSOUND = 0x4B2F;
+var PIT_FREQ = 1193180;
+
+var sound_fd = 0 - 1;
+var sound_enabled = 0;
+
+# Current sound state
+var sound_playing = 0;
+var sound_ticks_left = 0;
+
+# Sound queue (simple: one pending sound)
+var sound_queue_freq = 0;
+var sound_queue_ticks = 0;
+
+fn sound_init() {
+    # Try to open /dev/console for speaker control
+    sound_fd = syscall(2, "/dev/console", 2, 0);
+    if (sound_fd >= 0) {
+        sound_enabled = 1;
+    }
+    return 0;
+}
+
+fn sound_shutdown() {
+    if (sound_enabled == 1) {
+        # Silence
+        syscall(SYS_IOCTL, sound_fd, KIOCSOUND, 0);
+        syscall(3, sound_fd);
+        sound_fd = 0 - 1;
+        sound_enabled = 0;
+    }
+    return 0;
+}
+
+# Set speaker frequency (Hz). 0 = silence.
+fn sound_set_freq(hz) {
+    if (sound_enabled == 0) { return 0; }
+    if (hz <= 0) {
+        syscall(SYS_IOCTL, sound_fd, KIOCSOUND, 0);
+    } else {
+        var divisor = PIT_FREQ / hz;
+        syscall(SYS_IOCTL, sound_fd, KIOCSOUND, divisor);
+    }
+    return 0;
+}
+
+# ================================================================
+# Sound effect definitions
+# ================================================================
+# Each effect is a sequence of (frequency, duration_ticks) pairs.
+# Duration is in game ticks (1/35 sec each).
+
+# Play a tone for N ticks
+fn sound_play(freq, ticks) {
+    sound_queue_freq = freq;
+    sound_queue_ticks = ticks;
+    return 0;
+}
+
+# Predefined sound effects
+fn sound_pistol() { sound_play(800, 2); return 0; }
+fn sound_shotgun() { sound_play(400, 3); return 0; }
+fn sound_door_open() { sound_play(200, 5); return 0; }
+fn sound_door_close() { sound_play(150, 5); return 0; }
+fn sound_item_pickup() { sound_play(1200, 2); return 0; }
+fn sound_player_pain() { sound_play(300, 3); return 0; }
+fn sound_monster_pain() { sound_play(250, 2); return 0; }
+fn sound_monster_die() { sound_play(100, 8); return 0; }
+fn sound_switch() { sound_play(600, 2); return 0; }
+fn sound_explode() { sound_play(80, 10); return 0; }
+
+# Menu sounds
+fn sound_menu_move() { sound_play(500, 1); return 0; }
+fn sound_menu_select() { sound_play(1000, 2); return 0; }
+
+# ================================================================
+# Sound tick (called each game tick)
+# ================================================================
+
+fn sound_tick() {
+    if (sound_enabled == 0) { return 0; }
+
+    # Start queued sound
+    if (sound_queue_ticks > 0) {
+        sound_set_freq(sound_queue_freq);
+        sound_playing = 1;
+        sound_ticks_left = sound_queue_ticks;
+        sound_queue_ticks = 0;
+    }
+
+    # Count down current sound
+    if (sound_playing == 1) {
+        sound_ticks_left = sound_ticks_left - 1;
+        if (sound_ticks_left <= 0) {
+            sound_set_freq(0);
+            sound_playing = 0;
+        }
+    }
+
+    return 0;
+}

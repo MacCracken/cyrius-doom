@@ -1,238 +1,159 @@
 # wad.cyr -- WAD file parser for DOOM
-# Usage: include "src/wad.cyr" (after fixed.cyr)
-# Requires: lib/io.cyr, lib/string.cyr, lib/fmt.cyr
+# Usage: include "src/wad.cyr" (after fixed.cyr, lib/io.cyr, lib/alloc.cyr)
 #
 # WAD = "Where's All the Data"
-# Format:
-#   Header (12 bytes): magic[4] + numlumps(i32) + diroffset(i32)
-#   Lumps: raw data blobs
-#   Directory: array of 16-byte entries (offset(i32) + size(i32) + name[8])
-#
-# IWAD = Internal WAD (game data: DOOM1.WAD, DOOM.WAD)
-# PWAD = Patch WAD (mods)
-#
 # All integers in WAD are little-endian 32-bit.
 
-# ================================================================
-# WAD file state
-# ================================================================
+# WAD file descriptor
+enum WadConst {
+    WAD_DIR_ENTRY_SIZE = 24;
+    WAD_MAX_LUMPS = 2048;
+    WAD_LUMP_BUF_SIZE = 65536;
+}
 
-# WAD file descriptor (kept open for lump reads)
 var wad_fd = 0 - 1;
-
-# Number of lumps in the WAD
 var wad_numlumps = 0;
+var wad_dir = 0;
+var wad_lump_buf = 0;
 
-# Directory: array of lump entries
-# Each entry: offset(8 bytes) + size(8 bytes) + name(8 bytes) = 24 bytes
-# Max 2048 lumps * 24 = 49152 bytes
-var wad_dir[49152];
-var WAD_DIR_ENTRY_SIZE = 24;
-var WAD_MAX_LUMPS = 2048;
+fn wad_alloc() {
+    wad_dir = alloc(WAD_MAX_LUMPS * WAD_DIR_ENTRY_SIZE);
+    wad_lump_buf = alloc(WAD_LUMP_BUF_SIZE);
+    return 0;
+}
 
-# Lump cache buffer for loading lump data
-# Largest lumps are typically map data (~64KB) or textures
-var wad_lump_buf[65536];
-var WAD_LUMP_BUF_SIZE = 65536;
-
-# ================================================================
 # Little-endian readers
-# ================================================================
-
-# Read a little-endian 16-bit unsigned value from buffer
 fn read_le16(buf) {
-    var lo = load8(buf);
-    var hi = load8(buf + 1);
-    return lo | (hi << 8);
+    return load8(buf) | (load8(buf + 1) << 8);
 }
 
-# Read a little-endian 32-bit signed value from buffer
 fn read_le32(buf) {
-    var b0 = load8(buf);
-    var b1 = load8(buf + 1);
-    var b2 = load8(buf + 2);
-    var b3 = load8(buf + 3);
-    return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
+    return load8(buf) | (load8(buf + 1) << 8) | (load8(buf + 2) << 16) | (load8(buf + 3) << 24);
 }
-
-# ================================================================
-# WAD file operations
-# ================================================================
 
 # Open a WAD file. Returns 0 on success, -1 on error.
 fn wad_open(path) {
+    wad_alloc();
+
     wad_fd = file_open(path, 0, 0);
     if (wad_fd < 0) {
         file_write(2, "error: cannot open WAD file\n", 28);
         return 0 - 1;
     }
 
-    # Read 12-byte header
     var hdr[12];
     var n = file_read(wad_fd, &hdr, 12);
     if (n != 12) {
-        file_write(2, "error: WAD header too short\n", 28);
         file_close(wad_fd);
         wad_fd = 0 - 1;
         return 0 - 1;
     }
 
-    # Check magic: must be "IWAD" or "PWAD"
-    var magic0 = load8(&hdr);
-    var magic1 = load8(&hdr + 1);
-    var magic2 = load8(&hdr + 2);
-    var magic3 = load8(&hdr + 3);
+    # Check magic: "IWAD" or "PWAD"
+    var m0 = load8(&hdr);
+    var m1 = load8(&hdr + 1);
+    var m2 = load8(&hdr + 2);
+    var m3 = load8(&hdr + 3);
 
-    var is_iwad = 0;
-    var is_pwad = 0;
-    if (magic0 == 73) { if (magic1 == 87) { if (magic2 == 65) { if (magic3 == 68) {
-        is_iwad = 1;
-    } } } }
-    if (magic0 == 80) { if (magic1 == 87) { if (magic2 == 65) { if (magic3 == 68) {
-        is_pwad = 1;
-    } } } }
+    var valid = 0;
+    if (m0 == 73) { if (m1 == 87) { if (m2 == 65) { if (m3 == 68) { valid = 1; } } } }
+    if (m0 == 80) { if (m1 == 87) { if (m2 == 65) { if (m3 == 68) { valid = 1; } } } }
 
-    if (is_iwad == 0) { if (is_pwad == 0) {
+    if (valid == 0) {
         file_write(2, "error: not a WAD file\n", 21);
         file_close(wad_fd);
         wad_fd = 0 - 1;
         return 0 - 1;
-    } }
+    }
 
-    # Read lump count and directory offset
     wad_numlumps = read_le32(&hdr + 4);
     var diroffset = read_le32(&hdr + 8);
+    if (wad_numlumps > WAD_MAX_LUMPS) { wad_numlumps = WAD_MAX_LUMPS; }
 
-    if (wad_numlumps > WAD_MAX_LUMPS) {
-        wad_numlumps = WAD_MAX_LUMPS;
-    }
-
-    # Seek to directory (lseek syscall 8: fd, offset, whence=SEEK_SET=0)
+    # Seek to directory
     syscall(8, wad_fd, diroffset, 0);
 
-    # Read directory entries (16 bytes each in WAD: offset(4) + size(4) + name(8))
-    var raw_entry[16];
+    # Read directory entries (16 bytes each in WAD)
+    var raw[16];
     for (var i = 0; i < wad_numlumps; i = i + 1) {
-        n = file_read(wad_fd, &raw_entry, 16);
+        n = file_read(wad_fd, &raw, 16);
         if (n != 16) { break; }
 
-        var entry_base = &wad_dir + i * WAD_DIR_ENTRY_SIZE;
-
-        # Store offset (expand i32 to i64)
-        var lump_offset = read_le32(&raw_entry);
-        store64(entry_base, lump_offset);
-
-        # Store size (expand i32 to i64)
-        var lump_size = read_le32(&raw_entry + 4);
-        store64(entry_base + 8, lump_size);
-
-        # Copy 8-byte name (null-padded, uppercase ASCII)
-        store64(entry_base + 16, load64(&raw_entry + 8));
+        var entry = wad_dir + i * WAD_DIR_ENTRY_SIZE;
+        store64(entry, read_le32(&raw));
+        store64(entry + 8, read_le32(&raw + 4));
+        store64(entry + 16, load64(&raw + 8));
     }
 
     return 0;
 }
 
-# Close the WAD file
 fn wad_close() {
-    if (wad_fd >= 0) {
-        file_close(wad_fd);
-        wad_fd = 0 - 1;
-    }
+    if (wad_fd >= 0) { file_close(wad_fd); wad_fd = 0 - 1; }
     return 0;
 }
 
-# ================================================================
-# Lump lookup
-# ================================================================
-
-# Compare an 8-byte WAD lump name with a null-terminated string.
-# WAD names are uppercase, null-padded to 8 bytes.
-# Returns 1 if match, 0 otherwise.
+# Compare WAD lump name (8 bytes, uppercase, null-padded) with a string
 fn wad_name_eq(lump_name_ptr, name) {
     var nlen = strlen(name);
     if (nlen > 8) { return 0; }
-
     for (var i = 0; i < 8; i = i + 1) {
         var lc = load8(lump_name_ptr + i);
         if (i < nlen) {
             var nc = load8(name + i);
-            # Convert lowercase to uppercase for comparison
             if (nc >= 97) { if (nc <= 122) { nc = nc - 32; } }
             if (lc != nc) { return 0; }
         } else {
-            # Remaining bytes must be null
             if (lc != 0) { return 0; }
         }
     }
     return 1;
 }
 
-# Find a lump by name. Returns lump index or -1 if not found.
 fn wad_find_lump(name) {
     for (var i = 0; i < wad_numlumps; i = i + 1) {
-        var entry_base = &wad_dir + i * WAD_DIR_ENTRY_SIZE;
-        if (wad_name_eq(entry_base + 16, name) == 1) {
-            return i;
-        }
+        if (wad_name_eq(wad_dir + i * WAD_DIR_ENTRY_SIZE + 16, name) == 1) { return i; }
     }
     return 0 - 1;
 }
 
-# Find a lump by name, starting search after a given index.
-# Useful for finding map-specific lumps (e.g., THINGS after E1M1 marker).
 fn wad_find_lump_after(name, after) {
     for (var i = after + 1; i < wad_numlumps; i = i + 1) {
-        var entry_base = &wad_dir + i * WAD_DIR_ENTRY_SIZE;
-        if (wad_name_eq(entry_base + 16, name) == 1) {
-            return i;
-        }
+        if (wad_name_eq(wad_dir + i * WAD_DIR_ENTRY_SIZE + 16, name) == 1) { return i; }
     }
     return 0 - 1;
 }
 
-# Get lump size in bytes
 fn wad_lump_size(lump_index) {
     if (lump_index < 0) { return 0; }
     if (lump_index >= wad_numlumps) { return 0; }
-    var entry_base = &wad_dir + lump_index * WAD_DIR_ENTRY_SIZE;
-    return load64(entry_base + 8);
+    return load64(wad_dir + lump_index * WAD_DIR_ENTRY_SIZE + 8);
 }
 
-# Read lump data into the shared lump buffer.
-# Returns pointer to wad_lump_buf, or 0 on error.
-# Caller must use the data before the next wad_read_lump call.
 fn wad_read_lump(lump_index) {
     if (lump_index < 0) { return 0; }
     if (lump_index >= wad_numlumps) { return 0; }
 
-    var entry_base = &wad_dir + lump_index * WAD_DIR_ENTRY_SIZE;
-    var offset = load64(entry_base);
-    var size = load64(entry_base + 8);
+    var entry = wad_dir + lump_index * WAD_DIR_ENTRY_SIZE;
+    var offset = load64(entry);
+    var size = load64(entry + 8);
 
     if (size > WAD_LUMP_BUF_SIZE) { size = WAD_LUMP_BUF_SIZE; }
-    if (size == 0) { return &wad_lump_buf; }
+    if (size == 0) { return wad_lump_buf; }
 
-    # Seek to lump data
     syscall(8, wad_fd, offset, 0);
-
-    # Read lump data
-    var n = file_read(wad_fd, &wad_lump_buf, size);
+    var n = file_read(wad_fd, wad_lump_buf, size);
     if (n < 0) { return 0; }
-
-    return &wad_lump_buf;
+    return wad_lump_buf;
 }
 
-# Read lump data into a caller-provided buffer.
-# Returns bytes read.
 fn wad_read_lump_into(lump_index, buf, bufsize) {
     if (lump_index < 0) { return 0; }
     if (lump_index >= wad_numlumps) { return 0; }
 
-    var entry_base = &wad_dir + lump_index * WAD_DIR_ENTRY_SIZE;
-    var offset = load64(entry_base);
-    var size = load64(entry_base + 8);
-
+    var entry = wad_dir + lump_index * WAD_DIR_ENTRY_SIZE;
+    var offset = load64(entry);
+    var size = load64(entry + 8);
     if (size > bufsize) { size = bufsize; }
     if (size == 0) { return 0; }
 
@@ -240,36 +161,22 @@ fn wad_read_lump_into(lump_index, buf, bufsize) {
     return file_read(wad_fd, buf, size);
 }
 
-# ================================================================
-# WAD diagnostics
-# ================================================================
-
-# Print the lump directory (for debugging)
 fn wad_dump_directory() {
-    syscall(1, 1, "WAD directory: ", 15);
+    syscall(1, 1, "WAD: ", 5);
     fmt_int(wad_numlumps);
     syscall(1, 1, " lumps\n", 7);
 
     for (var i = 0; i < wad_numlumps; i = i + 1) {
-        var entry_base = &wad_dir + i * WAD_DIR_ENTRY_SIZE;
-        var offset = load64(entry_base);
-        var size = load64(entry_base + 8);
-
-        # Print index
+        var entry = wad_dir + i * WAD_DIR_ENTRY_SIZE;
         fmt_int(i);
         syscall(1, 1, ": ", 2);
-
-        # Print name (up to 8 chars)
         for (var j = 0; j < 8; j = j + 1) {
-            var c = load8(entry_base + 16 + j);
+            var c = load8(entry + 16 + j);
             if (c == 0) { break; }
-            syscall(1, 1, entry_base + 16 + j, 1);
+            syscall(1, 1, entry + 16 + j, 1);
         }
-
-        syscall(1, 1, "  offset=", 9);
-        fmt_int(offset);
-        syscall(1, 1, " size=", 6);
-        fmt_int(size);
+        syscall(1, 1, " sz=", 4);
+        fmt_int(load64(entry + 8));
         syscall(1, 1, "\n", 1);
     }
     return 0;

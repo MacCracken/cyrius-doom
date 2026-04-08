@@ -1,0 +1,206 @@
+# status.cyr -- HUD / status bar rendering
+# Usage: include "src/status.cyr" (after framebuf.cyr, player.cyr)
+#
+# The DOOM status bar occupies the bottom 32 pixels of the screen
+# (rows 168..199 of the 320x200 display).
+#
+# Layout (left to right):
+#   AMMO count | HEALTH % | ARMS (weapon slots) | FACE | ARMOR % | KEYS | AMMO totals
+#
+# Original DOOM renders the status bar from a pre-drawn graphic
+# (STBAR lump) with numbers overlaid. We draw it procedurally
+# since we don't have sprite rendering yet.
+
+# ================================================================
+# Status bar dimensions
+# ================================================================
+
+var STBAR_Y = 168;
+var STBAR_HEIGHT = 32;
+var STBAR_BG_COLOR = 0;
+
+# ================================================================
+# Digit rendering (3x5 bitmap font)
+# ================================================================
+# Each digit is a 3-wide by 5-tall bitmap stored as a 15-bit value.
+# Bits read left-to-right, top-to-bottom.
+#   bit 14 = top-left, bit 0 = bottom-right
+
+var digit_bitmaps = 0;
+
+fn status_init_font() {
+    digit_bitmaps = alloc(80);
+    store64(digit_bitmaps, 0x7B6F);
+    store64(digit_bitmaps + 8, 0x2C97);
+    store64(digit_bitmaps + 16, 0x73E7);
+    store64(digit_bitmaps + 24, 0x73CF);
+    store64(digit_bitmaps + 32, 0x5F29);
+    store64(digit_bitmaps + 40, 0x79CF);
+    store64(digit_bitmaps + 48, 0x79EF);
+    store64(digit_bitmaps + 56, 0x7249);
+    store64(digit_bitmaps + 64, 0x7FEF);
+    store64(digit_bitmaps + 72, 0x7FCF);
+    return 0;
+}
+
+# Draw a single 3x5 digit at (px, py) with given color, scaled 2x
+fn status_draw_digit(d, px, py, color) {
+    if (d < 0) { return 0; }
+    if (d > 9) { return 0; }
+
+    var bitmap = load64(digit_bitmaps + d * 8);
+
+    for (var row = 0; row < 5; row = row + 1) {
+        for (var col = 0; col < 3; col = col + 1) {
+            var bit = 14 - (row * 3 + col);
+            if ((bitmap >> bit) & 1 == 1) {
+                # Draw 2x2 pixel block
+                framebuf_pixel(px + col * 2, py + row * 2, color);
+                framebuf_pixel(px + col * 2 + 1, py + row * 2, color);
+                framebuf_pixel(px + col * 2, py + row * 2 + 1, color);
+                framebuf_pixel(px + col * 2 + 1, py + row * 2 + 1, color);
+            }
+        }
+    }
+    return 0;
+}
+
+# Draw a number (up to 3 digits) at (px, py)
+fn status_draw_number(num, px, py, color) {
+    if (num < 0) { num = 0; }
+    if (num > 999) { num = 999; }
+
+    var hundreds = num / 100;
+    var tens = (num / 10) % 10;
+    var ones = num % 10;
+
+    if (hundreds > 0) {
+        status_draw_digit(hundreds, px, py, color);
+    }
+    if (hundreds > 0) {
+        status_draw_digit(tens, px + 8, py, color);
+    } else {
+        if (tens > 0) {
+            status_draw_digit(tens, px + 8, py, color);
+        }
+    }
+    status_draw_digit(ones, px + 16, py, color);
+    return 0;
+}
+
+# Draw a percentage (number + %)
+fn status_draw_percent(num, px, py, color) {
+    status_draw_number(num, px, py, color);
+    # Draw % sign as a small dot pattern
+    framebuf_pixel(px + 24, py, color);
+    framebuf_pixel(px + 26, py + 4, color);
+    framebuf_pixel(px + 25, py + 2, color);
+    framebuf_pixel(px + 26, py + 8, color);
+    framebuf_pixel(px + 24, py + 8, color);
+    return 0;
+}
+
+# ================================================================
+# Face state (simplified)
+# ================================================================
+# DOOM's face reacts to: health level, pain, looking left/right,
+# picking up items, god mode, etc. We simplify to health-based.
+
+fn status_face_color() {
+    if (player_health > 80) { return 112; }
+    if (player_health > 50) { return 176; }
+    if (player_health > 25) { return 48; }
+    return 40;
+}
+
+# Draw face as a simple colored block
+fn status_draw_face(px, py) {
+    var color = status_face_color();
+    framebuf_fill_rect(px, py, 24, 24, color);
+
+    # Eyes
+    framebuf_pixel(px + 7, py + 8, 0);
+    framebuf_pixel(px + 8, py + 8, 0);
+    framebuf_pixel(px + 15, py + 8, 0);
+    framebuf_pixel(px + 16, py + 8, 0);
+
+    # Mouth (wider when hurt)
+    if (player_health > 50) {
+        framebuf_hline(px + 8, px + 15, py + 16, 0);
+    } else {
+        framebuf_hline(px + 6, px + 17, py + 16, 0);
+        framebuf_hline(px + 7, px + 16, py + 17, 0);
+    }
+    return 0;
+}
+
+# ================================================================
+# Key indicators
+# ================================================================
+
+fn status_draw_keys(px, py) {
+    # Blue key = palette 200, yellow = 160, red = 176
+    # For now just show placeholder slots
+    framebuf_fill_rect(px, py, 8, 6, 200);
+    framebuf_fill_rect(px, py + 8, 8, 6, 160);
+    framebuf_fill_rect(px, py + 16, 8, 6, 176);
+    return 0;
+}
+
+# ================================================================
+# Weapon slot indicators (ARMS)
+# ================================================================
+
+fn status_draw_arms(px, py) {
+    # 7 weapon slots in a 2-row layout
+    for (var w = 1; w <= 7; w = w + 1) {
+        var wx = px + ((w - 1) % 4) * 8;
+        var wy = py + ((w - 1) / 4) * 12;
+        var color = 96;
+        if (w == player_weapon) { color = 176; }
+        status_draw_digit(w, wx, wy, color);
+    }
+    return 0;
+}
+
+# ================================================================
+# Render the full status bar
+# ================================================================
+
+fn status_render() {
+    # Background
+    framebuf_fill_rect(0, STBAR_Y, SCREEN_WIDTH, STBAR_HEIGHT, STBAR_BG_COLOR);
+
+    # Horizontal separator line
+    framebuf_hline(0, SCREEN_WIDTH - 1, STBAR_Y, 96);
+
+    # AMMO (current weapon ammo count)
+    var ammo = player_ammo_bullets;
+    if (player_weapon == 3) { ammo = player_ammo_shells; }
+    if (player_weapon == 5) { ammo = player_ammo_rockets; }
+    if (player_weapon == 6) { ammo = player_ammo_cells; }
+    status_draw_number(ammo, 8, STBAR_Y + 8, 176);
+
+    # HEALTH
+    status_draw_percent(player_health, 60, STBAR_Y + 8, 176);
+
+    # ARMS
+    status_draw_arms(116, STBAR_Y + 6);
+
+    # FACE
+    status_draw_face(148, STBAR_Y + 4);
+
+    # ARMOR
+    status_draw_percent(player_armor, 188, STBAR_Y + 8, 176);
+
+    # KEYS
+    status_draw_keys(232, STBAR_Y + 6);
+
+    # AMMO totals (right side)
+    status_draw_number(player_ammo_bullets, 260, STBAR_Y + 4, 96);
+    status_draw_number(player_ammo_shells, 260, STBAR_Y + 12, 96);
+    status_draw_number(player_ammo_rockets, 260, STBAR_Y + 20, 96);
+    status_draw_number(player_ammo_cells, 296, STBAR_Y + 4, 96);
+
+    return 0;
+}

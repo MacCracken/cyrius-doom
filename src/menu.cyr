@@ -1,0 +1,294 @@
+# menu.cyr -- title screen and menu system
+# Usage: include "src/menu.cyr" (after framebuf.cyr, input.cyr)
+#
+# DOOM menu system:
+#   - Title screen (TITLEPIC lump from WAD)
+#   - Main menu: New Game, Options, Load, Save, Quit
+#   - Episode select (Knee Deep in the Dead, etc.)
+#   - Skill select (I'm too young to die, etc.)
+#
+# We render text menus procedurally since we don't have
+# the DOOM font patches loaded yet.
+
+# ================================================================
+# Menu state
+# ================================================================
+
+var MENU_NONE = 0;
+var MENU_TITLE = 1;
+var MENU_MAIN = 2;
+var MENU_EPISODE = 3;
+var MENU_SKILL = 4;
+
+var menu_active = 0;
+var menu_screen = 0;
+var menu_cursor = 0;
+var menu_item_count = 0;
+var menu_result = 0;
+
+# ================================================================
+# Text rendering (reuse digit font, extend to basic ASCII)
+# ================================================================
+# Simple 3x5 character bitmaps for A-Z, space, and punctuation.
+# We only need enough for menu text.
+
+# Draw a character at (px, py). Only supports 0-9, A-Z, space.
+# Returns character width (for advancing cursor).
+fn menu_draw_char(ch, px, py, color) {
+    # Digits
+    if (ch >= 48) { if (ch <= 57) {
+        status_draw_digit(ch - 48, px, py, color);
+        return 8;
+    } }
+
+    # Space
+    if (ch == 32) { return 6; }
+
+    # Letters A-Z: draw as simple block approximation
+    # Each letter: draw a 5x8 filled block with cutouts
+    if (ch >= 65) { if (ch <= 90) {
+        # Simple: draw letter as a colored rectangle
+        framebuf_fill_rect(px, py, 5, 8, color);
+        # Cut interior to make it look like a letter shape
+        framebuf_pixel(px + 1, py + 1, STBAR_BG_COLOR);
+        framebuf_pixel(px + 2, py + 1, STBAR_BG_COLOR);
+        framebuf_pixel(px + 3, py + 1, STBAR_BG_COLOR);
+        framebuf_pixel(px + 1, py + 5, STBAR_BG_COLOR);
+        framebuf_pixel(px + 2, py + 5, STBAR_BG_COLOR);
+        framebuf_pixel(px + 3, py + 5, STBAR_BG_COLOR);
+        return 7;
+    } }
+
+    # Lowercase: treat as uppercase
+    if (ch >= 97) { if (ch <= 122) {
+        return menu_draw_char(ch - 32, px, py, color);
+    } }
+
+    # Punctuation
+    if (ch == 46) {
+        framebuf_pixel(px + 1, py + 8, color);
+        framebuf_pixel(px + 2, py + 8, color);
+        return 5;
+    }
+    if (ch == 33) {
+        framebuf_vline(px + 1, py, py + 5, color);
+        framebuf_pixel(px + 1, py + 8, color);
+        return 5;
+    }
+    if (ch == 45) {
+        framebuf_hline(px, px + 4, py + 4, color);
+        return 7;
+    }
+    if (ch == 39) {
+        framebuf_vline(px + 1, py, py + 2, color);
+        return 4;
+    }
+
+    return 6;
+}
+
+# Draw a null-terminated string at (px, py)
+fn menu_draw_string(str, px, py, color) {
+    var x = px;
+    var i = 0;
+    while (load8(str + i) != 0) {
+        var ch = load8(str + i);
+        x = x + menu_draw_char(ch, x, py, color);
+        i = i + 1;
+    }
+    return 0;
+}
+
+# Draw a string centered on screen at vertical position py
+fn menu_draw_centered(str, py, color) {
+    var len = strlen(str);
+    var width = len * 7;
+    var px = (SCREEN_WIDTH - width) / 2;
+    menu_draw_string(str, px, py, color);
+    return 0;
+}
+
+# ================================================================
+# Title screen
+# ================================================================
+
+fn menu_draw_title() {
+    framebuf_clear(0);
+
+    # Title text
+    menu_draw_centered("CYRIUS DOOM", 40, 176);
+    menu_draw_centered("V0.1.0", 56, 96);
+
+    # Subtitle
+    menu_draw_centered("CLEAN ROOM IMPLEMENTATION", 80, 48);
+    menu_draw_centered("IN CYRIUS", 96, 48);
+
+    # Prompt
+    menu_draw_centered("PRESS ANY KEY", 140, 176);
+
+    framebuf_flip();
+    return 0;
+}
+
+# ================================================================
+# Main menu
+# ================================================================
+
+fn menu_draw_main() {
+    framebuf_clear(0);
+
+    menu_draw_centered("DOOM", 20, 176);
+
+    var items_y = 60;
+    var spacing = 20;
+
+    var c0 = 96;
+    var c1 = 96;
+    var c2 = 96;
+    var c3 = 96;
+
+    if (menu_cursor == 0) { c0 = 176; }
+    if (menu_cursor == 1) { c1 = 176; }
+    if (menu_cursor == 2) { c2 = 176; }
+    if (menu_cursor == 3) { c3 = 176; }
+
+    menu_draw_centered("NEW GAME", items_y, c0);
+    menu_draw_centered("OPTIONS", items_y + spacing, c1);
+    menu_draw_centered("LOAD GAME", items_y + spacing * 2, c2);
+    menu_draw_centered("QUIT GAME", items_y + spacing * 3, c3);
+
+    # Cursor indicator
+    var cursor_y = items_y + menu_cursor * spacing;
+    menu_draw_string(">", 40, cursor_y, 176);
+
+    menu_item_count = 4;
+    framebuf_flip();
+    return 0;
+}
+
+# ================================================================
+# Skill select menu
+# ================================================================
+
+fn menu_draw_skill() {
+    framebuf_clear(0);
+
+    menu_draw_centered("CHOOSE YOUR SKILL", 30, 176);
+
+    var items_y = 60;
+    var spacing = 18;
+
+    var colors[40];
+    for (var i = 0; i < 5; i = i + 1) {
+        store64(&colors + i * 8, 96);
+    }
+    store64(&colors + menu_cursor * 8, 176);
+
+    menu_draw_centered("I'M TOO YOUNG TO DIE", items_y, load64(&colors));
+    menu_draw_centered("HEY NOT TOO ROUGH", items_y + spacing, load64(&colors + 8));
+    menu_draw_centered("HURT ME PLENTY", items_y + spacing * 2, load64(&colors + 16));
+    menu_draw_centered("ULTRA VIOLENCE", items_y + spacing * 3, load64(&colors + 24));
+    menu_draw_centered("NIGHTMARE", items_y + spacing * 4, load64(&colors + 32));
+
+    menu_draw_string(">", 20, items_y + menu_cursor * spacing, 176);
+
+    menu_item_count = 5;
+    framebuf_flip();
+    return 0;
+}
+
+# ================================================================
+# Menu input handling
+# ================================================================
+
+fn menu_handle_input() {
+    if (menu_screen == MENU_TITLE) {
+        # Any key advances to main menu
+        if (input_forward == 1) { menu_screen = MENU_MAIN; menu_cursor = 0; }
+        if (input_fire == 1) { menu_screen = MENU_MAIN; menu_cursor = 0; }
+        if (input_use == 1) { menu_screen = MENU_MAIN; menu_cursor = 0; }
+        return 0;
+    }
+
+    # Navigate up/down
+    if (input_forward == 1) {
+        if (menu_cursor > 0) { menu_cursor = menu_cursor - 1; }
+    }
+    if (input_backward == 1) {
+        if (menu_cursor < menu_item_count - 1) { menu_cursor = menu_cursor + 1; }
+    }
+
+    # Select
+    if (input_use == 1) {
+        if (menu_screen == MENU_MAIN) {
+            if (menu_cursor == 0) {
+                # New Game -> skill select
+                menu_screen = MENU_SKILL;
+                menu_cursor = 2;
+            }
+            if (menu_cursor == 3) {
+                # Quit
+                menu_result = 0 - 1;
+            }
+        }
+        if (menu_screen == MENU_SKILL) {
+            # Skill selected, start game
+            menu_result = 1;
+            menu_active = 0;
+        }
+    }
+
+    # ESC goes back
+    if (input_quit == 1) {
+        if (menu_screen == MENU_SKILL) {
+            menu_screen = MENU_MAIN;
+            menu_cursor = 0;
+            input_quit = 0;
+        }
+    }
+
+    return 0;
+}
+
+# ================================================================
+# Menu tick (draw + handle input)
+# ================================================================
+
+fn menu_tick() {
+    if (menu_screen == MENU_TITLE) { menu_draw_title(); }
+    if (menu_screen == MENU_MAIN) { menu_draw_main(); }
+    if (menu_screen == MENU_SKILL) { menu_draw_skill(); }
+
+    menu_handle_input();
+    return 0;
+}
+
+# ================================================================
+# Start menu mode
+# Returns: 1 = start game, -1 = quit
+# ================================================================
+
+fn menu_run() {
+    menu_active = 1;
+    menu_screen = MENU_TITLE;
+    menu_cursor = 0;
+    menu_result = 0;
+
+    while (menu_active == 1) {
+        tick_begin();
+        input_poll();
+
+        if (input_quit == 1) {
+            if (menu_screen == MENU_TITLE) { return 0 - 1; }
+            if (menu_screen == MENU_MAIN) { return 0 - 1; }
+        }
+
+        menu_tick();
+
+        if (menu_result != 0) { return menu_result; }
+
+        tick_wait();
+    }
+
+    return menu_result;
+}

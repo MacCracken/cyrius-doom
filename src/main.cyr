@@ -1,164 +1,62 @@
-# main.cyr -- DOOM entry point
-# cyrius-doom: clean-room DOOM engine in Cyrius
-#
-# Build: cyrb build
-# Run:   ./build/doom /path/to/doom1.wad [mapname]
-#
-# Phase 3: playable -- walk through E1M1
+# main.cyr -- DOOM entry point (minimal)
+# Build: cat src/main.cyr | cc2 > build/doom && chmod +x build/doom
+# Run:   ./build/doom /path/to/doom1.wad
 
-# ================================================================
-# Standard library
-# ================================================================
 include "lib/string.cyr"
-include "lib/fmt.cyr"
 include "lib/alloc.cyr"
-include "lib/io.cyr"
+include "lib/fmt.cyr"
 include "lib/args.cyr"
 
-# ================================================================
-# DOOM modules
-# ================================================================
+fn file_open(p, f, m) { return syscall(2, p, f, m); }
+fn file_close(fd) { return syscall(3, fd); }
+fn file_read(fd, b, l) { return syscall(0, fd, b, l); }
+fn file_write(fd, b, l) { return syscall(1, fd, b, l); }
+
 include "src/fixed.cyr"
 include "src/tables.cyr"
 include "src/wad.cyr"
 include "src/framebuf.cyr"
 include "src/map.cyr"
 include "src/render.cyr"
-include "src/input.cyr"
-include "src/player.cyr"
-include "src/tick.cyr"
-
-# ================================================================
-# Game state
-# ================================================================
-var game_running = 0;
-
-# ================================================================
-# Entry point
-# ================================================================
 
 fn doom_main() {
     alloc_init();
     args_init();
 
     syscall(1, 1, "cyrius-doom v0.1.0\n", 19);
-    syscall(1, 1, "controls: WASD/arrows=move, Q=quit, ESC=quit\n", 45);
+    if (argc() < 2) { syscall(1, 2, "usage: doom <wad>\n", 18); syscall(60, 1); }
 
-    # Check for WAD file argument
-    if (argc() < 2) {
-        syscall(1, 2, "usage: doom <wadfile> [mapname]\n", 31);
-        syscall(60, 1);
-    }
-
-    # Initialize trig tables
     tables_init();
-
-    # Open WAD file
     var wad_path = argv(1);
-    if (wad_open(wad_path) != 0) {
-        syscall(1, 2, "fatal: cannot open WAD\n", 23);
-        syscall(60, 1);
-    }
+    if (wad_open(wad_path) != 0) { syscall(60, 1); }
+    syscall(1, 1, "wad: ", 5); fmt_int(wad_numlumps); syscall(1, 1, " lumps\n", 7);
 
-    syscall(1, 1, "wad: ", 5);
-    fmt_int(wad_numlumps);
-    syscall(1, 1, " lumps\n", 7);
-
-    # Load palette
     var pal_idx = wad_find_lump("PLAYPAL");
     if (pal_idx >= 0) {
         var pal_data = wad_read_lump(pal_idx);
-        if (pal_data != 0) {
-            framebuf_set_palette(pal_data);
-        }
+        if (pal_data != 0) { framebuf_set_palette(pal_data); }
     }
 
-    # Initialize framebuffer
     framebuf_init();
 
-    # Determine which map to load
     var map_name = "E1M1";
-    if (argc() >= 3) {
-        map_name = argv(2);
-    }
-
-    # Load map
-    syscall(1, 1, "map: ", 5);
-    var mn_len = strlen(map_name);
-    syscall(1, 1, map_name, mn_len);
-    syscall(1, 1, "\n", 1);
-
-    if (map_load(map_name) != 0) {
-        syscall(1, 2, "fatal: cannot load map\n", 23);
-        wad_close();
-        syscall(60, 1);
-    }
-
+    if (argc() >= 3) { map_name = argv(2); }
+    if (map_load(map_name) != 0) { syscall(60, 1); }
     map_print_stats();
+    map_find_player_start();
 
-    # Find player start
-    if (map_find_player_start() != 0) {
-        syscall(1, 1, "warn: no player start\n", 22);
-    }
+    # Render one frame from player start
+    view_x = player_start_x;
+    view_y = player_start_y;
+    view_angle = player_start_angle;
 
-    # Initialize subsystems
-    player_init();
-    input_init();
-    tick_init();
-
-    syscall(1, 1, "start: x=", 9);
-    fmt_int(fixed_to_int(player_x));
-    syscall(1, 1, " y=", 3);
-    fmt_int(fixed_to_int(player_y));
-    syscall(1, 1, "\n", 1);
-
-    # ================================================================
-    # Game loop (35 Hz)
-    # ================================================================
-    game_running = 1;
-
-    while (game_running == 1) {
-        tick_begin();
-
-        # Poll input
-        input_poll();
-
-        # Check quit
-        if (input_quit == 1) {
-            game_running = 0;
-            continue;
-        }
-
-        # Update player
-        player_tick();
-
-        # Render frame
-        render_frame();
-
-        # Output
-        framebuf_flip();
-
-        # Wait for next tick
-        tick_wait();
-    }
-
-    # ================================================================
-    # Shutdown
-    # ================================================================
-    input_shutdown();
-
-    # Write final frame for inspection
-    framebuf_write_ppm("/tmp/doom_final.ppm");
-    syscall(1, 1, "wrote: /tmp/doom_final.ppm\n", 27);
-
-    syscall(1, 1, "ticks: ", 7);
-    fmt_int(tick_get_count());
-    syscall(1, 1, "\n", 1);
+    render_frame();
+    framebuf_write_ppm("/tmp/doom_e1m1.ppm");
+    syscall(1, 1, "wrote /tmp/doom_e1m1.ppm\n", 25);
 
     wad_close();
     framebuf_shutdown();
-
-    syscall(1, 1, "doom: clean exit\n", 17);
+    syscall(1, 1, "done\n", 5);
     return 0;
 }
 
