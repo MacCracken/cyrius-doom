@@ -2,9 +2,9 @@
 # cyrius-doom: clean-room DOOM engine in Cyrius
 #
 # Build: cyrb build
-# Run:   ./build/doom /path/to/doom1.wad
+# Run:   ./build/doom /path/to/doom1.wad [mapname]
 #
-# Phase 2: map loading + BSP rendering
+# Phase 3: playable -- walk through E1M1
 
 # ================================================================
 # Standard library
@@ -24,6 +24,14 @@ include "src/wad.cyr"
 include "src/framebuf.cyr"
 include "src/map.cyr"
 include "src/render.cyr"
+include "src/input.cyr"
+include "src/player.cyr"
+include "src/tick.cyr"
+
+# ================================================================
+# Game state
+# ================================================================
+var game_running = 0;
 
 # ================================================================
 # Entry point
@@ -34,6 +42,7 @@ fn doom_main() {
     args_init();
 
     syscall(1, 1, "cyrius-doom v0.1.0\n", 19);
+    syscall(1, 1, "controls: WASD/arrows=move, Q=quit, ESC=quit\n", 45);
 
     # Check for WAD file argument
     if (argc() < 2) {
@@ -43,7 +52,6 @@ fn doom_main() {
 
     # Initialize trig tables
     tables_init();
-    syscall(1, 1, "tables: initialized\n", 20);
 
     # Open WAD file
     var wad_path = argv(1);
@@ -52,20 +60,17 @@ fn doom_main() {
         syscall(60, 1);
     }
 
-    syscall(1, 1, "wad: opened, ", 13);
+    syscall(1, 1, "wad: ", 5);
     fmt_int(wad_numlumps);
     syscall(1, 1, " lumps\n", 7);
 
-    # Load palette from WAD (PLAYPAL lump)
+    # Load palette
     var pal_idx = wad_find_lump("PLAYPAL");
     if (pal_idx >= 0) {
         var pal_data = wad_read_lump(pal_idx);
         if (pal_data != 0) {
             framebuf_set_palette(pal_data);
-            syscall(1, 1, "palette: loaded\n", 16);
         }
-    } else {
-        syscall(1, 1, "warn: PLAYPAL not found, using defaults\n", 40);
     }
 
     # Initialize framebuffer
@@ -78,7 +83,7 @@ fn doom_main() {
     }
 
     # Load map
-    syscall(1, 1, "loading map: ", 13);
+    syscall(1, 1, "map: ", 5);
     var mn_len = strlen(map_name);
     syscall(1, 1, map_name, mn_len);
     syscall(1, 1, "\n", 1);
@@ -93,37 +98,63 @@ fn doom_main() {
 
     # Find player start
     if (map_find_player_start() != 0) {
-        syscall(1, 2, "warn: no player 1 start, using origin\n", 38);
-        player_start_x = 0;
-        player_start_y = 0;
-        player_start_angle = 0;
+        syscall(1, 1, "warn: no player start\n", 22);
     }
 
-    syscall(1, 1, "player start: x=", 16);
-    fmt_int(fixed_to_int(player_start_x));
+    # Initialize subsystems
+    player_init();
+    input_init();
+    tick_init();
+
+    syscall(1, 1, "start: x=", 9);
+    fmt_int(fixed_to_int(player_x));
     syscall(1, 1, " y=", 3);
-    fmt_int(fixed_to_int(player_start_y));
-    syscall(1, 1, " angle=", 7);
-    fmt_int(player_start_angle);
+    fmt_int(fixed_to_int(player_y));
     syscall(1, 1, "\n", 1);
 
-    # Set view to player start
-    view_x = player_start_x;
-    view_y = player_start_y;
-    view_angle = player_start_angle;
+    # ================================================================
+    # Game loop (35 Hz)
+    # ================================================================
+    game_running = 1;
 
-    # Render a single frame from the player start position
-    syscall(1, 1, "rendering frame...\n", 19);
-    render_frame();
+    while (game_running == 1) {
+        tick_begin();
 
-    # Write rendered frame as PPM for inspection
-    framebuf_write_ppm("/tmp/doom_e1m1.ppm");
-    syscall(1, 1, "wrote: /tmp/doom_e1m1.ppm\n", 26);
+        # Poll input
+        input_poll();
 
-    # Also write to framebuffer if available
-    framebuf_flip();
+        # Check quit
+        if (input_quit == 1) {
+            game_running = 0;
+            continue;
+        }
 
-    # Cleanup
+        # Update player
+        player_tick();
+
+        # Render frame
+        render_frame();
+
+        # Output
+        framebuf_flip();
+
+        # Wait for next tick
+        tick_wait();
+    }
+
+    # ================================================================
+    # Shutdown
+    # ================================================================
+    input_shutdown();
+
+    # Write final frame for inspection
+    framebuf_write_ppm("/tmp/doom_final.ppm");
+    syscall(1, 1, "wrote: /tmp/doom_final.ppm\n", 27);
+
+    syscall(1, 1, "ticks: ", 7);
+    fmt_int(tick_get_count());
+    syscall(1, 1, "\n", 1);
+
     wad_close();
     framebuf_shutdown();
 

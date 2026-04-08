@@ -1,0 +1,232 @@
+# input.cyr -- keyboard input for DOOM
+# Usage: include "src/input.cyr"
+#
+# Two input modes:
+#   1. AGNOS kernel: PS/2 scancodes via /dev/kbd or direct port I/O
+#   2. Linux userspace: terminal raw mode via stdin + termios ioctl
+#
+# Maps raw keycodes to game actions. Maintains a key state array
+# so the game loop can poll "is key X held down?" each tick.
+#
+# Original DOOM polled keyboard at the start of each 35Hz tick.
+
+# ================================================================
+# Key state array (256 entries, 1 = pressed, 0 = released)
+# ================================================================
+var key_state[2048];
+
+# ================================================================
+# Game action flags (polled each tick by player.cyr)
+# ================================================================
+var input_forward = 0;
+var input_backward = 0;
+var input_turn_left = 0;
+var input_turn_right = 0;
+var input_strafe_left = 0;
+var input_strafe_right = 0;
+var input_run = 0;
+var input_fire = 0;
+var input_use = 0;
+var input_quit = 0;
+var input_weapon = 0;
+
+# ================================================================
+# Key codes (Linux terminal escape sequences)
+# ================================================================
+# Arrow keys come as ESC [ A/B/C/D
+var KEY_ESC = 27;
+var KEY_UP = 128;
+var KEY_DOWN = 129;
+var KEY_LEFT = 130;
+var KEY_RIGHT = 131;
+var KEY_SPACE = 32;
+var KEY_CTRL = 132;
+var KEY_SHIFT = 133;
+var KEY_ENTER = 10;
+
+# ASCII keys
+var KEY_W = 119;
+var KEY_A = 97;
+var KEY_S = 115;
+var KEY_D = 100;
+var KEY_Q = 113;
+var KEY_E = 101;
+var KEY_R = 114;
+var KEY_TAB = 9;
+
+# ================================================================
+# Terminal raw mode (Linux userspace)
+# ================================================================
+# struct termios = 60 bytes on Linux x86_64
+# We save the original termios and restore it on exit.
+
+var orig_termios[64];
+var raw_mode_active = 0;
+
+# SYS_IOCTL = 16
+# TCGETS = 0x5401 (get termios)
+# TCSETS = 0x5402 (set termios)
+var TCGETS = 0x5401;
+var TCSETS = 0x5402;
+
+# termios offsets (Linux x86_64):
+# c_iflag = 0 (4 bytes)
+# c_oflag = 4 (4 bytes)
+# c_cflag = 8 (4 bytes)
+# c_lflag = 12 (4 bytes)
+# c_cc[VMIN] = 16 + 6 = 22
+# c_cc[VTIME] = 16 + 5 = 21
+
+fn input_enable_raw_mode() {
+    # Save original termios
+    syscall(16, 0, TCGETS, &orig_termios);
+
+    # Copy to modify
+    var raw[64];
+    memcpy(&raw, &orig_termios, 60);
+
+    # Disable canonical mode and echo
+    # c_lflag &= ~(ICANON | ECHO | ISIG)
+    # ICANON=2, ECHO=8, ISIG=1
+    var lflag = load32(&raw + 12);
+    lflag = lflag & (0 - 12);
+    store32(&raw + 12, lflag);
+
+    # Disable input processing
+    # c_iflag &= ~(IXON | ICRNL | BRKINT | INPCK | ISTRIP)
+    var iflag = load32(&raw);
+    iflag = iflag & (0 - 1043);
+    store32(&raw, iflag);
+
+    # Set VMIN=0 (non-blocking), VTIME=0 (no timeout)
+    store8(&raw + 22, 0);
+    store8(&raw + 21, 0);
+
+    # Apply
+    syscall(16, 0, TCSETS, &raw);
+    raw_mode_active = 1;
+    return 0;
+}
+
+fn input_disable_raw_mode() {
+    if (raw_mode_active == 1) {
+        syscall(16, 0, TCSETS, &orig_termios);
+        raw_mode_active = 0;
+    }
+    return 0;
+}
+
+# ================================================================
+# Input initialization
+# ================================================================
+
+fn input_init() {
+    # Clear key state
+    for (var i = 0; i < 256; i = i + 1) {
+        store64(&key_state + i * 8, 0);
+    }
+
+    # Enable raw terminal input
+    input_enable_raw_mode();
+
+    return 0;
+}
+
+fn input_shutdown() {
+    input_disable_raw_mode();
+    return 0;
+}
+
+# ================================================================
+# Read and process input (non-blocking)
+# ================================================================
+# Called once per tick. Reads all available bytes from stdin,
+# decodes escape sequences, updates key state and action flags.
+
+fn input_poll() {
+    # Clear action flags (re-derive from key state)
+    input_forward = 0;
+    input_backward = 0;
+    input_turn_left = 0;
+    input_turn_right = 0;
+    input_strafe_left = 0;
+    input_strafe_right = 0;
+    input_run = 0;
+    input_fire = 0;
+    input_use = 0;
+
+    # Read available bytes (non-blocking since VMIN=0)
+    var buf[32];
+    var n = syscall(0, 0, &buf, 32);
+
+    if (n > 0) {
+        var pos = 0;
+        while (pos < n) {
+            var ch = load8(&buf + pos);
+
+            if (ch == KEY_ESC) {
+                # Check for escape sequence
+                if (pos + 2 < n) {
+                    var seq1 = load8(&buf + pos + 1);
+                    var seq2 = load8(&buf + pos + 2);
+                    if (seq1 == 91) {
+                        # ESC [ X -- arrow keys
+                        if (seq2 == 65) { store64(&key_state + KEY_UP * 8, 1); }
+                        if (seq2 == 66) { store64(&key_state + KEY_DOWN * 8, 1); }
+                        if (seq2 == 67) { store64(&key_state + KEY_RIGHT * 8, 1); }
+                        if (seq2 == 68) { store64(&key_state + KEY_LEFT * 8, 1); }
+                        pos = pos + 3;
+                        continue;
+                    }
+                }
+                # Bare ESC = quit
+                input_quit = 1;
+                pos = pos + 1;
+            } else {
+                # Regular key press
+                if (ch < 256) {
+                    store64(&key_state + ch * 8, 1);
+                }
+                pos = pos + 1;
+            }
+        }
+    }
+
+    # Map key state to game actions
+    # WASD + arrow keys
+    if (load64(&key_state + KEY_W * 8) == 1) { input_forward = 1; }
+    if (load64(&key_state + KEY_UP * 8) == 1) { input_forward = 1; }
+    if (load64(&key_state + KEY_S * 8) == 1) { input_backward = 1; }
+    if (load64(&key_state + KEY_DOWN * 8) == 1) { input_backward = 1; }
+    if (load64(&key_state + KEY_LEFT * 8) == 1) { input_turn_left = 1; }
+    if (load64(&key_state + KEY_RIGHT * 8) == 1) { input_turn_right = 1; }
+    if (load64(&key_state + KEY_A * 8) == 1) { input_strafe_left = 1; }
+    if (load64(&key_state + KEY_D * 8) == 1) { input_strafe_right = 1; }
+
+    # Action keys
+    if (load64(&key_state + KEY_SPACE * 8) == 1) { input_use = 1; }
+    if (load64(&key_state + KEY_E * 8) == 1) { input_use = 1; }
+
+    # Fire (ctrl or f key)
+    if (load64(&key_state + 102 * 8) == 1) { input_fire = 1; }
+
+    # Run (shift = r key in terminal since we can't detect modifier)
+    if (load64(&key_state + KEY_R * 8) == 1) { input_run = 1; }
+
+    # Quit
+    if (load64(&key_state + KEY_Q * 8) == 1) { input_quit = 1; }
+
+    # Weapon select (1-7)
+    for (var wi = 1; wi <= 7; wi = wi + 1) {
+        if (load64(&key_state + (48 + wi) * 8) == 1) {
+            input_weapon = wi;
+        }
+    }
+
+    # Clear key state for next poll (keys are instant, not held in terminal mode)
+    for (var i = 0; i < 256; i = i + 1) {
+        store64(&key_state + i * 8, 0);
+    }
+
+    return 0;
+}

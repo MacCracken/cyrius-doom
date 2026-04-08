@@ -1,0 +1,303 @@
+# player.cyr -- player movement, collision detection, state
+# Usage: include "src/player.cyr" (after fixed.cyr, map.cyr, input.cyr)
+#
+# Handles:
+#   - Movement: forward/backward/strafe based on input
+#   - Turning: left/right rotation
+#   - Collision detection: slide along walls (no walking through solids)
+#   - Height: step up stairs (max 24 units), fall off ledges
+#   - State: health, armor, ammo, current weapon
+#
+# Original DOOM movement:
+#   Walk speed: 25 units/tick (map units, not pixels)
+#   Run speed: 50 units/tick
+#   Turn speed: ~2.8 degrees/tick (walk), ~5.6 degrees/tick (run)
+
+# ================================================================
+# Player state
+# ================================================================
+
+var player_x = 0;
+var player_y = 0;
+var player_z = 0;
+var player_angle = 0;
+
+# Movement speeds (fixed-point)
+# Walk: 3 map units per tick << 16 = 196608
+# Run:  6 map units per tick << 16 = 393216
+var PLAYER_WALK_SPEED = 196608;
+var PLAYER_RUN_SPEED = 393216;
+var PLAYER_STRAFE_SPEED = 163840;
+
+# Turn speed in angle units per tick
+# Walk turn: 4 angle units (~1.4 degrees)
+# Run turn: 8 angle units (~2.8 degrees)
+var PLAYER_TURN_SPEED = 4;
+var PLAYER_TURN_SPEED_RUN = 8;
+
+# Maximum step height the player can climb (24 map units)
+var PLAYER_MAX_STEP = 24;
+# Player height (56 map units, eye at 41)
+var PLAYER_HEIGHT = 56;
+# Player radius for collision (16 map units in fixed-point)
+var PLAYER_RADIUS = 1048576;
+
+# Combat state
+var player_health = 100;
+var player_armor = 0;
+var player_ammo_bullets = 50;
+var player_ammo_shells = 0;
+var player_ammo_rockets = 0;
+var player_ammo_cells = 0;
+var player_weapon = 1;
+
+# ================================================================
+# Player initialization
+# ================================================================
+
+fn player_init() {
+    player_x = player_start_x;
+    player_y = player_start_y;
+    player_z = 0;
+    player_angle = player_start_angle;
+
+    player_health = 100;
+    player_armor = 0;
+    player_ammo_bullets = 50;
+    player_weapon = 1;
+
+    # Find the floor height at player start
+    var sector = player_find_sector();
+    if (sector >= 0) {
+        player_z = map_sector_floorh(sector) << 16;
+    }
+
+    return 0;
+}
+
+# ================================================================
+# Find which sector the player is in
+# ================================================================
+# Walk the BSP tree to find the subsector containing the player,
+# then get the sector from the first seg's linedef/sidedef.
+
+fn player_find_sector() {
+    if (map_num_nodes == 0) { return 0; }
+
+    var node_idx = map_num_nodes - 1;
+
+    # Walk BSP to leaf
+    while (map_is_subsector(node_idx) == 0) {
+        var side = map_point_on_side(player_x, player_y, node_idx);
+        if (side == 0) {
+            node_idx = map_node_child_r(node_idx);
+        } else {
+            node_idx = map_node_child_l(node_idx);
+        }
+    }
+
+    # Got a subsector -- find sector from first seg
+    var ss_idx = map_subsector_idx(node_idx);
+    var first_seg = map_ssector_first(ss_idx);
+    var line_idx = map_seg_linedef(first_seg);
+    var seg_side = map_seg_side(first_seg);
+
+    var sidedef_idx = map_linedef_side_right(line_idx);
+    if (seg_side == 1) {
+        sidedef_idx = map_linedef_side_left(line_idx);
+    }
+    if (sidedef_idx < 0) { return 0; }
+
+    return map_sidedef_sector(sidedef_idx);
+}
+
+# ================================================================
+# Collision detection
+# ================================================================
+# Check if position (nx, ny) is valid (not inside a solid wall).
+# Uses linedef blocking checks within a radius around the position.
+#
+# Simple approach: test against all linedefs within range.
+# Original DOOM uses blockmap for efficiency -- we can add that later.
+
+fn player_check_position(nx, ny) {
+    var radius = PLAYER_RADIUS;
+
+    for (var i = 0; i < map_num_linedefs; i = i + 1) {
+        var flags = map_linedef_flags(i);
+
+        # Only check blocking lines
+        if ((flags & ML_BLOCKING) == 0) {
+            # Two-sided non-blocking lines need step/height check
+            if ((flags & ML_TWOSIDED) == 0) { continue; }
+        }
+
+        # Get linedef vertices
+        var v1 = map_linedef_v1(i);
+        var v2 = map_linedef_v2(i);
+        var lx1 = map_vertex_x(v1);
+        var ly1 = map_vertex_y(v1);
+        var lx2 = map_vertex_x(v2);
+        var ly2 = map_vertex_y(v2);
+
+        # Quick bounding box reject
+        var min_x = fixed_min(lx1, lx2) - radius;
+        var max_x = fixed_max(lx1, lx2) + radius;
+        var min_y = fixed_min(ly1, ly2) - radius;
+        var max_y = fixed_max(ly1, ly2) + radius;
+
+        if (nx < min_x) { continue; }
+        if (nx > max_x) { continue; }
+        if (ny < min_y) { continue; }
+        if (ny > max_y) { continue; }
+
+        # Point-to-line-segment distance test
+        var ldx = lx2 - lx1;
+        var ldy = ly2 - ly1;
+        var pdx = nx - lx1;
+        var pdy = ny - ly1;
+
+        # Project point onto line: t = dot(p-v1, v2-v1) / dot(v2-v1, v2-v1)
+        var len_sq = fixed_mul(ldx >> 8, ldx >> 8) + fixed_mul(ldy >> 8, ldy >> 8);
+        if (len_sq == 0) { continue; }
+
+        var dot = fixed_mul(pdx >> 8, ldx >> 8) + fixed_mul(pdy >> 8, ldy >> 8);
+        var t = fixed_div(dot, len_sq);
+        t = fixed_clamp(t, 0, FIXED_ONE);
+
+        # Closest point on segment
+        var cx = lx1 + fixed_mul(t, ldx);
+        var cy = ly1 + fixed_mul(t, ldy);
+
+        # Distance from player to closest point
+        var dist = fixed_approx_dist(nx - cx, ny - cy);
+
+        if (dist < radius) {
+            # Blocking line -- reject this position
+            if ((flags & ML_BLOCKING) != 0) { return 0; }
+
+            # Two-sided: check if player can step over height difference
+            if ((flags & ML_TWOSIDED) != 0) {
+                var right_side = map_linedef_side_right(i);
+                var left_side = map_linedef_side_left(i);
+                if (right_side >= 0) { if (left_side >= 0) {
+                    var rs = map_sidedef_sector(right_side);
+                    var ls = map_sidedef_sector(left_side);
+                    var rf = map_sector_floorh(rs);
+                    var lf = map_sector_floorh(ls);
+
+                    # Can't step up more than 24 units
+                    var step = lf - rf;
+                    if (step < 0) { step = 0 - step; }
+                    var player_floor = fixed_to_int(player_z);
+                    var target_floor = rf;
+                    if (lf > rf) { target_floor = lf; }
+                    if (target_floor - player_floor > PLAYER_MAX_STEP) {
+                        return 0;
+                    }
+
+                    # Can't fit under ceiling
+                    var rc = map_sector_ceilh(rs);
+                    var lc = map_sector_ceilh(ls);
+                    var min_ceil = rc;
+                    if (lc < min_ceil) { min_ceil = lc; }
+                    if (min_ceil - target_floor < PLAYER_HEIGHT) {
+                        return 0;
+                    }
+                } }
+            }
+        }
+    }
+
+    return 1;
+}
+
+# ================================================================
+# Player movement (called each tick)
+# ================================================================
+
+fn player_tick() {
+    var speed = PLAYER_WALK_SPEED;
+    var turn_speed = PLAYER_TURN_SPEED;
+
+    if (input_run == 1) {
+        speed = PLAYER_RUN_SPEED;
+        turn_speed = PLAYER_TURN_SPEED_RUN;
+    }
+
+    # Turning
+    if (input_turn_left == 1) {
+        player_angle = angle_add(player_angle, turn_speed);
+    }
+    if (input_turn_right == 1) {
+        player_angle = angle_sub(player_angle, turn_speed);
+    }
+
+    # Calculate movement vector
+    var move_x = 0;
+    var move_y = 0;
+
+    var fwd_cos = fixed_cos(player_angle);
+    var fwd_sin = fixed_sin(player_angle);
+
+    # Forward/backward
+    if (input_forward == 1) {
+        move_x = move_x + fixed_mul(fwd_cos, speed);
+        move_y = move_y + fixed_mul(fwd_sin, speed);
+    }
+    if (input_backward == 1) {
+        move_x = move_x - fixed_mul(fwd_cos, speed);
+        move_y = move_y - fixed_mul(fwd_sin, speed);
+    }
+
+    # Strafing (perpendicular to facing direction)
+    if (input_strafe_left == 1) {
+        move_x = move_x + fixed_mul(fwd_sin, PLAYER_STRAFE_SPEED);
+        move_y = move_y - fixed_mul(fwd_cos, PLAYER_STRAFE_SPEED);
+    }
+    if (input_strafe_right == 1) {
+        move_x = move_x - fixed_mul(fwd_sin, PLAYER_STRAFE_SPEED);
+        move_y = move_y + fixed_mul(fwd_cos, PLAYER_STRAFE_SPEED);
+    }
+
+    # Try to move (with collision detection)
+    if (move_x != 0) {
+        if (move_y != 0) {
+            # Try full move
+            var nx = player_x + move_x;
+            var ny = player_y + move_y;
+
+            if (player_check_position(nx, ny) == 1) {
+                player_x = nx;
+                player_y = ny;
+            } else {
+                # Wall sliding: try X-only, then Y-only
+                nx = player_x + move_x;
+                ny = player_y;
+                if (player_check_position(nx, ny) == 1) {
+                    player_x = nx;
+                } else {
+                    nx = player_x;
+                    ny = player_y + move_y;
+                    if (player_check_position(nx, ny) == 1) {
+                        player_y = ny;
+                    }
+                }
+            }
+        }
+    }
+
+    # Update Z (floor height at current position)
+    var sector = player_find_sector();
+    if (sector >= 0) {
+        var floor = map_sector_floorh(sector) << 16;
+        player_z = floor;
+    }
+
+    # Sync view state with player
+    view_x = player_x;
+    view_y = player_y;
+    view_angle = player_angle;
+
+    return 0;
+}
