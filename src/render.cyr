@@ -1,0 +1,371 @@
+# render.cyr -- BSP traversal and wall/floor/ceiling rendering
+# Usage: include "src/render.cyr" (after map.cyr, fixed.cyr, tables.cyr, framebuf.cyr)
+#
+# DOOM rendering pipeline (per frame):
+#   1. BSP tree traversal from player position (back-to-front)
+#   2. For each subsector reached: draw its wall segments (segs)
+#   3. Each seg maps to a screen column range
+#   4. Columns are rendered top-to-bottom: ceiling, wall, floor
+#   5. Clipping: track which columns are already drawn (occlusion)
+#
+# No Z-buffer. The BSP tree guarantees correct draw order.
+# Column rendering is the core inner loop -- one vertical strip at a time.
+
+# ================================================================
+# View state (set before each frame)
+# ================================================================
+
+var view_x = 0;
+var view_y = 0;
+var view_angle = 0;
+var view_cos = 0;
+var view_sin = 0;
+
+# Player eye height above floor (41 pixels in original DOOM = 41 << 16)
+var VIEW_HEIGHT = 2686976;
+
+# Horizontal FOV: 90 degrees = 256 angle units
+var VIEW_FOV = 256;
+var VIEW_FOV_HALF = 128;
+
+# Projection: distance from eye to projection plane
+# For 320-wide screen and 90 FOV: proj_dist = 160 (half-width)
+# In fixed-point: 160 << 16 = 10485760
+var PROJ_DIST = 10485760;
+
+# Half screen dimensions (for centering)
+var HALF_WIDTH = 160;
+var HALF_HEIGHT = 100;
+
+# ================================================================
+# Column clipping
+# ================================================================
+# Track the top and bottom of each rendered column (0..319)
+# As walls are drawn, these narrow. When top >= bottom, column is done.
+# 320 entries * 8 bytes = 2560 bytes each
+var clip_top[2560];
+var clip_bottom[2560];
+
+# Solid column tracker: 1 = fully occluded, 0 = open
+var clip_solid[2560];
+
+# Number of fully occluded columns (early-out when all 320 are done)
+var clip_count = 0;
+
+fn render_init_clip() {
+    for (var i = 0; i < SCREEN_WIDTH; i = i + 1) {
+        store64(&clip_top + i * 8, 0);
+        store64(&clip_bottom + i * 8, SCREEN_HEIGHT - 1);
+        store64(&clip_solid + i * 8, 0);
+    }
+    clip_count = 0;
+    return 0;
+}
+
+# ================================================================
+# Angle-to-column mapping
+# ================================================================
+
+# Convert a world-space angle to a screen column.
+# angle is relative to view direction (negative = left, positive = right)
+# Returns column index 0..319, or -1 if off-screen.
+fn render_angle_to_col(angle) {
+    # Normalize to view-relative angle
+    var rel = angle_sub(angle, view_angle);
+
+    # Map: center = 160, left edge = +FOV/2, right edge = -FOV/2
+    # Each angle unit = 320 / FOV pixels = 320/256 = 1.25 pixels
+    # col = 160 - rel * 320 / FOV
+
+    # Handle wrapping: if rel > 512, it wrapped around
+    if (rel > ANG180) { rel = rel - ANG360; }
+
+    # Check if within FOV
+    if (rel > VIEW_FOV_HALF) { return 0 - 1; }
+    if (rel < 0 - VIEW_FOV_HALF) { return 0 - 1; }
+
+    var col = HALF_WIDTH - rel * SCREEN_WIDTH / VIEW_FOV;
+    if (col < 0) { col = 0; }
+    if (col >= SCREEN_WIDTH) { col = SCREEN_WIDTH - 1; }
+    return col;
+}
+
+# ================================================================
+# Transform a vertex from world space to view space
+# ================================================================
+
+# Returns: tx (view-space X, left/right) in *out_tx
+#          ty (view-space Y, depth/distance) in *out_ty
+fn render_transform_vertex(wx, wy, out_tx, out_ty) {
+    var dx = wx - view_x;
+    var dy = wy - view_y;
+
+    # Rotate by negative view angle:
+    # tx = dx * cos + dy * sin
+    # ty = -dx * sin + dy * cos
+    var tx = fixed_mul(dx, view_cos) + fixed_mul(dy, view_sin);
+    var ty = fixed_mul(dy, view_cos) - fixed_mul(dx, view_sin);
+
+    store64(out_tx, tx);
+    store64(out_ty, ty);
+    return 0;
+}
+
+# ================================================================
+# Render a wall segment (seg)
+# ================================================================
+# This is where the actual column-by-column drawing happens.
+
+fn render_seg(seg_idx) {
+    var v1_idx = map_seg_v1(seg_idx);
+    var v2_idx = map_seg_v2(seg_idx);
+    var line_idx = map_seg_linedef(seg_idx);
+    var side = map_seg_side(seg_idx);
+
+    # Get world-space vertex positions
+    var wx1 = map_vertex_x(v1_idx);
+    var wy1 = map_vertex_y(v1_idx);
+    var wx2 = map_vertex_x(v2_idx);
+    var wy2 = map_vertex_y(v2_idx);
+
+    # Transform to view space
+    var tx1 = 0;
+    var ty1 = 0;
+    var tx2 = 0;
+    var ty2 = 0;
+    render_transform_vertex(wx1, wy1, &tx1, &ty1);
+    render_transform_vertex(wx2, wy2, &tx2, &ty2);
+
+    # Both behind the viewer? Skip.
+    if (ty1 <= 0) { if (ty2 <= 0) { return 0; } }
+
+    # Near-plane clipping: if a vertex is behind the viewer,
+    # clip it to a small positive depth
+    var NEAR_CLIP = 256;
+    if (ty1 < NEAR_CLIP) {
+        # Interpolate tx1 toward tx2 at the clip plane
+        if (ty2 > NEAR_CLIP) {
+            var t = fixed_div(NEAR_CLIP - ty1, ty2 - ty1);
+            tx1 = tx1 + fixed_mul(t, tx2 - tx1);
+            ty1 = NEAR_CLIP;
+        } else {
+            return 0;
+        }
+    }
+    if (ty2 < NEAR_CLIP) {
+        if (ty1 > NEAR_CLIP) {
+            var t = fixed_div(NEAR_CLIP - ty2, ty1 - ty2);
+            tx2 = tx2 + fixed_mul(t, tx1 - tx2);
+            ty2 = NEAR_CLIP;
+        } else {
+            return 0;
+        }
+    }
+
+    # Project to screen X coordinates
+    # screen_x = HALF_WIDTH + tx * PROJ_DIST / ty
+    var sx1 = HALF_WIDTH + fixed_to_int(fixed_div(fixed_mul(tx1, PROJ_DIST), ty1));
+    var sx2 = HALF_WIDTH + fixed_to_int(fixed_div(fixed_mul(tx2, PROJ_DIST), ty2));
+
+    # Ensure left-to-right order
+    if (sx1 > sx2) {
+        # Swap endpoints
+        var tmp = sx1;
+        sx1 = sx2;
+        sx2 = tmp;
+        tmp = ty1;
+        ty1 = ty2;
+        ty2 = tmp;
+    }
+
+    # Clip to screen bounds
+    if (sx2 < 0) { return 0; }
+    if (sx1 >= SCREEN_WIDTH) { return 0; }
+    if (sx1 < 0) { sx1 = 0; }
+    if (sx2 >= SCREEN_WIDTH) { sx2 = SCREEN_WIDTH - 1; }
+
+    # Get sector info for heights and light
+    var sidedef_idx = map_linedef_side_right(line_idx);
+    if (side == 1) {
+        sidedef_idx = map_linedef_side_left(line_idx);
+    }
+    if (sidedef_idx < 0) { return 0; }
+
+    var sector_idx = map_sidedef_sector(sidedef_idx);
+    var floor_h = map_sector_floorh(sector_idx);
+    var ceil_h = map_sector_ceilh(sector_idx);
+    var light = map_sector_light(sector_idx);
+
+    # Choose wall color based on light level (map to palette index)
+    # Light ranges 0-255 in DOOM; map to palette index for now
+    var wall_color = light / 16;
+    if (wall_color > 15) { wall_color = 15; }
+    if (wall_color < 1) { wall_color = 1; }
+
+    # Check for two-sided linedef (portal to another sector)
+    var is_twosided = map_linedef_flags(line_idx) & ML_TWOSIDED;
+    var back_floor_h = floor_h;
+    var back_ceil_h = ceil_h;
+
+    if (is_twosided != 0) {
+        var back_side_idx = map_linedef_side_left(line_idx);
+        if (side == 1) { back_side_idx = map_linedef_side_right(line_idx); }
+        if (back_side_idx >= 0) {
+            var back_sector = map_sidedef_sector(back_side_idx);
+            back_floor_h = map_sector_floorh(back_sector);
+            back_ceil_h = map_sector_ceilh(back_sector);
+        }
+    }
+
+    # Draw columns from sx1 to sx2
+    for (var col = sx1; col <= sx2; col = col + 1) {
+        # Skip fully occluded columns
+        if (load64(&clip_solid + col * 8) == 1) { continue; }
+
+        var ct = load64(&clip_top + col * 8);
+        var cb = load64(&clip_bottom + col * 8);
+        if (ct > cb) { continue; }
+
+        # Interpolate depth for this column
+        var frac = 0;
+        if (sx2 != sx1) {
+            frac = fixed_div((col - sx1) << 16, (sx2 - sx1) << 16);
+        }
+        var depth = fixed_lerp(ty1, ty2, frac);
+        if (depth <= 0) { depth = 256; }
+
+        # Project floor and ceiling heights to screen Y
+        # screen_y = HALF_HEIGHT - (height - eye_height) * PROJ_DIST / depth
+        var eye_h = (floor_h << 16) + VIEW_HEIGHT;
+
+        var ceil_screen = HALF_HEIGHT - fixed_to_int(
+            fixed_div(fixed_mul((ceil_h << 16) - eye_h, PROJ_DIST), depth));
+        var floor_screen = HALF_HEIGHT - fixed_to_int(
+            fixed_div(fixed_mul((floor_h << 16) - eye_h, PROJ_DIST), depth));
+
+        # Clamp to clip region
+        if (ceil_screen < ct) { ceil_screen = ct; }
+        if (floor_screen > cb) { floor_screen = cb; }
+
+        # Draw ceiling (above wall top)
+        if (ceil_screen > ct) {
+            framebuf_vline(col, ct, ceil_screen - 1, 0);
+        }
+
+        # Draw floor (below wall bottom)
+        if (floor_screen < cb) {
+            framebuf_vline(col, floor_screen + 1, cb, 96);
+        }
+
+        if (is_twosided != 0) {
+            # Two-sided: draw upper and lower walls around portal opening
+            var back_ceil_screen = HALF_HEIGHT - fixed_to_int(
+                fixed_div(fixed_mul((back_ceil_h << 16) - eye_h, PROJ_DIST), depth));
+            var back_floor_screen = HALF_HEIGHT - fixed_to_int(
+                fixed_div(fixed_mul((back_floor_h << 16) - eye_h, PROJ_DIST), depth));
+
+            # Upper wall (between front ceiling and back ceiling)
+            if (back_ceil_screen > ceil_screen) {
+                framebuf_vline(col, ceil_screen, back_ceil_screen - 1, wall_color);
+            }
+
+            # Lower wall (between back floor and front floor)
+            if (back_floor_screen < floor_screen) {
+                framebuf_vline(col, back_floor_screen + 1, floor_screen, wall_color + 16);
+            }
+
+            # Update clip to the portal opening
+            if (back_ceil_screen > ct) {
+                store64(&clip_top + col * 8, back_ceil_screen);
+            }
+            if (back_floor_screen < cb) {
+                store64(&clip_bottom + col * 8, back_floor_screen);
+            }
+        } else {
+            # One-sided: solid wall fills the whole opening
+            framebuf_vline(col, ceil_screen, floor_screen, wall_color);
+
+            # Mark column as fully occluded
+            store64(&clip_solid + col * 8, 1);
+            clip_count = clip_count + 1;
+        }
+    }
+
+    return 0;
+}
+
+# ================================================================
+# Render a subsector (leaf node of BSP tree)
+# ================================================================
+
+fn render_subsector(ss_idx) {
+    var count = map_ssector_count(ss_idx);
+    var first = map_ssector_first(ss_idx);
+
+    for (var i = 0; i < count; i = i + 1) {
+        render_seg(first + i);
+    }
+    return 0;
+}
+
+# ================================================================
+# BSP traversal
+# ================================================================
+# Walk the BSP tree from the root. At each node:
+#   1. Determine which side of the partition line the player is on
+#   2. Recurse into that side first (front-to-back for occlusion)
+#   3. Then recurse into the other side
+#   4. When reaching a subsector (leaf), render its segs
+
+fn render_bsp_node(node_idx) {
+    # Early out: all columns occluded
+    if (clip_count >= SCREEN_WIDTH) { return 0; }
+
+    # Is this a subsector (leaf)?
+    if (map_is_subsector(node_idx) == 1) {
+        render_subsector(map_subsector_idx(node_idx));
+        return 0;
+    }
+
+    # Determine which side of the partition line the player is on
+    var side = map_point_on_side(view_x, view_y, node_idx);
+
+    # Render front side first (the side the player is on)
+    if (side == 0) {
+        render_bsp_node(map_node_child_r(node_idx));
+        # Then back side (if not fully occluded)
+        if (clip_count < SCREEN_WIDTH) {
+            render_bsp_node(map_node_child_l(node_idx));
+        }
+    } else {
+        render_bsp_node(map_node_child_l(node_idx));
+        if (clip_count < SCREEN_WIDTH) {
+            render_bsp_node(map_node_child_r(node_idx));
+        }
+    }
+
+    return 0;
+}
+
+# ================================================================
+# Render a full frame
+# ================================================================
+
+fn render_frame() {
+    # Set up view transform
+    view_cos = fixed_cos(view_angle);
+    view_sin = fixed_sin(view_angle);
+
+    # Clear screen
+    framebuf_clear(0);
+
+    # Reset column clipping
+    render_init_clip();
+
+    # Traverse BSP tree from root (last node)
+    if (map_num_nodes > 0) {
+        render_bsp_node(map_num_nodes - 1);
+    }
+
+    return 0;
+}

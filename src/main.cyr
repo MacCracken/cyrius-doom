@@ -4,7 +4,7 @@
 # Build: cyrb build
 # Run:   ./build/doom /path/to/doom1.wad
 #
-# Phase 1: foundations only (fixed-point math, WAD parsing, framebuffer)
+# Phase 2: map loading + BSP rendering
 
 # ================================================================
 # Standard library
@@ -22,6 +22,8 @@ include "src/fixed.cyr"
 include "src/tables.cyr"
 include "src/wad.cyr"
 include "src/framebuf.cyr"
+include "src/map.cyr"
+include "src/render.cyr"
 
 # ================================================================
 # Entry point
@@ -35,7 +37,7 @@ fn doom_main() {
 
     # Check for WAD file argument
     if (argc() < 2) {
-        syscall(1, 2, "usage: doom <wadfile>\n", 21);
+        syscall(1, 2, "usage: doom <wadfile> [mapname]\n", 31);
         syscall(60, 1);
     }
 
@@ -69,33 +71,57 @@ fn doom_main() {
     # Initialize framebuffer
     framebuf_init();
 
-    # --- Test rendering: draw a gradient using the DOOM palette ---
-    framebuf_clear(0);
-
-    # Draw vertical color bars using first 16 palette colors
-    for (var ci = 0; ci < 16; ci = ci + 1) {
-        var x_start = ci * 20;
-        for (var x = x_start; x < x_start + 20; x = x + 1) {
-            framebuf_vline(x, 0, SCREEN_HEIGHT - 1, ci);
-        }
+    # Determine which map to load
+    var map_name = "E1M1";
+    if (argc() >= 3) {
+        map_name = argv(2);
     }
 
-    # Write test image
-    framebuf_write_ppm("/tmp/doom_test.ppm");
-    syscall(1, 1, "test: wrote /tmp/doom_test.ppm\n", 31);
+    # Load map
+    syscall(1, 1, "loading map: ", 13);
+    var mn_len = strlen(map_name);
+    syscall(1, 1, map_name, mn_len);
+    syscall(1, 1, "\n", 1);
 
-    # Dump WAD directory
-    wad_dump_directory();
-
-    # Look for E1M1
-    var e1m1_idx = wad_find_lump("E1M1");
-    if (e1m1_idx >= 0) {
-        syscall(1, 1, "found: E1M1 at lump ", 20);
-        fmt_int(e1m1_idx);
-        syscall(1, 1, "\n", 1);
-    } else {
-        syscall(1, 1, "E1M1 not found in WAD\n", 22);
+    if (map_load(map_name) != 0) {
+        syscall(1, 2, "fatal: cannot load map\n", 23);
+        wad_close();
+        syscall(60, 1);
     }
+
+    map_print_stats();
+
+    # Find player start
+    if (map_find_player_start() != 0) {
+        syscall(1, 2, "warn: no player 1 start, using origin\n", 38);
+        player_start_x = 0;
+        player_start_y = 0;
+        player_start_angle = 0;
+    }
+
+    syscall(1, 1, "player start: x=", 16);
+    fmt_int(fixed_to_int(player_start_x));
+    syscall(1, 1, " y=", 3);
+    fmt_int(fixed_to_int(player_start_y));
+    syscall(1, 1, " angle=", 7);
+    fmt_int(player_start_angle);
+    syscall(1, 1, "\n", 1);
+
+    # Set view to player start
+    view_x = player_start_x;
+    view_y = player_start_y;
+    view_angle = player_start_angle;
+
+    # Render a single frame from the player start position
+    syscall(1, 1, "rendering frame...\n", 19);
+    render_frame();
+
+    # Write rendered frame as PPM for inspection
+    framebuf_write_ppm("/tmp/doom_e1m1.ppm");
+    syscall(1, 1, "wrote: /tmp/doom_e1m1.ppm\n", 26);
+
+    # Also write to framebuffer if available
+    framebuf_flip();
 
     # Cleanup
     wad_close();
