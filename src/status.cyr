@@ -211,39 +211,40 @@ fn status_draw_arms(px, py) {
 # ================================================================
 
 fn status_render() {
-    # Background
-    framebuf_fill_rect(0, STBAR_Y, SCREEN_WIDTH, STBAR_HEIGHT, STBAR_BG_COLOR);
-
-    # Horizontal separator line
+    # Background (dark grey)
+    framebuf_fill_rect(0, STBAR_Y, SCREEN_WIDTH, STBAR_HEIGHT, 104);
     framebuf_hline(0, SCREEN_WIDTH - 1, STBAR_Y, 96);
 
-    # AMMO (current weapon ammo count)
+    # Layout matches original DOOM status bar (320px wide, 32px tall)
+    var sy = STBAR_Y + 3;
+
+    # AMMO (current weapon) — left side, large digits
     var ammo = player_ammo_bullets;
     if (player_weapon == 3) { ammo = player_ammo_shells; }
     if (player_weapon == 5) { ammo = player_ammo_rockets; }
     if (player_weapon == 6) { ammo = player_ammo_cells; }
-    status_draw_number(ammo, 8, STBAR_Y + 8, 176);
+    status_draw_number(ammo, 14, sy + 6, 176);
 
-    # HEALTH
-    status_draw_percent(player_health, 60, STBAR_Y + 8, 176);
+    # HEALTH — with % sign
+    status_draw_percent(player_health, 64, sy + 6, 176);
 
-    # ARMS
-    status_draw_arms(116, STBAR_Y + 6);
+    # ARMS — weapon number grid
+    status_draw_arms(111, sy + 4);
 
-    # FACE
-    status_draw_face(148, STBAR_Y + 4);
+    # FACE — centered at x=143, 31px wide box
+    status_draw_face(146, sy + 1);
 
-    # ARMOR
-    status_draw_percent(player_armor, 188, STBAR_Y + 8, 176);
+    # ARMOR — with % sign
+    status_draw_percent(player_armor, 197, sy + 6, 176);
 
-    # KEYS
-    status_draw_keys(232, STBAR_Y + 6);
+    # KEYS — 3 colored indicators
+    status_draw_keys(239, sy + 3);
 
-    # AMMO totals (right side)
-    status_draw_number(player_ammo_bullets, 260, STBAR_Y + 4, 96);
-    status_draw_number(player_ammo_shells, 260, STBAR_Y + 12, 96);
-    status_draw_number(player_ammo_rockets, 260, STBAR_Y + 20, 96);
-    status_draw_number(player_ammo_cells, 296, STBAR_Y + 4, 96);
+    # AMMO totals — right side, 4 rows
+    status_draw_number(player_ammo_bullets, 278, sy + 2, 96);
+    status_draw_number(player_ammo_shells, 278, sy + 9, 96);
+    status_draw_number(player_ammo_rockets, 278, sy + 16, 96);
+    status_draw_number(player_ammo_cells, 278, sy + 23, 96);
 
     return 0;
 }

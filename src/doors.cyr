@@ -260,9 +260,6 @@ fn doors_use() {
 
     var special = load64(map_linedefs + best_line * MAP_LINEDEF_SIZE + 24);
 
-    # Common door specials: 1 (open wait close), 26-28 (keyed doors), 31 (open stay)
-    # Common lift specials: 62 (lower wait raise), 88 (lower wait raise fast)
-    # We handle the most common ones
     var rs = map_linedef_side_right(best_line);
     var ls = map_linedef_side_left(best_line);
 
@@ -270,16 +267,96 @@ fn doors_use() {
     var door_sec = 0 - 1;
     if (ls >= 0) { door_sec = map_sidedef_sector(ls); }
 
+    # Doors (open wait close)
     if (special == 1) { if (door_sec >= 0) { door_open(door_sec); } }
     if (special == 31) { if (door_sec >= 0) { door_open(door_sec); } }
     if (special == 26) { if (door_sec >= 0) { door_open(door_sec); } }
     if (special == 27) { if (door_sec >= 0) { door_open(door_sec); } }
     if (special == 28) { if (door_sec >= 0) { door_open(door_sec); } }
     if (special == 117) { if (door_sec >= 0) { door_open(door_sec); } }
+    if (special == 63) { if (door_sec >= 0) { door_open(door_sec); } }
+    if (special == 29) { if (door_sec >= 0) { door_open(door_sec); } }
+    if (special == 90) { if (door_sec >= 0) { door_open(door_sec); } }
 
     # Lifts
     if (special == 62) { if (door_sec >= 0) { lift_activate(door_sec); } }
     if (special == 88) { if (door_sec >= 0) { lift_activate(door_sec); } }
+    if (special == 10) { if (door_sec >= 0) { lift_activate(door_sec); } }
+    if (special == 21) { if (door_sec >= 0) { lift_activate(door_sec); } }
+    if (special == 121) { if (door_sec >= 0) { lift_activate(door_sec); } }
+    if (special == 122) { if (door_sec >= 0) { lift_activate(door_sec); } }
 
+    # Switches that open doors/lifts on tagged sectors
+    # Type 103 = open door (tag), 23 = lower floor, etc.
+    var tag = load64(map_linedefs + best_line * MAP_LINEDEF_SIZE + 32);
+    if (tag > 0) {
+        # Find sectors with matching tag
+        for (var si = 0; si < map_num_sectors; si = si + 1) {
+            var stag = load64(map_sectors + si * MAP_SECTOR_SIZE + 48);
+            if (stag == tag) {
+                if (special == 103) { door_open(si); }
+                if (special == 23) { lift_activate(si); }
+                if (special == 102) { lift_activate(si); }
+                if (special == 38) { lift_activate(si); }
+                if (special == 70) { lift_activate(si); }
+                if (special == 71) { lift_activate(si); }
+            }
+        }
+    }
+
+    return 0;
+}
+
+# Walk-over triggers: check if player crossed a special linedef
+fn doors_walk_trigger(old_x, old_y, new_x, new_y) {
+    for (var i = 0; i < map_num_linedefs; i = i + 1) {
+        var special = load64(map_linedefs + i * MAP_LINEDEF_SIZE + 24);
+        if (special == 0) { continue; }
+
+        var is_walk = 0;
+        if (special == 2) { is_walk = 1; }
+        if (special == 4) { is_walk = 1; }
+        if (special == 88) { is_walk = 1; }
+        if (special == 10) { is_walk = 1; }
+        if (special == 38) { is_walk = 1; }
+        if (special == 70) { is_walk = 1; }
+        if (is_walk == 0) { continue; }
+
+        var v1 = map_linedef_v1(i);
+        var v2 = map_linedef_v2(i);
+        var lx1 = map_vertex_x(v1);
+        var ly1 = map_vertex_y(v1);
+        var lx2 = map_vertex_x(v2);
+        var ly2 = map_vertex_y(v2);
+
+        var mx = asr(lx1 + lx2, 1);
+        var my = asr(ly1 + ly2, 1);
+        if (fixed_approx_dist(mx - new_x, my - new_y) > 128 << 16) { continue; }
+
+        var ldx = lx2 - lx1;
+        var ldy = ly2 - ly1;
+        var os = asr(old_x - lx1, 8) * asr(ldy, 8) - asr(old_y - ly1, 8) * asr(ldx, 8);
+        var ns = asr(new_x - lx1, 8) * asr(ldy, 8) - asr(new_y - ly1, 8) * asr(ldx, 8);
+
+        var crossed = 0;
+        if (os >= 0) { if (ns < 0) { crossed = 1; } }
+        if (os < 0) { if (ns >= 0) { crossed = 1; } }
+        if (crossed == 0) { continue; }
+
+        var tag = load64(map_linedefs + i * MAP_LINEDEF_SIZE + 32);
+        if (tag > 0) {
+            for (var si = 0; si < map_num_sectors; si = si + 1) {
+                var stag = load64(map_sectors + si * MAP_SECTOR_SIZE + 48);
+                if (stag == tag) {
+                    if (special == 2) { door_open(si); }
+                    if (special == 4) { door_open(si); }
+                    if (special == 88) { lift_activate(si); }
+                    if (special == 10) { lift_activate(si); }
+                    if (special == 38) { lift_activate(si); }
+                    if (special == 70) { lift_activate(si); }
+                }
+            }
+        }
+    }
     return 0;
 }

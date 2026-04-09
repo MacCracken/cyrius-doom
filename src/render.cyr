@@ -87,9 +87,10 @@ fn render_draw_weapon(light_level) {
     if (loff >= 0x8000) { loff = loff - 0x10000; }
     if (toff >= 0x8000) { toff = toff - 0x10000; }
 
-    # Position weapon: DOOM centers at x=160, y offset from status bar
-    var sx = HALF_WIDTH + loff + 40;
-    var sy = SCREEN_HEIGHT - 32 + toff;
+    # Place weapon: origin at screen center, offset by sprite hotspot
+    # sx = screen center + signed offset positions the sprite correctly
+    var sx = HALF_WIDTH + loff + pw;
+    var sy = 168 + toff;
 
     for (var col = 0; col < pw; col = col + 1) {
         var scr_x = sx + col;

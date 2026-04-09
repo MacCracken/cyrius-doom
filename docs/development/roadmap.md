@@ -124,14 +124,26 @@
 | 4 | Visplane merging | Deferred | Performance is fine without it (2.9ms) |
 | 5 | Screen wipe | Deferred | Cosmetic, not needed for gameplay |
 
-## v0.16.0 — Level Transitions
+## v0.16.0 — Polish & Triggers (DONE)
 
 | # | Item | Status | Detail |
 |---|------|--------|--------|
-| 1 | Exit switch → next level | Not started | E1M1 → E1M2 etc. |
-| 2 | Intermission screen | Not started | Kill %, item %, secret %, time |
-| 3 | Secret exits | Not started | E1M3 → E1M9 |
-| 4 | Episode select | Not started | Knee Deep / Shores / Inferno |
+| 1 | Weapon position fix | Done | Proper signed offset math |
+| 2 | HUD layout fix | Done | Matches original DOOM proportions |
+| 3 | Doomguy face sprite | Done | STFST from WAD, 5 health levels |
+| 4 | Walk-over triggers | Done | Doors/lifts on linedef crossing |
+| 5 | Tagged sector support | Done | Switches activate remote sectors |
+| 6 | Extended specials | Done | 20+ linedef types supported |
+
+## v1.0.0 — Ship
+
+| # | Item | Status | Detail |
+|---|------|--------|--------|
+| 1 | Level transitions | Not started | Exit switch → next map |
+| 2 | Intermission screen | Not started | Kill %, item %, time |
+| 3 | Plays E1M1-E1M9 | Not started | Full episode 1 |
+| 4 | Runs on AGNOS kernel | Not started | Kernel framebuffer + PS/2 |
+| 5 | Runs on Linux /dev/fb0 | Not started | Userspace fallback |
 
 ## v1.0.0 — Ship
 

@@ -1,6 +1,6 @@
 [package]
 name = "cyrius-doom"
-version = "0.15.0"
+version = "0.16.0"
 description = "DOOM in Cyrius — 30-50KB, direct framebuffer, no libc, just syscalls."
 license = "GPL-3.0-only"
 repository = "https://github.com/MacCracken/cyrius-doom"

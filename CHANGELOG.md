@@ -5,6 +5,30 @@ All notable changes to cyrius-doom will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] - 2026-04-09
+
+### Fixed
+
+- **Weapon sprite position** — proper offset math using signed patch offsets
+- **HUD layout** — repositioned all elements to match original DOOM proportions (ammo, health, arms, face, armor, keys, totals)
+- **Status bar background** — dark grey (palette 104) instead of black
+- **Doomguy face** — loads actual STFST sprite from WAD with health-based frame selection (5 damage levels + dead)
+
+### Added
+
+- Walk-over linedef triggers — doors/lifts activate when player crosses trigger lines
+- Tagged sector support — switches and triggers find sectors by tag number
+- Additional door specials: 63, 29, 90
+- Additional lift specials: 10, 21, 121, 122
+- Switch-to-tagged-sector specials: 103, 23, 102, 38, 70, 71
+- Walk-over types: 2, 4, 88, 10, 38, 70
+
+### Changed
+
+- Binary size: 127KB
+- Source: 18 .cyr files
+- doors.cyr expanded with tagged sectors and walk triggers
+
 ## [0.15.0] - 2026-04-09
 
 ### Added

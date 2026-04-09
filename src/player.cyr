@@ -293,6 +293,10 @@ fn player_tick() {
         move_y = move_y + fixed_mul(fwd_cos, PLAYER_STRAFE_SPEED);
     }
 
+    # Save old position for walk-over trigger check
+    var old_px = player_x;
+    var old_py = player_y;
+
     # Try to move (with collision detection)
     if (move_x != 0) {
         if (move_y != 0) {
@@ -326,6 +330,10 @@ fn player_tick() {
         var floor = map_sector_floorh(sector) << 16;
         player_z = floor;
     }
+
+    # Check walk-over triggers
+    if (player_x != old_px) { doors_walk_trigger(old_px, old_py, player_x, player_y); }
+    if (player_y != old_py) { doors_walk_trigger(old_px, old_py, player_x, player_y); }
 
     # Sync view state with player
     view_x = player_x;
