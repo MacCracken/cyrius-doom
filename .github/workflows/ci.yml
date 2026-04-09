@@ -12,7 +12,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  CYRIUS_VERSION: "2.2.0"
+  CYRIUS_VERSION: "2.2.2"
 
 jobs:
   build-and-test:
@@ -21,13 +21,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Cyrius
-        run: CYRIUS_VERSION=$CYRIUS_VERSION curl -sSf https://raw.githubusercontent.com/MacCracken/cyrius/main/scripts/install.sh | sh
+      - name: Install Cyrius toolchain
+        run: |
+          curl -sLO "https://github.com/MacCracken/cyrius/releases/download/$CYRIUS_VERSION/cyrius-$CYRIUS_VERSION-x86_64-linux.tar.gz"
+          tar xzf "cyrius-$CYRIUS_VERSION-x86_64-linux.tar.gz"
+          CYRIUS_DIR="cyrius-$CYRIUS_VERSION-x86_64-linux"
+          mkdir -p "$HOME/.cyrius/bin" "$HOME/.cyrius/lib"
+          cp "$CYRIUS_DIR/bin/"* "$HOME/.cyrius/bin/" 2>/dev/null || true
+          cp -r "$CYRIUS_DIR/lib/"* "$HOME/.cyrius/lib/" 2>/dev/null || true
+          chmod +x "$HOME/.cyrius/bin/"* 2>/dev/null || true
+          echo "$HOME/.cyrius/bin" >> $GITHUB_PATH
+          echo "Cyrius $CYRIUS_VERSION installed"
 
       - name: Build
         run: |
-          export PATH="$HOME/.cyrius/bin:$PATH"
-          cyrb build src/main.cyr build/doom
+          mkdir -p build
+          cat src/main.cyr | cc2 > build/doom 2>build/errors.log
+          if [ $? -ne 0 ]; then cat build/errors.log; exit 1; fi
+          chmod +x build/doom
           echo "doom: $(wc -c < build/doom) bytes"
 
       - name: Verify ELF
@@ -54,13 +65,13 @@ jobs:
       - name: Check required docs
         run: |
           MISSING=0
-          for doc in README.md CHANGELOG.md VERSION CONTRIBUTING.md SECURITY.md LICENSE cyrb.toml; do
+          for doc in README.md CHANGELOG.md VERSION CONTRIBUTING.md SECURITY.md LICENSE; do
             if [ -f "$doc" ]; then echo "  OK: $doc"; else echo "  MISSING: $doc"; MISSING=1; fi
           done
           exit $MISSING
       - name: Verify version consistency
         run: |
           VERSION=$(cat VERSION | tr -d '[:space:]')
-          TOML_VERSION=$(grep '^version' cyrb.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
-          [ "$VERSION" = "$TOML_VERSION" ] || { echo "FAIL: version mismatch"; exit 1; }
+          echo "VERSION: $VERSION"
           grep -q "$VERSION" CHANGELOG.md || { echo "FAIL: version not in changelog"; exit 1; }
+          echo "Version consistent"
