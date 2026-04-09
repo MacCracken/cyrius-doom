@@ -1,0 +1,81 @@
+# level.cyr -- level progression and transitions
+# Usage: include "src/level.cyr" (after map.cyr, wad.cyr)
+#
+# Handles: current map tracking, next map selection, map reload
+
+# Current episode and map (1-based)
+var cur_episode = 1;
+var cur_map = 1;
+var next_level_flag = 0;
+var secret_exit_flag = 0;
+
+# Map name buffer
+var level_name_buf = 0;
+
+fn level_init() {
+    level_name_buf = alloc(8);
+    cur_episode = 1;
+    cur_map = 1;
+    next_level_flag = 0;
+    secret_exit_flag = 0;
+    return 0;
+}
+
+# Build map name string "E1M1" etc.
+fn level_get_name() {
+    store8(level_name_buf, 69);
+    store8(level_name_buf + 1, 48 + cur_episode);
+    store8(level_name_buf + 2, 77);
+    store8(level_name_buf + 3, 48 + cur_map);
+    store8(level_name_buf + 4, 0);
+    return level_name_buf;
+}
+
+# Trigger normal exit (special 11, 52, 124)
+fn level_exit_normal() {
+    next_level_flag = 1;
+    secret_exit_flag = 0;
+    return 0;
+}
+
+# Trigger secret exit (special 51)
+fn level_exit_secret() {
+    next_level_flag = 1;
+    secret_exit_flag = 1;
+    return 0;
+}
+
+# Advance to next map
+fn level_advance() {
+    if (secret_exit_flag == 1) {
+        # Secret exit: E1M3→E1M9, E2M5→E2M9, E3M6→E3M9
+        cur_map = 9;
+    } else {
+        if (cur_map == 9) {
+            # From secret level, go to next normal level
+            # E1M9→E1M4, E2M9→E2M6, E3M9→E3M7
+            if (cur_episode == 1) { cur_map = 4; }
+            if (cur_episode == 2) { cur_map = 6; }
+            if (cur_episode == 3) { cur_map = 7; }
+        } else {
+            if (cur_map == 8) {
+                # E1M8 = boss level, episode complete
+                # For now, wrap back to E1M1
+                cur_map = 1;
+            } else {
+                cur_map = cur_map + 1;
+            }
+        }
+    }
+    next_level_flag = 0;
+    secret_exit_flag = 0;
+    return 0;
+}
+
+# Set specific map (from command line or menu)
+fn level_set(episode, map) {
+    cur_episode = episode;
+    cur_map = map;
+    next_level_flag = 0;
+    return 0;
+}

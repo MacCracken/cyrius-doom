@@ -5,6 +5,25 @@ All notable changes to cyrius-doom will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.0] - 2026-04-09
+
+### Added
+
+- **level.cyr** — Level progression system (episode/map tracking, advance, secret exits)
+- Exit switch support: linedef special 11 (normal exit), 51 (secret exit)
+- Walk-over exit lines: special 52 (normal), 124 (secret)
+- Level advance logic: E1M1→E1M2→...→E1M8, E1M3→E1M9 (secret), E1M9→E1M4 (return)
+- `load_map()` function — reload all map state (geometry, things, doors, player) for transitions
+- Map name from command line: `./doom DOOM1.WAD E1M3` loads E1M3 directly
+- Verified all 9 maps of Episode 1 load and render (E1M1-E1M9)
+
+### Changed
+
+- Binary size: 129KB
+- main.cyr restructured with `load_map()` for level transitions
+- Game loop checks `next_level_flag` each tick for seamless map changes
+- Source: 19 .cyr files
+
 ## [0.16.0] - 2026-04-09
 
 ### Fixed

@@ -286,6 +286,10 @@ fn doors_use() {
     if (special == 121) { if (door_sec >= 0) { lift_activate(door_sec); } }
     if (special == 122) { if (door_sec >= 0) { lift_activate(door_sec); } }
 
+    # Exit switches
+    if (special == 11) { level_exit_normal(); return 0; }
+    if (special == 51) { level_exit_secret(); return 0; }
+
     # Switches that open doors/lifts on tagged sectors
     # Type 103 = open door (tag), 23 = lower floor, etc.
     var tag = load64(map_linedefs + best_line * MAP_LINEDEF_SIZE + 32);
@@ -320,6 +324,8 @@ fn doors_walk_trigger(old_x, old_y, new_x, new_y) {
         if (special == 10) { is_walk = 1; }
         if (special == 38) { is_walk = 1; }
         if (special == 70) { is_walk = 1; }
+        if (special == 52) { is_walk = 1; }
+        if (special == 124) { is_walk = 1; }
         if (is_walk == 0) { continue; }
 
         var v1 = map_linedef_v1(i);
@@ -342,6 +348,10 @@ fn doors_walk_trigger(old_x, old_y, new_x, new_y) {
         if (os >= 0) { if (ns < 0) { crossed = 1; } }
         if (os < 0) { if (ns >= 0) { crossed = 1; } }
         if (crossed == 0) { continue; }
+
+        # Exit lines
+        if (special == 52) { level_exit_normal(); return 0; }
+        if (special == 124) { level_exit_secret(); return 0; }
 
         var tag = load64(map_linedefs + i * MAP_LINEDEF_SIZE + 32);
         if (tag > 0) {
