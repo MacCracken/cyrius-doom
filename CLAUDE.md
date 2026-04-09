@@ -2,80 +2,162 @@
 
 ## Project Identity
 
-**cyrius-doom** — DOOM engine in Cyrius. Direct framebuffer, no libc, no SDL, kernel syscalls only.
+**cyrius-doom** (homage to id Software's DOOM, 1993) — Clean-room DOOM engine in Cyrius. Direct framebuffer, no libc, no SDL, kernel syscalls only.
 
 - **Type**: Standalone game binary / kernel demo
 - **License**: GPL-3.0-only (clean-room implementation)
-- **Language**: Cyrius (native)
+- **Language**: Cyrius (native, compiled via cc2)
 - **Version**: SemVer, version file at `VERSION`
-- **Target binary size**: 30-50KB
-- **Status**: Scaffolded, pre-implementation
+- **Binary size**: 107KB (all 13 modules), renders at 22ms/frame
+- **Status**: v0.10.0 — textured walls, floor flats, sprites, HUD, full game loop
+- **Genesis repo**: [agnosticos](https://github.com/MacCracken/agnosticos)
+- **Philosophy**: [AGNOS Philosophy](https://github.com/MacCracken/agnosticos/blob/main/docs/philosophy.md)
+- **Standards**: [First-Party Standards](https://github.com/MacCracken/agnosticos/blob/main/docs/development/applications/first-party-standards.md)
 
-## Genesis Layer
+## Consumers
 
-Part of **AGNOS** — an AI-native operating system. Genesis repo: `/home/macro/Repos/agnosticos`.
+AGNOS kernel (initrd demo), kiran (game engine reference), vidya (field notes / language research)
 
-- **Compiler**: `/home/macro/Repos/cyrius` (cc2)
-- **Kernel**: `/home/macro/Repos/agnos` (AGNOS kernel with PS/2 keyboard, timer, VFS, initrd)
-- **Standards**: `agnosticos/docs/development/applications/first-party-standards.md`
+**Composes**: bsp (spatial geometry, git dep tag 0.5.2), sakshi (tracing 0.7.0)
+
+## References
+
+These are the primary sources for clean-room implementation. Read before implementing.
+
+- **[Game Engine Black Book: DOOM](https://fabiensanglard.net/gebbdoom/)** — Fabien Sanglard's engine analysis (rendering pipeline, BSP, visplanes, sprites)
+- **[Unofficial DOOM Specs](https://doomwiki.org/wiki/WAD)** — WAD format, lump types, map data structures
+- **[DOOM Source Code](https://github.com/id-Software/DOOM)** — GPL-2.0 reference (DO NOT copy — read for understanding only)
+- **[DOOM1.WAD (shareware)](https://github.com/nneonneo/universal-doom)** — Test WAD, downloaded by `scripts/get-wad.sh`
+- **vidya** — `content/cyrius/field_notes.toml` documents Cyrius-specific lessons from this build
 
 ## Architecture
 
 ```
 src/
-  main.cyr        — entry, game loop (35Hz tick)
-  wad.cyr         — WAD parser (IWAD header, directory, lump load)
-  render.cyr      — BSP traversal, wall/floor/ceiling column rendering
-  map.cyr         — linedefs, sidedefs, sectors, segs, nodes, blockmap
-  things.cyr      — monsters, items, projectiles, AI state machine
-  player.cyr      — movement, shooting, collision detection
-  status.cyr      — HUD (health, ammo, arms, face)
-  input.cyr       — PS/2 scancodes → game actions
-  framebuf.cyr    — direct framebuffer writes (320x200 palette indexed)
-  fixed.cyr       — 16.16 fixed-point math
-  tables.cyr      — precomputed sin/cos/tan (1024 entries)
-  sound.cyr       — PC speaker (optional)
-  menu.cyr        — title screen, menus
-  tick.cyr        — timer-driven 35Hz game loop
+  main.cyr        — entry, game loop (35Hz tick), --ppm screenshot mode
+  fixed.cyr       — 16.16 fixed-point math, asr() for logical-shift workaround
+  tables.cyr      — 1024-entry sine table (Bhaskara I), atan2, trig wrappers
+  wad.cyr         — WAD parser (IWAD/PWAD, directory, lump read/cache)
+  framebuf.cyr    — 320x200 palette-indexed framebuffer, PPM output
+  map.cyr         — vertices, linedefs, sidedefs, sectors, segs, subsectors, BSP nodes, things
+  texture.cyr     — wall texture compositing from patches, flat cache, patch LRU cache
+  render.cyr      — BSP traversal, textured wall columns, COLORMAP lighting, visplane spans, sky
+  sprite.cyr      — thing sprites: distance sort, scale, clip to walls, sector lighting
+  input.cyr       — terminal raw mode, WASD + arrows, bitmask action flags
+  player.cyr      — movement, wall sliding collision, step height, ceiling check
+  tick.cyr        — 35Hz timer via clock_gettime + nanosleep
+  things.cyr      — monster AI state machine, item pickups, damage
+  status.cyr      — HUD: bitmap font, health/ammo/armor/face/keys
+  sound.cyr       — PC speaker tone queue via ioctl
+  menu.cyr        — title screen, main menu, skill select
 ```
 
 ## Key Constraints
 
-- **All math is 16.16 fixed-point** — no FPU, no floating point. Original DOOM ran on a 386.
-- **No libc** — direct syscalls for file I/O, framebuffer, keyboard, timer
-- **No memory allocator** — fixed buffers for map data, WAD lumps, framebuffer
+- **All math is 16.16 fixed-point** — no FPU. `asr()` required for right shifts (Cyrius >> is logical)
+- **No libc** — direct syscalls via `lib/io.cyr` for file I/O, framebuffer, keyboard, timer
+- **Heap-allocated data** — all large buffers via `alloc()` to stay under cc2's 256KB output limit
+- **Enums for constants** — saves gvar_toks slots (cc2 limit: 1024 initialized globals)
 - **320x200 resolution** — palette indexed (256 colors from WAD PLAYPAL lump)
 - **35Hz game tick** — matches original DOOM timing
-- **WAD files not included** — user provides DOOM1.WAD (shareware) or DOOM.WAD
+- **WAD files not included** — `scripts/get-wad.sh` downloads DOOM1.WAD shareware for testing
+- **Clean-room** — implemented from documented specs only, no id Software code copied
 
 ## Development Process
 
-### Work Loop
+### P(-1): Research (before implementing any module)
 
-1. **P(-1)** — Read DOOM Black Book / Unofficial DOOM Specs / vidya before implementing
-2. Implement module in Cyrius
-3. `cyrb build` — verify compilation
-4. Test against shareware WAD (DOOM1.WAD)
-5. Profile binary size — stay under 50KB budget
-6. Update CHANGELOG
+1. Read the relevant chapter in DOOM Black Book
+2. Read the Unofficial DOOM Specs for data format details
+3. Check `vidya/content/cyrius/field_notes.toml` for Cyrius-specific gotchas
+4. Check `vidya/content/cyrius/language.toml` for compiler constraints
+5. Document findings as comments in the source file header
 
-### Implementation Order
+### Work Loop (continuous)
 
-1. fixed.cyr + tables.cyr (math foundation)
-2. wad.cyr (can test independently — parse and dump lump directory)
-3. framebuf.cyr (can test independently — draw solid colors, gradients)
-4. map.cyr (load E1M1, dump geometry)
-5. render.cyr (BSP traversal, draw walls)
-6. input.cyr + player.cyr (move through level)
-7. things.cyr (monsters, items)
-8. status.cyr + menu.cyr (HUD, title screen)
-9. sound.cyr (PC speaker, optional)
-10. tick.cyr + main.cyr (tie it all together)
+1. Work phase — implement feature, fix bug, optimize
+2. Build check: `cyrius build src/main.cyr build/doom`
+3. Test: `./build/doom wad/DOOM1.WAD --ppm` (headless screenshot verification)
+4. Run fuzz harnesses: `cyrius fuzz` (fuzz/fuzz_wad.cyr, fuzz/fuzz_fixed.cyr)
+5. Binary size check — track growth per feature
+6. Review — performance (22ms frame budget), correctness (compare PPM to expected), memory (heap usage)
+7. Documentation — CHANGELOG, roadmap, vidya field notes for novel findings
+8. Version check — VERSION, cyrius.toml, main.cyr banner all in sync
+
+### Task Sizing
+
+- **Low/Medium**: Batch freely — multiple items per cycle
+- **Large**: Small bites — break into sub-tasks, verify each
+- **If unsure**: Treat as large. Research via vidya first, then externally for information
+
+### Refactoring
+
+- Refactor when the code tells you to — duplication, unclear boundaries, performance
+- Never refactor speculatively. Wait for the third instance
+- Every refactor must pass the same build + test + fuzz gates
+
+### Key Principles
+
+- **Never skip benchmarks.** 22ms frame time is the target. Measure before and after.
+- **Fuzz early.** The fuzz harnesses found 3 bugs that unit tests missed.
+- **asr() everywhere.** Cyrius >> is logical. Every right shift on signed values must use `asr()`.
+- **Lazy init guards.** `if (ptr == 0) { ptr = alloc(N); }` — prevents double-alloc and null deref.
+- **Enum for constants.** Saves gvar_toks slots — use `var` only for mutable state.
+- **Patch cache.** `pcache_get()` eliminates WAD I/O during rendering (200x speedup).
+- **Sakshi tracing.** All error paths use `sakshi_error/warn/info` — structured timestamped logging.
+
+## Build & Test Commands
+
+```sh
+# Build
+cyrius build src/main.cyr build/doom
+
+# Run (requires DOOM1.WAD)
+./build/doom wad/DOOM1.WAD              # interactive (needs /dev/fb0)
+./build/doom wad/DOOM1.WAD --ppm        # screenshot mode (headless)
+./build/doom wad/DOOM1.WAD E1M2 --ppm   # specific map
+
+# Download shareware WAD
+sh scripts/get-wad.sh wad
+
+# Fuzz
+cyrius fuzz
+
+# One-shot run
+sh scripts/run.sh
+```
 
 ## DO NOT
 
 - **Do not commit or push** — the user handles all git operations
 - **NEVER use `gh` CLI** — use `curl` to GitHub API only
-- Do not include WAD files in the repo
-- Do not copy id Software source code — this is a clean-room implementation from documented specs
+- Do not include WAD files in the repo (gitignored)
+- Do not copy id Software source code — clean-room implementation from documented specs only
 - Do not use floating point — all math is 16.16 fixed-point
+- Do not use bare `>>` on signed values — use `asr()` function
+- Do not skip fuzz testing before claiming robustness
+- Do not allocate with `var buf[N]` for buffers > 100 bytes — use `alloc()`
+
+## Documentation Structure
+
+```
+Root files (required):
+  README.md, CHANGELOG.md, CLAUDE.md, CONTRIBUTING.md, SECURITY.md,
+  CODE_OF_CONDUCT.md, LICENSE, VERSION, cyrius.toml
+
+docs/ (required):
+  architecture/overview.md — rendering pipeline, memory layout
+  development/roadmap.md — per-version milestones with status
+
+scripts/:
+  get-wad.sh — download DOOM1.WAD shareware
+  run.sh — one-shot build + run
+
+fuzz/:
+  fuzz_wad.cyr — WAD parser with random malformed inputs
+  fuzz_fixed.cyr — fixed-point math with extreme values
+```
+
+## CHANGELOG Format
+
+Follow [Keep a Changelog](https://keepachangelog.com/). Performance claims MUST include benchmark numbers (frame time, binary size). Every version bump updates VERSION + cyrius.toml + cyrius.toml + main.cyr banner.
