@@ -113,23 +113,66 @@ fn status_face_color() {
     return 40;
 }
 
-# Draw face as a simple colored block
+# Face sprite buffer
+var face_patch_buf = 0;
+
 fn status_draw_face(px, py) {
-    var color = status_face_color();
-    framebuf_fill_rect(px, py, 24, 24, color);
+    if (face_patch_buf == 0) { face_patch_buf = alloc(4096); }
 
-    # Eyes
-    framebuf_pixel(px + 7, py + 8, 0);
-    framebuf_pixel(px + 8, py + 8, 0);
-    framebuf_pixel(px + 15, py + 8, 0);
-    framebuf_pixel(px + 16, py + 8, 0);
-
-    # Mouth (wider when hurt)
-    if (player_health > 50) {
-        framebuf_hline(px + 8, px + 15, py + 16, 0);
+    # Select face based on health: STFST00 (healthy) to STFST40 (near death)
+    var face_name = alloc(8);
+    memcpy(face_name, "STFST", 5);
+    var health_level = 0;
+    if (player_health < 80) { health_level = 1; }
+    if (player_health < 60) { health_level = 2; }
+    if (player_health < 40) { health_level = 3; }
+    if (player_health < 20) { health_level = 4; }
+    if (player_health <= 0) {
+        memcpy(face_name, "STFDEAD", 7);
+        store8(face_name + 7, 48);
     } else {
-        framebuf_hline(px + 6, px + 17, py + 16, 0);
-        framebuf_hline(px + 7, px + 16, py + 17, 0);
+        store8(face_name + 5, 48 + health_level);
+        store8(face_name + 6, 48);
+        store8(face_name + 7, 0);
+    }
+
+    var lump = wad_find_lump(face_name);
+    if (lump < 0) {
+        # Fallback: colored block
+        framebuf_fill_rect(px, py, 24, 24, status_face_color());
+        return 0;
+    }
+
+    var psz = wad_lump_size(lump);
+    if (psz > 4096) { return 0; }
+    wad_read_lump_into(lump, face_patch_buf, psz);
+
+    var pw = read_le16(face_patch_buf);
+    var ph = read_le16(face_patch_buf + 2);
+
+    # Draw patch columns
+    for (var col = 0; col < pw; col = col + 1) {
+        var scr_x = px + col;
+        if (scr_x >= SCREEN_WIDTH) { continue; }
+
+        var col_off = read_le32(face_patch_buf + 8 + col * 4);
+        var post = face_patch_buf + col_off;
+
+        var safety = 0;
+        while (safety < 64) {
+            var td = load8(post);
+            if (td == 255) { break; }
+            var length = load8(post + 1);
+            var pixels = post + 3;
+            for (var row = 0; row < length; row = row + 1) {
+                var scr_y = py + td + row;
+                if (scr_y >= SCREEN_HEIGHT) { continue; }
+                var pal = load8(pixels + row);
+                if (pal != 0) { framebuf_pixel(scr_x, scr_y, pal); }
+            }
+            post = post + 4 + length;
+            safety = safety + 1;
+        }
     }
     return 0;
 }
