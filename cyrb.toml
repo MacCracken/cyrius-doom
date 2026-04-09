@@ -1,5 +1,5 @@
 name = "cyrius-doom"
-version = "0.5.0"
+version = "0.5.1"
 license = "GPL-3.0-only"
 entry = "src/main.cyr"
 output = "doom"

@@ -31,7 +31,7 @@ fn doom_main() {
     alloc_init();
     args_init();
 
-    syscall(1, 1, "cyrius-doom v0.5.0\n", 19);
+    syscall(1, 1, "cyrius-doom v0.5.1\n", 19);
     if (argc() < 2) { syscall(1, 2, "usage: doom <wad> [map]\n", 24); syscall(60, 1); }
 
     tables_init();

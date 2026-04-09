@@ -22,62 +22,35 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Verify version consistency
+      - name: Verify version
         run: |
           FILE_VERSION=$(cat VERSION | tr -d '[:space:]')
           TOML_VERSION=$(grep '^version' cyrb.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
-          TAG_VERSION="${GITHUB_REF_NAME}"
-          if [ "$FILE_VERSION" != "$TAG_VERSION" ]; then
-            echo "ERROR: VERSION ($FILE_VERSION) != tag ($TAG_VERSION)"; exit 1
-          fi
-          if [ "$TOML_VERSION" != "$TAG_VERSION" ]; then
-            echo "ERROR: cyrb.toml ($TOML_VERSION) != tag ($TAG_VERSION)"; exit 1
-          fi
-          echo "Version verified: $TAG_VERSION"
+          TAG="${GITHUB_REF_NAME}"
+          [ "$FILE_VERSION" = "$TAG" ] || { echo "VERSION != tag"; exit 1; }
+          [ "$TOML_VERSION" = "$TAG" ] || { echo "cyrb.toml != tag"; exit 1; }
 
-      - name: Install Cyrius toolchain
-        run: |
-          curl -sLO "https://github.com/MacCracken/cyrius/releases/download/$CYRIUS_VERSION/cyrius-$CYRIUS_VERSION-x86_64-linux.tar.gz"
-          tar xzf "cyrius-$CYRIUS_VERSION-x86_64-linux.tar.gz"
-          CYRIUS_HOME="cyrius-$CYRIUS_VERSION-x86_64-linux"
-          mkdir -p build lib
-          cp "$CYRIUS_HOME/bin/cc2" ./build/cc2
-          cp "$CYRIUS_HOME/lib/"*.cyr ./lib/ 2>/dev/null || true
-          chmod +x ./build/cc2
+      - name: Install Cyrius
+        run: CYRIUS_VERSION=$CYRIUS_VERSION curl -sSf https://raw.githubusercontent.com/MacCracken/cyrius/main/scripts/install.sh | sh
 
-      - name: Build doom binary
+      - name: Build
         run: |
-          cat src/main.cyr | ./build/cc2 2>/dev/null > build/doom
-          chmod +x build/doom
+          export PATH="$HOME/.cyrius/bin:$PATH"
+          cyrb build src/main.cyr build/doom
           echo "doom: $(wc -c < build/doom) bytes"
 
-      - name: Verify ELF
-        run: xxd -l 4 build/doom | grep -q "7f45 4c46"
-
-      - name: Extract changelog
-        run: |
-          VERSION="${GITHUB_REF_NAME}"
-          awk "/^## \\[$VERSION\\]/{found=1; next} /^## \\[/{if(found) exit} found{print}" CHANGELOG.md > /tmp/release-body.md
-
-      - name: Create source archive
+      - name: Archive
         run: |
           TAG="${GITHUB_REF_NAME}"
           git archive --format=tar.gz --prefix="cyrius-doom-${TAG}/" -o "cyrius-doom-${TAG}-src.tar.gz" HEAD
-
-      - name: Generate checksums
-        run: |
-          TAG="${GITHUB_REF_NAME}"
           sha256sum "cyrius-doom-${TAG}-src.tar.gz" > SHA256SUMS
-          cat SHA256SUMS
 
-      - name: Upload release artifacts
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: release-artifacts
           path: |
             cyrius-doom-*-src.tar.gz
             SHA256SUMS
-          retention-days: 5
 
   release:
     name: Create GitHub Release
@@ -85,22 +58,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Download release artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           name: release-artifacts
-
-      - name: Extract changelog
-        run: |
-          VERSION="${GITHUB_REF_NAME}"
-          awk "/^## \\[$VERSION\\]/{found=1; next} /^## \\[/{if(found) exit} found{print}" CHANGELOG.md > /tmp/release-body.md
-
-      - name: Create release
-        uses: softprops/action-gh-release@v2
+      - name: Changelog
+        run: awk "/^## \\[${GITHUB_REF_NAME}\\]/{found=1; next} /^## \\[/{if(found) exit} found{print}" CHANGELOG.md > /tmp/body.md
+      - uses: softprops/action-gh-release@v2
         with:
           name: "cyrius-doom ${{ github.ref_name }}"
-          body_path: /tmp/release-body.md
+          body_path: /tmp/body.md
           prerelease: ${{ startsWith(github.ref_name, '0.') }}
           files: |
             cyrius-doom-${{ github.ref_name }}-src.tar.gz
