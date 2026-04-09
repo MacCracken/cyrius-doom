@@ -19,7 +19,7 @@ var fb_fd = 0 - 1;
 fn framebuf_init() {
     screen_buf = alloc(64000);
     rgb_buf = alloc(256000);
-    palette = alloc(768);
+    if (palette == 0) { palette = alloc(768); }
 
     fb_fd = file_open("/dev/fb0", 2, 0);
     if (fb_fd < 0) {

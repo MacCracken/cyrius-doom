@@ -59,6 +59,7 @@ fn doom_main() {
     }
 
     framebuf_init();
+    render_load_colormap();
 
     var ppm_mode = 0;
     var map_name = "E1M1";
@@ -89,7 +90,26 @@ fn doom_main() {
         view_x = player_start_x();
         view_y = player_start_y();
         view_angle = player_start_angle();
+
+        view_x = player_start_x();
+        view_y = player_start_y();
+        view_angle = player_start_angle();
+        syscall(1, 1, "view: ", 6);
+        fmt_int(fixed_to_int(view_x)); syscall(1, 1, ",", 1);
+        fmt_int(fixed_to_int(view_y)); syscall(1, 1, " a=", 3);
+        fmt_int(view_angle); syscall(1, 1, "\n", 1);
+
         render_frame();
+
+        # Count non-zero pixels
+        var nz = 0;
+        for (var pi = 0; pi < 64000; pi = pi + 1) {
+            if (load8(screen_buf + pi) != 0) { nz = nz + 1; }
+        }
+        syscall(1, 1, "pixels: ", 8); fmt_int(nz);
+        syscall(1, 1, "/64000 clip=", 12); fmt_int(clip_count);
+        syscall(1, 1, "/320\n", 5);
+
         framebuf_write_ppm("/tmp/doom_e1m1.ppm");
         sakshi_info("wrote /tmp/doom_e1m1.ppm", 24);
         wad_close();

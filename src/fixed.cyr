@@ -1,15 +1,13 @@
 # fixed.cyr -- 16.16 fixed-point math for DOOM
-# Usage: include "src/fixed.cyr"
+#
+# IMPORTANT: Cyrius >> is LOGICAL right shift (zero-fill).
+# All functions must handle negative values explicitly.
 
-# Constants as enum to avoid gvar_toks overflow
 enum Fixed {
-    FIXED_ZERO = 0;
     FIXED_ONE = 65536;
     FIXED_HALF = 32768;
-    FIXED_TWO = 131072;
-    FIXED_FRAC_MASK = 65535;
-    FIXED_SHIFT = 16;
     FIXED_MAX = 2147483647;
+    FIXED_SHIFT = 16;
 }
 
 enum Angle {
@@ -21,24 +19,26 @@ enum Angle {
     ANG_MASK = 1023;
 }
 
-# These need runtime computation (negative values)
 var FIXED_NEG_ONE = 0 - 65536;
 var FIXED_MIN = 0 - 2147483648;
 var FIXED_PI = 205887;
 var FIXED_2PI = 411775;
 var FIXED_PI_HALF = 102944;
 
-fn fixed_from_int(n) { return n << 16; }
-
-fn fixed_to_int(f) {
-    if (f >= 0) { return f >> 16; }
-    return (f >> 16) | (0 - 1 << 48);
+# Arithmetic right shift (sign-preserving)
+fn asr(val, bits) {
+    if (val >= 0) { return val >> bits; }
+    var pos = 0 - val;
+    return 0 - (pos >> bits);
 }
 
-fn fixed_round(f) { return (f + FIXED_HALF) >> 16; }
-fn fixed_add(a, b) { return a + b; }
-fn fixed_sub(a, b) { return a - b; }
-fn fixed_mul(a, b) { return (a * b) >> 16; }
+fn fixed_from_int(n) { return n << 16; }
+fn fixed_to_int(f) { return asr(f, 16); }
+fn fixed_round(f) { return asr(f + FIXED_HALF, 16); }
+
+fn fixed_mul(a, b) {
+    return asr(a * b, 16);
+}
 
 fn fixed_div(a, b) {
     if (b == 0) { return FIXED_MAX; }
@@ -72,8 +72,8 @@ fn angle_sub(a, b) { return (a - b) & ANG_MASK; }
 fn fixed_approx_dist(dx, dy) {
     var adx = fixed_abs(dx);
     var ady = fixed_abs(dy);
-    if (adx > ady) { return adx + (ady >> 1); }
-    return ady + (adx >> 1);
+    if (adx > ady) { return adx + asr(ady, 1); }
+    return ady + asr(adx, 1);
 }
 
 fn fixed_dot2(ax, ay, bx, by) {

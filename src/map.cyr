@@ -130,8 +130,11 @@ fn map_is_subsector(child) {
 fn map_subsector_idx(child) { return child & 0x7FFF; }
 
 fn sign_extend_16(val) {
-    if ((val & 0x8000) != 0) { return val | (0 - 65536); }
-    return val;
+    var lo = val & 0xFFFF;
+    if (lo >= 0x8000) {
+        return lo - 0x10000;
+    }
+    return lo;
 }
 
 # Load a map from the WAD
@@ -284,8 +287,10 @@ fn map_load(map_name) {
     for (var i = 0; i < map_num_things; i = i + 1) {
         var src = data + i * 10;
         var base = map_things + i * MAP_THING_SIZE;
-        store64(base, sign_extend_16(read_le16(src)) << 16);
-        store64(base + 8, sign_extend_16(read_le16(src + 2)) << 16);
+        var tx = sign_extend_16(read_le16(src));
+        var ty = sign_extend_16(read_le16(src + 2));
+        store64(base, tx << 16);
+        store64(base + 8, ty << 16);
         store64(base + 16, read_le16(src + 4));
         store64(base + 24, read_le16(src + 6));
         store64(base + 32, read_le16(src + 8));
@@ -324,8 +329,8 @@ fn map_point_on_side(x, y, node_idx) {
     var ndy = map_node_dy(node_idx);
     var dx = x - nx;
     var dy = y - ny;
-    var left = ((dx >> 8) * (ndy >> 8)) >> 0;
-    var right = ((dy >> 8) * (ndx >> 8)) >> 0;
+    var left = asr(dx, 8) * asr(ndy, 8);
+    var right = asr(dy, 8) * asr(ndx, 8);
     if (left >= right) { return 0; }
     return 1;
 }

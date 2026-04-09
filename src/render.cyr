@@ -43,6 +43,28 @@ var clip_solid = 0;
 # Number of fully occluded columns (early-out when all 320 are done)
 var clip_count = 0;
 
+# COLORMAP: 34 light levels * 256 palette entries = 8704 bytes
+# Loaded from WAD, used for proper DOOM lighting
+var colormap = 0;
+
+fn render_load_colormap() {
+    var idx = wad_find_lump("COLORMAP");
+    if (idx >= 0) {
+        colormap = alloc(8704);
+        wad_read_lump_into(idx, colormap, 8704);
+    }
+    return 0;
+}
+
+# Apply COLORMAP: given a base palette index and a light level (0=bright, 31=dark),
+# return the shaded palette index
+fn render_shade(pal_idx, light_level) {
+    if (colormap == 0) { return pal_idx; }
+    if (light_level < 0) { light_level = 0; }
+    if (light_level > 31) { light_level = 31; }
+    return load8(colormap + light_level * 256 + pal_idx);
+}
+
 fn render_init_clip() {
     if (clip_top == 0) {
         clip_top = alloc(2560);
@@ -192,11 +214,31 @@ fn render_seg(seg_idx) {
     var ceil_h = map_sector_ceilh(sector_idx);
     var light = map_sector_light(sector_idx);
 
-    # Choose wall color based on light level (map to palette index)
-    # Light ranges 0-255 in DOOM; map to palette index for now
-    var wall_color = light / 16;
-    if (wall_color > 15) { wall_color = 15; }
-    if (wall_color < 1) { wall_color = 1; }
+    # Base COLORMAP level from sector light (0=full bright, 31=dark)
+    # DOOM formula: sector_light ranges 0-255, COLORMAP has 32 levels
+    var base_light = 31 - (light >> 3);
+    if (base_light < 0) { base_light = 0; }
+    if (base_light > 31) { base_light = 31; }
+
+    # Wall orientation: N/S vs E/W (DOOM dims N/S by ~2 COLORMAP levels)
+    var seg_dx = fixed_abs(map_vertex_x(v2_idx) - map_vertex_x(v1_idx));
+    var seg_dy = fixed_abs(map_vertex_y(v2_idx) - map_vertex_y(v1_idx));
+    var orient_dim = 0;
+    if (seg_dx > seg_dy) {
+        # N/S facing wall: dim by 2 levels
+        orient_dim = 2;
+    }
+
+    # Base palette indices for wall, ceiling, floor
+    # Without textures, we use characteristic palette colors:
+    # Walls: 96 (grey), ceiling: 192 (blue) or 104 (dark grey), floor: 128 (beige)
+    var wall_base_pal = 96;
+    if (seg_dy > seg_dx) { wall_base_pal = 64; }
+
+    var ceil_base_pal = 192;
+    if (ceil_h <= 200) { ceil_base_pal = 104; }
+
+    var floor_base_pal = 128;
 
     # Check for two-sided linedef (portal to another sector)
     var is_twosided = map_linedef_flags(line_idx) & ML_TWOSIDED;
@@ -243,34 +285,48 @@ fn render_seg(seg_idx) {
         if (ceil_screen < ct) { ceil_screen = ct; }
         if (floor_screen > cb) { floor_screen = cb; }
 
-        # Draw ceiling (above wall top)
+        # Distance-based COLORMAP level: further = darker
+        # DOOM: each 128 map units adds ~1 COLORMAP level
+        var dist_dim = fixed_to_int(depth) / 96;
+        if (dist_dim < 0) { dist_dim = 0; }
+        if (dist_dim > 16) { dist_dim = 16; }
+
+        var col_light = base_light + dist_dim + orient_dim;
+        if (col_light > 31) { col_light = 31; }
+        if (col_light < 0) { col_light = 0; }
+
+        # Apply COLORMAP to get final shaded colors
+        var wall_color = render_shade(wall_base_pal, col_light);
+        var cc = render_shade(ceil_base_pal, col_light);
+        var fc = render_shade(floor_base_pal, col_light);
+
+        # Draw ceiling
         if (ceil_screen > ct) {
-            framebuf_vline(col, ct, ceil_screen - 1, 0);
+            framebuf_vline(col, ct, ceil_screen - 1, cc);
         }
 
-        # Draw floor (below wall bottom)
+        # Draw floor
         if (floor_screen < cb) {
-            framebuf_vline(col, floor_screen + 1, cb, 96);
+            framebuf_vline(col, floor_screen + 1, cb, fc);
         }
 
         if (is_twosided != 0) {
-            # Two-sided: draw upper and lower walls around portal opening
             var back_ceil_screen = HALF_HEIGHT - fixed_to_int(
                 fixed_div(fixed_mul((back_ceil_h << 16) - eye_h, PROJ_DIST), depth));
             var back_floor_screen = HALF_HEIGHT - fixed_to_int(
                 fixed_div(fixed_mul((back_floor_h << 16) - eye_h, PROJ_DIST), depth));
 
-            # Upper wall (between front ceiling and back ceiling)
+            # Upper wall
             if (back_ceil_screen > ceil_screen) {
                 framebuf_vline(col, ceil_screen, back_ceil_screen - 1, wall_color);
             }
 
-            # Lower wall (between back floor and front floor)
+            # Lower wall (step texture color)
             if (back_floor_screen < floor_screen) {
-                framebuf_vline(col, back_floor_screen + 1, floor_screen, wall_color + 16);
+                var lower_color = render_shade(128, col_light);
+                framebuf_vline(col, back_floor_screen + 1, floor_screen, lower_color);
             }
 
-            # Update clip to the portal opening
             if (back_ceil_screen > ct) {
                 store64(clip_top + col * 8, back_ceil_screen);
             }
@@ -278,10 +334,9 @@ fn render_seg(seg_idx) {
                 store64(clip_bottom + col * 8, back_floor_screen);
             }
         } else {
-            # One-sided: solid wall fills the whole opening
+            # One-sided: solid wall
             framebuf_vline(col, ceil_screen, floor_screen, wall_color);
 
-            # Mark column as fully occluded
             store64(clip_solid + col * 8, 1);
             clip_count = clip_count + 1;
         }
