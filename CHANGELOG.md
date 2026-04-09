@@ -5,6 +5,36 @@ All notable changes to cyrius-doom will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-04-08
+
+### Added
+
+- **texture.cyr** — Wall texture loading from WAD (PNAMES, TEXTURE1, patch compositing)
+- Patch-based column rendering: reads DOOM's column-major patch format (posts with transparency)
+- Texture name lookup via hash table for fast sidedef → texture resolution
+- Flat (floor/ceiling) texture cache: loads 64x64 raw images from F_START..F_END
+- DOOM COLORMAP integration: 34-level light-to-palette mapping from WAD
+- Distance-based COLORMAP shading: walls darken with depth using id Software's light curves
+- Directional wall dimming: N/S walls dimmed by 2 COLORMAP levels (matches original DOOM)
+- Per-sector ceiling colors: blue for tall/outdoor sectors, dark grey for indoor
+- Per-sector floor colors: beige/brown from palette ramp
+- `--ppm` screenshot mode for headless rendering and testing
+- `render_load_colormap()` and `render_shade()` for proper palette-based lighting
+- `texture_get_column()` composites multiple patches into a single texture column
+- `render_draw_tex_column()` draws textured wall columns with COLORMAP shading
+
+### Fixed
+
+- **Critical: Cyrius >> is logical, not arithmetic** — all fixed-point math with negative values was broken (black screen). Added `asr()` helper for sign-preserving right shift
+- Palette double-allocation: `framebuf_set_palette` and `framebuf_init` both allocated palette buffer, second one overwrote loaded data with zeros
+- `sign_extend_16` rewritten to use subtraction (`lo - 0x10000`) instead of OR with bitmask
+
+### Changed
+
+- Binary size: 70KB (was 63KB — texture system adds 7KB)
+- Wall rendering: textured columns (STARTAN3, LITE3, DOOR3, etc.) instead of solid colors
+- E1M1 renders with actual DOOM wall textures, COLORMAP lighting, distance shading
+
 ## [0.6.0] - 2026-04-08
 
 ### Added

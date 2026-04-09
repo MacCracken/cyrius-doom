@@ -57,14 +57,24 @@
 | 3 | BSP library integration | Not started | Replace inline BSP with bsp crate |
 | 4 | Binary size audit | Not started | Target under 50KB |
 
-## v0.7.0 — Textures + Sprites
+## v0.7.0 — Textures (DONE)
 
 | # | Item | Status | Detail |
 |---|------|--------|--------|
-| 1 | Wall texture mapping | Not started | Fixed-point U/V from WAD patches |
-| 2 | Floor/ceiling visplanes | Not started | Horizontal span rendering |
-| 3 | Sprite rendering | Not started | Sorted by distance, clipped to walls |
-| 4 | Palette lighting | Not started | COLORMAP lump, distance falloff |
+| 1 | Wall texture mapping | Done | Patch compositing, column rendering, U/V mapping |
+| 2 | COLORMAP lighting | Done | 34-level palette shading from WAD |
+| 3 | Distance shading | Done | Walls darken with depth via COLORMAP |
+| 4 | Directional wall dimming | Done | N/S vs E/W, matches original DOOM |
+| 5 | Flat texture loading | Done | 64x64 floor/ceiling images cached |
+| 6 | asr() fix for >> | Done | Logical-to-arithmetic shift, fixed all negative math |
+
+## v0.8.0 — Visplanes + Sprites
+
+| # | Item | Status | Detail |
+|---|------|--------|--------|
+| 1 | Floor/ceiling visplanes | Not started | Horizontal span rendering with flat textures |
+| 2 | Sprite rendering | Not started | Sorted by distance, clipped to walls |
+| 3 | Flat texture mapping | Not started | Apply loaded flats to floor/ceiling spans |
 
 ## v1.0.0 — Ship
 

@@ -30,7 +30,7 @@ fn doom_main() {
     alloc_init();
     args_init();
 
-    sakshi_info("cyrius-doom v0.6.0", 18);
+    sakshi_info("cyrius-doom v0.7.0", 18);
 
     if (argc() < 2) {
         sakshi_error("usage: doom <wad> [map] [--ppm]", 31);
