@@ -5,6 +5,22 @@ All notable changes to cyrius-doom will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.2] - 2026-04-08
+
+### Fixed
+
+- Segfault on startup: `framebuf_set_palette()` called before palette buffer allocated — added lazy init guard
+- Verified against real DOOM1.WAD shareware (1264 lumps, E1M1 loads correctly)
+
+### Added
+
+- `scripts/get-wad.sh` — downloads DOOM1.WAD shareware from nneonneo/universal-doom
+- `scripts/run.sh` — one-shot download + build + run
+- `fuzz/fuzz_wad.cyr` — WAD parser fuzz harness (1000 random inputs, zero crashes)
+- `fuzz/fuzz_fixed.cyr` — fixed-point math fuzz harness (50000 iterations, extreme values)
+- CI smoke test with real DOOM1.WAD
+- E1M1 stats: 467 vertices, 475 linedefs, 648 sidedefs, 85 sectors, 732 segs, 237 subsectors, 236 nodes, 138 things
+
 ## [0.5.1] - 2026-04-08
 
 ### Changed
