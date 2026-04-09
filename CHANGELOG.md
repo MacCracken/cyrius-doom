@@ -5,7 +5,45 @@ All notable changes to cyrius-doom will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.0] - Unreleased
+## [0.5.0] - 2026-04-08
+
+### Added
+
+- **fixed.cyr** — 16.16 fixed-point math (mul, div, abs, clamp, lerp, approx_dist)
+- **tables.cyr** — 1024-entry sine table via Bhaskara I approximation, atan2, trig wrappers
+- **wad.cyr** — WAD file parser (IWAD/PWAD magic, directory, lump read, name lookup)
+- **framebuf.cyr** — 320x200 palette-indexed framebuffer, vline/hline, palette-to-BGRA flip, PPM output
+- **map.cyr** — Full geometry loader: vertices, linedefs, sidedefs, sectors, segs, subsectors, BSP nodes, things
+- **render.cyr** — BSP traversal, view transform, near-plane clipping, column-by-column wall rendering, two-sided portals, per-column occlusion
+- **input.cyr** — Terminal raw mode, ESC sequence decoder, WASD + arrow keys, bitmask action flags
+- **player.cyr** — Movement (walk/run/strafe), wall sliding collision, step height + ceiling clearance checks, sector tracking
+- **tick.cyr** — 35Hz game timer via clock_gettime + nanosleep
+- **things.cyr** — Monster/item/decoration types, AI state machine (spawn/see/chase/attack/pain/die), item pickups, damage
+- **status.cyr** — HUD with 3x5 bitmap font, health/armor/ammo display, face, weapon slots, keys
+- **menu.cyr** — Title screen, main menu, skill select, cursor navigation
+- **sound.cyr** — PC speaker via ioctl (KIOCSOUND), tone queue, predefined effects
+- **main.cyr** — Full game loop: menu → load → input → AI → render → HUD → flip → wait
+- All data arrays heap-allocated to stay under cc2's 256KB output limit
+- Constants packed into enums to stay within 64 gvar_toks limit
+- Reads real DOOM1.WAD shareware files
+- All math is 16.16 fixed-point, no FPU
+
+### Build
+
+- Compiles with cc2 2.2.2+ (requires improved error reporting)
+- 9-module game loop binary: **56KB** (core without things/status/menu/sound: 45KB)
+- 3,094 lines of Cyrius across 14 source files
+- 64 initialized globals (at cc2 limit)
+
+### Known Limitations
+
+- things.cyr, status.cyr, menu.cyr, sound.cyr not yet included in game loop (need >64 gvar_toks)
+- No texture mapping (solid colors from sector light level)
+- No sprite rendering
+- No automap
+- Binary size 56KB exceeds 50KB target by 6KB
+
+## [0.1.0] - 2026-04-08
 
 ### Added
 

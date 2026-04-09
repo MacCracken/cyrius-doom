@@ -1,0 +1,15 @@
+name = "cyrius-doom"
+version = "0.5.0"
+license = "GPL-3.0-only"
+entry = "src/main.cyr"
+output = "doom"
+description = "DOOM in Cyrius — 56KB, direct framebuffer, no libc, just syscalls."
+repository = "https://github.com/MacCracken/cyrius-doom"
+
+[deps]
+stdlib = ["string", "alloc", "fmt", "args"]
+
+[deps.bsp]
+git = "https://github.com/MacCracken/bsp"
+tag = "0.5.0"
+modules = ["src/fixed.cyr", "src/aabb.cyr", "src/intersect.cyr", "src/tree.cyr", "src/traverse.cyr", "src/query.cyr", "src/blockmap.cyr", "src/frustum.cyr"]

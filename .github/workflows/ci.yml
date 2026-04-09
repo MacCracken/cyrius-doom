@@ -1,0 +1,118 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_call:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CYRIUS_VERSION: "2.2.0"
+
+jobs:
+  build-and-test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Cyrius toolchain
+        run: |
+          curl -sLO "https://github.com/MacCracken/cyrius/releases/download/$CYRIUS_VERSION/cyrius-$CYRIUS_VERSION-x86_64-linux.tar.gz"
+          tar xzf "cyrius-$CYRIUS_VERSION-x86_64-linux.tar.gz"
+          CYRIUS_HOME="cyrius-$CYRIUS_VERSION-x86_64-linux"
+          mkdir -p build lib
+          cp "$CYRIUS_HOME/bin/cc2" ./build/cc2
+          cp "$CYRIUS_HOME/bin/cyrb" ./build/cyrb 2>/dev/null || true
+          cp "$CYRIUS_HOME/lib/"*.cyr ./lib/ 2>/dev/null || true
+          chmod +x ./build/*
+          echo "Cyrius $CYRIUS_VERSION installed"
+
+      - name: Build doom binary
+        run: |
+          cat src/main.cyr | ./build/cc2 2>/dev/null > build/doom
+          chmod +x build/doom
+          SIZE=$(wc -c < build/doom)
+          echo "doom binary: $SIZE bytes"
+          if [ "$SIZE" -gt 65536 ]; then
+            echo "WARN: binary exceeds 64KB ($SIZE bytes)"
+          fi
+
+      - name: Verify ELF header
+        run: |
+          MAGIC=$(xxd -l 4 build/doom | head -1)
+          echo "$MAGIC" | grep -q "7f45 4c46" || { echo "FAIL: not a valid ELF"; exit 1; }
+          echo "PASS: valid ELF binary"
+
+  check:
+    name: Check & Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Cyrius toolchain
+        run: |
+          curl -sLO "https://github.com/MacCracken/cyrius/releases/download/$CYRIUS_VERSION/cyrius-$CYRIUS_VERSION-x86_64-linux.tar.gz"
+          tar xzf "cyrius-$CYRIUS_VERSION-x86_64-linux.tar.gz"
+          CYRIUS_HOME="cyrius-$CYRIUS_VERSION-x86_64-linux"
+          mkdir -p build lib
+          cp "$CYRIUS_HOME/bin/"* ./build/ 2>/dev/null || true
+          cp "$CYRIUS_HOME/lib/"*.cyr ./lib/ 2>/dev/null || true
+          chmod +x ./build/*
+
+      - name: Syntax check
+        run: |
+          cat src/main.cyr | ./build/cc2 2>/dev/null > /dev/null
+          echo "PASS: compiles"
+
+      - name: Source stats
+        run: |
+          echo "=== Source ==="
+          wc -l src/*.cyr
+          echo "=== Globals ==="
+          grep -c '^var .* = ' src/*.cyr lib/*.cyr 2>/dev/null | awk -F: '{sum+=$2} END{print "Total: " sum "/64"}'
+
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Scan for dangerous patterns
+        run: |
+          WARN=0
+          if grep -rn 'syscall(59' src/ 2>/dev/null | grep -v "# "; then
+            echo "WARN: raw execve in modules"; WARN=1
+          fi
+          if grep -rn '"/etc/' src/ 2>/dev/null; then
+            echo "WARN: system file access"; WARN=1
+          fi
+          echo "security scan complete (warnings: $WARN)"
+
+  docs:
+    name: Documentation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check required docs
+        run: |
+          MISSING=0
+          for doc in README.md CHANGELOG.md VERSION CONTRIBUTING.md SECURITY.md LICENSE cyrb.toml; do
+            if [ -f "$doc" ]; then echo "  OK: $doc"; else echo "  MISSING: $doc"; MISSING=1; fi
+          done
+          exit $MISSING
+
+      - name: Verify version consistency
+        run: |
+          VERSION=$(cat VERSION | tr -d '[:space:]')
+          TOML_VERSION=$(grep '^version' cyrb.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
+          echo "VERSION: $VERSION  cyrb.toml: $TOML_VERSION"
+          [ "$VERSION" = "$TOML_VERSION" ] || { echo "FAIL: version mismatch"; exit 1; }
+          grep -q "$VERSION" CHANGELOG.md || { echo "FAIL: version not in changelog"; exit 1; }
+          echo "Version consistent"
