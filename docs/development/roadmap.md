@@ -68,13 +68,23 @@
 | 5 | Flat texture loading | Done | 64x64 floor/ceiling images cached |
 | 6 | asr() fix for >> | Done | Logical-to-arithmetic shift, fixed all negative math |
 
-## v0.8.0 — Visplanes + Sprites
+## v0.8.0 — Flats (DONE)
 
 | # | Item | Status | Detail |
 |---|------|--------|--------|
-| 1 | Floor/ceiling visplanes | Not started | Horizontal span rendering with flat textures |
-| 2 | Sprite rendering | Not started | Sorted by distance, clipped to walls |
-| 3 | Flat texture mapping | Not started | Apply loaded flats to floor/ceiling spans |
+| 1 | Floor flat textures | Done | Per-pixel perspective mapping from sector flat names |
+| 2 | Ceiling flat textures | Done | Same technique, inverted Y plane |
+| 3 | Flat texture cache | Done | 64x64 raw palette images from F_START..F_END |
+| 4 | Distance shading on flats | Done | COLORMAP dimming with depth |
+
+## v0.9.0 — Sprites + Polish
+
+| # | Item | Status | Detail |
+|---|------|--------|--------|
+| 1 | Sprite rendering | Not started | Things drawn as billboards, sorted by distance |
+| 2 | Sprite clipping | Not started | Clip sprites to wall columns |
+| 3 | Performance: span-based flats | Not started | Horizontal spans instead of per-pixel |
+| 4 | Automap | Not started | 2D overhead view of explored areas |
 
 ## v1.0.0 — Ship
 

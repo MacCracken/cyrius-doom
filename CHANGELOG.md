@@ -5,6 +5,23 @@ All notable changes to cyrius-doom will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-04-08
+
+### Added
+
+- Floor/ceiling flat texture rendering with perspective mapping
+- Flat textures loaded from WAD (F_START..F_END, 64x64 raw palette indices)
+- Per-pixel world coordinate calculation for floor/ceiling spans
+- Sector floor/ceiling texture name accessors (`map_sector_floor_tex`, `map_sector_ceil_tex`)
+- Flat texture lookup via name hash (`flat_find`, `flat_get_pixel`)
+- Distance-based light dimming on floor/ceiling planes
+
+### Changed
+
+- Binary size: 74KB (was 70KB — floor/ceiling rendering adds 4KB)
+- Floor/ceiling now show actual DOOM flat textures (FLOOR4_8, etc.) instead of solid colors
+- Rendering time increased (per-pixel flat calculation) but produces correct perspective
+
 ## [0.7.0] - 2026-04-08
 
 ### Added

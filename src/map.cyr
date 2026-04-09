@@ -94,6 +94,8 @@ fn map_sidedef_sector(idx) { return load64(map_sidedefs + idx * MAP_SIDEDEF_SIZE
 
 fn map_sector_floorh(idx) { return load64(map_sectors + idx * MAP_SECTOR_SIZE); }
 fn map_sector_ceilh(idx) { return load64(map_sectors + idx * MAP_SECTOR_SIZE + 8); }
+fn map_sector_floor_tex(idx) { return map_sectors + idx * MAP_SECTOR_SIZE + 16; }
+fn map_sector_ceil_tex(idx) { return map_sectors + idx * MAP_SECTOR_SIZE + 24; }
 fn map_sector_light(idx) { return load64(map_sectors + idx * MAP_SECTOR_SIZE + 32); }
 fn map_sector_special(idx) { return load64(map_sectors + idx * MAP_SECTOR_SIZE + 40); }
 fn map_sector_tag(idx) { return load64(map_sectors + idx * MAP_SECTOR_SIZE + 48); }

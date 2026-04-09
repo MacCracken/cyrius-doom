@@ -68,6 +68,77 @@ fn render_shade(pal_idx, light_level) {
 # Column buffer for texture lookups (max 256 pixels tall)
 var tex_col_buf = 0;
 
+# Visplane tracking: for each screen row, store the floor/ceiling flat index + light
+# We draw floor/ceiling spans AFTER all walls, using the open regions
+# Floor span bounds: for each row y, track x_start and x_end
+var vp_floor_x1 = 0;
+var vp_floor_x2 = 0;
+var vp_ceil_x1 = 0;
+var vp_ceil_x2 = 0;
+
+fn render_init_visplanes() {
+    if (vp_floor_x1 == 0) {
+        vp_floor_x1 = alloc(200 * 8);
+        vp_floor_x2 = alloc(200 * 8);
+        vp_ceil_x1 = alloc(200 * 8);
+        vp_ceil_x2 = alloc(200 * 8);
+    }
+    for (var y = 0; y < SCREEN_HEIGHT; y = y + 1) {
+        store64(vp_floor_x1 + y * 8, SCREEN_WIDTH);
+        store64(vp_floor_x2 + y * 8, 0);
+        store64(vp_ceil_x1 + y * 8, SCREEN_WIDTH);
+        store64(vp_ceil_x2 + y * 8, 0);
+    }
+    return 0;
+}
+
+# Draw a single floor/ceiling span at screen row y, from x1 to x2
+# flat_idx = flat texture index, floor_h = world floor height
+# light = COLORMAP level
+fn render_flat_span(y, x1, x2, flat_idx, plane_h, light_level) {
+    if (flat_idx < 0) { return 0; }
+    if (x1 > x2) { return 0; }
+
+    # For screen row y, compute the world-space distance
+    # Original DOOM: distance = (plane_height * PROJ_DIST) / (y - HALF_HEIGHT)
+    # For floor: y > HALF_HEIGHT (below center)
+    # For ceiling: y < HALF_HEIGHT (above center)
+    var dy = y - HALF_HEIGHT;
+    if (dy == 0) { return 0; }
+
+    # plane_h is the height difference between eye and plane (fixed-point)
+    var dist = fixed_div(fixed_mul(plane_h, PROJ_DIST), fixed_abs(dy << 16));
+    if (dist <= 0) { return 0; }
+
+    # For each pixel in the span, compute world X,Y
+    for (var x = x1; x <= x2; x = x + 1) {
+        # Screen-relative X from center
+        var sx = x - HALF_WIDTH;
+
+        # World offset from view position
+        # wx = view_x + (dist * cos - sx_world * sin)
+        # wy = view_y + (dist * sin + sx_world * cos)
+        var sx_world = fixed_div(sx << 16, PROJ_DIST);
+        var step_x = fixed_mul(dist, view_cos) + fixed_mul(fixed_mul(sx_world, dist), view_sin);
+        var step_y = fixed_mul(dist, view_sin) - fixed_mul(fixed_mul(sx_world, dist), view_cos);
+
+        var wx = fixed_to_int(view_x + step_x);
+        var wy = fixed_to_int(view_y + step_y);
+
+        var pal = flat_get_pixel(flat_idx, wx & 63, wy & 63);
+
+        # Distance-based light dimming
+        var dist_dim = fixed_to_int(dist) / 96;
+        if (dist_dim < 0) { dist_dim = 0; }
+        if (dist_dim > 16) { dist_dim = 16; }
+        var lv = light_level + dist_dim;
+        if (lv > 31) { lv = 31; }
+
+        framebuf_pixel(x, y, render_shade(pal, lv));
+    }
+    return 0;
+}
+
 # Draw a textured wall column
 # x = screen column, y1/y2 = screen top/bottom
 # tex_idx = texture index, tex_col = texture column (U coord)
@@ -268,6 +339,13 @@ fn render_seg(seg_idx) {
     if (ceil_h <= 200) { ceil_base_pal = 104; }
     var floor_base_pal = 128;
 
+    # Floor/ceiling flat texture indices
+    var floor_flat = flat_find(map_sector_floor_tex(sector_idx));
+    var ceil_flat = flat_find(map_sector_ceil_tex(sector_idx));
+
+    # Eye height for floor plane distance calculation
+    var plane_eye_h = VIEW_HEIGHT;
+
     # Seg offset along linedef (for texture U coordinate)
     var seg_offset = map_seg_offset(seg_idx);
 
@@ -331,17 +409,46 @@ fn render_seg(seg_idx) {
         if (col_light > 31) { col_light = 31; }
         if (col_light < 0) { col_light = 0; }
 
-        var cc = render_shade(ceil_base_pal, col_light);
-        var fc = render_shade(floor_base_pal, col_light);
-
         # Draw ceiling
         if (ceil_screen > ct) {
-            framebuf_vline(col, ct, ceil_screen - 1, cc);
+            if (ceil_flat >= 0) {
+                for (var cy = ct; cy < ceil_screen; cy = cy + 1) {
+                    var cdy = HALF_HEIGHT - cy;
+                    if (cdy > 0) {
+                        var cdist = fixed_div(plane_eye_h, cdy << 16);
+                        var csx = fixed_div((col - HALF_WIDTH) << 16, PROJ_DIST);
+                        var cwx = view_x + fixed_mul(cdist, view_cos) + fixed_mul(fixed_mul(csx, cdist), view_sin);
+                        var cwy = view_y + fixed_mul(cdist, view_sin) - fixed_mul(fixed_mul(csx, cdist), view_cos);
+                        var cp = flat_get_pixel(ceil_flat, fixed_to_int(cwx) & 63, fixed_to_int(cwy) & 63);
+                        framebuf_pixel(col, cy, render_shade(cp, col_light));
+                    } else {
+                        framebuf_pixel(col, cy, render_shade(ceil_base_pal, col_light));
+                    }
+                }
+            } else {
+                framebuf_vline(col, ct, ceil_screen - 1, render_shade(ceil_base_pal, col_light));
+            }
         }
 
         # Draw floor
         if (floor_screen < cb) {
-            framebuf_vline(col, floor_screen + 1, cb, fc);
+            if (floor_flat >= 0) {
+                for (var fy = floor_screen + 1; fy <= cb; fy = fy + 1) {
+                    var fdy = fy - HALF_HEIGHT;
+                    if (fdy > 0) {
+                        var fdist = fixed_div(plane_eye_h, fdy << 16);
+                        var fsx = fixed_div((col - HALF_WIDTH) << 16, PROJ_DIST);
+                        var fwx = view_x + fixed_mul(fdist, view_cos) + fixed_mul(fixed_mul(fsx, fdist), view_sin);
+                        var fwy = view_y + fixed_mul(fdist, view_sin) - fixed_mul(fixed_mul(fsx, fdist), view_cos);
+                        var fp = flat_get_pixel(floor_flat, fixed_to_int(fwx) & 63, fixed_to_int(fwy) & 63);
+                        framebuf_pixel(col, fy, render_shade(fp, col_light));
+                    } else {
+                        framebuf_pixel(col, fy, render_shade(floor_base_pal, col_light));
+                    }
+                }
+            } else {
+                framebuf_vline(col, floor_screen + 1, cb, render_shade(floor_base_pal, col_light));
+            }
         }
 
         # Texture U coordinate for this column
