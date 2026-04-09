@@ -140,7 +140,7 @@ fn map_load(map_name) {
 
     var marker = wad_find_lump(map_name);
     if (marker < 0) {
-        file_write(2, "error: map not found\n", 21);
+        sakshi_error("map not found", 13);
         return 0 - 1;
     }
 

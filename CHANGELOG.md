@@ -5,6 +5,22 @@ All notable changes to cyrius-doom will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-04-08
+
+### Added
+
+- Sakshi 0.7.0 integration — structured logging with timestamps to stderr
+- All startup, WAD loading, map loading, and error paths emit `[INFO]`/`[WARN]`/`[ERROR]` traces
+- `--ppm` flag for headless screenshot mode (`./doom DOOM1.WAD --ppm`)
+- Debug-level tracing for subsystem init (tables, palette, player)
+- cc2 gvar_toks limit confirmed at 256 (not 64 as previously assumed)
+
+### Changed
+
+- Error messages use `sakshi_error()` instead of raw `file_write(2, ...)`
+- Binary size: 62KB (was 57KB — sakshi adds ~5KB)
+- Log output format: `[timestamp_ns] [LEVEL] message`
+
 ## [0.5.2] - 2026-04-08
 
 ### Fixed
