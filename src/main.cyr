@@ -20,6 +20,7 @@ include "src/framebuf.cyr"
 include "src/map.cyr"
 include "src/texture.cyr"
 include "src/render.cyr"
+include "src/sprite.cyr"
 include "src/input.cyr"
 include "src/player.cyr"
 include "src/tick.cyr"
@@ -30,7 +31,7 @@ fn doom_main() {
     alloc_init();
     args_init();
 
-    sakshi_info("cyrius-doom v0.8.0", 18);
+    sakshi_info("cyrius-doom v0.9.0", 18);
 
     if (argc() < 2) {
         sakshi_error("usage: doom <wad> [map] [--ppm]", 31);
@@ -63,6 +64,7 @@ fn doom_main() {
     render_load_colormap();
     sakshi_debug("loading textures", 16);
     texture_init();
+    sprite_init();
 
     var ppm_mode = 0;
     var map_name = "E1M1";
@@ -103,6 +105,7 @@ fn doom_main() {
         fmt_int(view_angle); syscall(1, 1, "\n", 1);
 
         render_frame();
+        sprite_render_all();
 
         # Count non-zero pixels
         var nz = 0;
@@ -132,6 +135,7 @@ fn doom_main() {
         if (input_quit == 1) { game_running = 0; continue; }
         player_tick();
         render_frame();
+        sprite_render_all();
         framebuf_flip();
         tick_wait();
     }

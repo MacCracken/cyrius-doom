@@ -77,14 +77,25 @@
 | 3 | Flat texture cache | Done | 64x64 raw palette images from F_START..F_END |
 | 4 | Distance shading on flats | Done | COLORMAP dimming with depth |
 
-## v0.9.0 — Sprites + Polish
+## v0.9.0 — Sprites (DONE)
 
 | # | Item | Status | Detail |
 |---|------|--------|--------|
-| 1 | Sprite rendering | Not started | Things drawn as billboards, sorted by distance |
-| 2 | Sprite clipping | Not started | Clip sprites to wall columns |
-| 3 | Performance: span-based flats | Not started | Horizontal spans instead of per-pixel |
-| 4 | Automap | Not started | 2D overhead view of explored areas |
+| 1 | Sprite rendering | Done | 35 thing types, patch column drawing |
+| 2 | Sprite clipping | Done | Clipped to wall clip_top/clip_bottom |
+| 3 | Distance sorting | Done | Back-to-front insertion sort |
+| 4 | Sector floor anchoring | Done | BSP walk for per-sprite floor height |
+| 5 | Sprite lighting | Done | COLORMAP + distance falloff |
+
+## v1.0.0 — Ship
+
+| # | Item | Status | Detail |
+|---|------|--------|--------|
+| 1 | Performance: span-based flats | Not started | Horizontal spans instead of per-pixel |
+| 2 | All 13 modules in game loop | Not started | Needs cyrius 2.4.0 gvar expansion |
+| 3 | Plays E1M1-E1M9 (shareware) | Not started | Full episode 1 |
+| 4 | Runs on AGNOS kernel | Not started | Kernel framebuffer + PS/2 |
+| 5 | Runs on Linux /dev/fb0 | Not started | Userspace fallback |
 
 ## v1.0.0 — Ship
 

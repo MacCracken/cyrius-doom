@@ -5,6 +5,29 @@ All notable changes to cyrius-doom will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-04-08
+
+### Added
+
+- **sprite.cyr** — Thing sprite rendering (monsters, items, decorations)
+- Sprite lookup table: 35 DoomEd thing types mapped to sprite prefixes
+- Back-to-front distance sorting (insertion sort) for correct overdraw
+- Sprite scaling by distance using projection math
+- Sprite clipping to wall column boundaries (clip_top/clip_bottom)
+- BSP sector lookup for per-sprite floor height and light level
+- Dedicated 16KB sprite patch buffer (avoids shared WAD lump buffer corruption)
+- COLORMAP shading on sprites with distance falloff
+
+### Fixed
+
+- Shared WAD lump buffer crash: sprites calling `wad_read_lump` in a loop overwrote previous patch data — now uses `wad_read_lump_into` with dedicated buffer
+- Removed `elif` usage (not supported by all cc2 versions) — replaced with data-driven lookup table
+
+### Changed
+
+- Binary size: 81KB (was 74KB — sprite system adds 7KB)
+- E1M1 renders with zombiemen, barrels, items, armor bonuses visible
+
 ## [0.8.0] - 2026-04-08
 
 ### Added

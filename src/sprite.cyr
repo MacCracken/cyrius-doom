@@ -1,0 +1,298 @@
+# sprite.cyr -- thing sprite rendering
+# Usage: include "src/sprite.cyr" (after render.cyr, texture.cyr, map.cyr)
+#
+# Each thing in the map has a sprite prefix (4 chars).
+# Sprite lump name = prefix + frame_letter + rotation_digit
+# e.g., TROOA1 = imp, frame A, rotation 1
+#
+# Sprites are rendered as billboards (always face the viewer)
+# sorted back-to-front and clipped to wall columns.
+
+# DoomEd type → sprite prefix mapping
+# We store the S_START lump range for fast lookups
+var sprite_s_start = 0;
+var sprite_s_end = 0;
+
+# Sorted draw list: thing index + distance, max 128 visible sprites
+var sprite_order = 0;
+var sprite_dist = 0;
+var sprite_visible = 0;
+
+# Per-column clip heights from wall rendering (reuse clip_top/clip_bottom)
+
+fn sprite_init() {
+    sprite_s_start = wad_find_lump("S_START");
+    sprite_s_end = wad_find_lump("S_END");
+    sprite_order = alloc(128 * 8);
+    sprite_dist = alloc(128 * 8);
+    sprite_build_lookup();
+    return 0;
+}
+
+# Sprite lookup table: pairs of (thing_type, sprite_name_as_i64)
+# Stored as heap array, populated on init
+var spr_lookup = 0;
+var spr_lookup_count = 0;
+
+fn sprite_add_lookup(ttype, name) {
+    store64(spr_lookup + spr_lookup_count * 16, ttype);
+    store64(spr_lookup + spr_lookup_count * 16 + 8, name);
+    spr_lookup_count = spr_lookup_count + 1;
+    return 0;
+}
+
+fn sprite_build_lookup() {
+    spr_lookup = alloc(64 * 16);
+    spr_lookup_count = 0;
+    sprite_add_lookup(3004, "POSS");
+    sprite_add_lookup(9, "SPOS");
+    sprite_add_lookup(3001, "TROO");
+    sprite_add_lookup(3002, "SARG");
+    sprite_add_lookup(3005, "HEAD");
+    sprite_add_lookup(3003, "BOSS");
+    sprite_add_lookup(3006, "SKUL");
+    sprite_add_lookup(2035, "BAR1");
+    sprite_add_lookup(2011, "STIM");
+    sprite_add_lookup(2012, "MEDI");
+    sprite_add_lookup(2014, "BON1");
+    sprite_add_lookup(2015, "BON2");
+    sprite_add_lookup(2018, "ARM1");
+    sprite_add_lookup(2019, "ARM2");
+    sprite_add_lookup(2007, "CLIP");
+    sprite_add_lookup(2048, "AMMO");
+    sprite_add_lookup(2008, "SHEL");
+    sprite_add_lookup(2001, "SHOT");
+    sprite_add_lookup(2002, "MGUN");
+    sprite_add_lookup(2003, "LAUN");
+    sprite_add_lookup(2006, "BFUG");
+    sprite_add_lookup(2005, "CSAW");
+    sprite_add_lookup(2013, "SOUL");
+    sprite_add_lookup(5, "BKEY");
+    sprite_add_lookup(6, "YKEY");
+    sprite_add_lookup(13, "RKEY");
+    sprite_add_lookup(2028, "COLU");
+    sprite_add_lookup(34, "CAND");
+    sprite_add_lookup(44, "TBLU");
+    sprite_add_lookup(45, "TGRN");
+    sprite_add_lookup(46, "TRED");
+    sprite_add_lookup(47, "SMIT");
+    sprite_add_lookup(48, "ELEC");
+    sprite_add_lookup(10, "PLAY");
+    sprite_add_lookup(12, "PLAY");
+    return 0;
+}
+
+# Find sprite lump for a thing type
+# Reusable prefix buffer (avoid alloc per call)
+var _spr_prefix = 0;
+
+fn sprite_find_lump(thing_type) {
+    if (_spr_prefix == 0) { _spr_prefix = alloc(8); }
+    var prefix = _spr_prefix;
+    store64(prefix, 0);
+
+    # Search lookup table
+    var found = 0;
+    for (var i = 0; i < spr_lookup_count; i = i + 1) {
+        if (load64(spr_lookup + i * 16) == thing_type) {
+            var name = load64(spr_lookup + i * 16 + 8);
+            memcpy(prefix, name, 4);
+            found = 1;
+            break;
+        }
+    }
+    if (found == 0) { return 0 - 1; }
+
+    # Try frame A rotation 0, then 1
+    store8(prefix + 4, 65);
+    store8(prefix + 5, 48);
+    store8(prefix + 6, 0);
+    var lump = wad_find_lump(prefix);
+    if (lump >= 0) { return lump; }
+
+    store8(prefix + 5, 49);
+    return wad_find_lump(prefix);
+}
+
+# Render all visible sprites for the current frame
+fn sprite_render_all() {
+    sprite_visible = 0;
+
+    # Collect visible things with distance
+    for (var i = 0; i < map_num_things; i = i + 1) {
+        if (sprite_visible >= 128) { break; }
+
+        var ttype = map_thing_type(i);
+        # Skip player starts
+        if (ttype >= 1) { if (ttype <= 4) { continue; } }
+        if (ttype == 11) { continue; }
+        if (ttype == 14) { continue; }
+
+        var tx = map_thing_x(i);
+        var ty = map_thing_y(i);
+
+        # Transform to view space
+        var dx = tx - view_x;
+        var dy = ty - view_y;
+        var vx = fixed_mul(dx, view_cos) + fixed_mul(dy, view_sin);
+        var vy = fixed_mul(dy, view_cos) - fixed_mul(dx, view_sin);
+
+        # Behind viewer?
+        if (vy <= 4096) { continue; }
+
+        # Store for sorting
+        store64(sprite_order + sprite_visible * 8, i);
+        store64(sprite_dist + sprite_visible * 8, vy);
+        sprite_visible = sprite_visible + 1;
+    }
+
+    # Sort by distance (back to front) — simple insertion sort
+    for (var i = 1; i < sprite_visible; i = i + 1) {
+        var key_order = load64(sprite_order + i * 8);
+        var key_dist = load64(sprite_dist + i * 8);
+        var j = i - 1;
+        while (j >= 0) {
+            if (load64(sprite_dist + j * 8) >= key_dist) { break; }
+            store64(sprite_order + (j + 1) * 8, load64(sprite_order + j * 8));
+            store64(sprite_dist + (j + 1) * 8, load64(sprite_dist + j * 8));
+            j = j - 1;
+        }
+        store64(sprite_order + (j + 1) * 8, key_order);
+        store64(sprite_dist + (j + 1) * 8, key_dist);
+    }
+
+    # Dedicated sprite patch buffer (so wad_read_lump doesn't clobber it)
+    var spr_patch_buf = alloc(16384);
+
+    for (var si = 0; si < sprite_visible; si = si + 1) {
+        var thing_idx = load64(sprite_order + si * 8);
+        var dist = load64(sprite_dist + si * 8);
+        var ttype = map_thing_type(thing_idx);
+
+        var lump = sprite_find_lump(ttype);
+        if (lump < 0) { continue; }
+
+        var psz = wad_lump_size(lump);
+        if (psz > 16384) { continue; }
+        wad_read_lump_into(lump, spr_patch_buf, psz);
+        var pdata = spr_patch_buf;
+        if (psz == 0) { continue; }
+
+        var pw = read_le16(pdata);
+        var ph = read_le16(pdata + 2);
+        var left_off = read_le16(pdata + 4);
+        if (left_off >= 0x8000) { left_off = left_off - 0x10000; }
+        var top_off = read_le16(pdata + 6);
+        if (top_off >= 0x8000) { top_off = top_off - 0x10000; }
+
+        # Transform thing position to view space
+        var tx = map_thing_x(thing_idx);
+        var ty = map_thing_y(thing_idx);
+        var dx = tx - view_x;
+        var dy = ty - view_y;
+        var vx = fixed_mul(dx, view_cos) + fixed_mul(dy, view_sin);
+        var vy = fixed_mul(dy, view_cos) - fixed_mul(dx, view_sin);
+
+        # Project to screen
+        var screen_x = HALF_WIDTH + fixed_to_int(fixed_div(fixed_mul(vx, PROJ_DIST), vy));
+
+        # Scale sprite based on distance
+        var scale = fixed_div(PROJ_DIST, vy);
+        var sprite_w = fixed_to_int(fixed_mul(pw << 16, scale));
+        var sprite_h = fixed_to_int(fixed_mul(ph << 16, scale));
+        if (sprite_w <= 0) { continue; }
+        if (sprite_h <= 0) { continue; }
+
+        # Screen bounds
+        var sx1 = screen_x - fixed_to_int(fixed_mul(left_off << 16, scale));
+        var sy1 = HALF_HEIGHT - fixed_to_int(fixed_mul(top_off << 16, scale));
+
+        # Find floor height via BSP walk
+        var thing_floor = 0;
+        var thing_light = 160;
+        if (map_num_nodes > 0) {
+            var nw = map_num_nodes - 1;
+            while (map_is_subsector(nw) == 0) {
+                if (map_point_on_side(tx, ty, nw) == 0) { nw = map_node_child_r(nw); }
+                else { nw = map_node_child_l(nw); }
+            }
+            var ssi = map_subsector_idx(nw);
+            if (ssi < map_num_ssectors) {
+                var s0 = map_ssector_first(ssi);
+                if (s0 < map_num_segs) {
+                    var l0 = map_seg_linedef(s0);
+                    var sd0 = map_linedef_side_right(l0);
+                    if (map_seg_side(s0) == 1) { sd0 = map_linedef_side_left(l0); }
+                    if (sd0 >= 0) {
+                        var sc = map_sidedef_sector(sd0);
+                        thing_floor = map_sector_floorh(sc);
+                        thing_light = map_sector_light(sc);
+                    }
+                }
+            }
+        }
+
+        # Project sprite bottom at floor level
+        var eye_h = (thing_floor << 16) + VIEW_HEIGHT;
+        var floor_proj = HALF_HEIGHT - fixed_to_int(
+            fixed_div(fixed_mul((thing_floor << 16) - eye_h, PROJ_DIST), vy));
+
+        # Anchor sprite bottom to floor
+        sy1 = floor_proj - sprite_h;
+
+        # Light level
+        var spr_light = 31 - (thing_light >> 3);
+        if (spr_light < 0) { spr_light = 0; }
+        var dist_dim = fixed_to_int(vy) / 96;
+        if (dist_dim > 16) { dist_dim = 16; }
+        spr_light = spr_light + dist_dim;
+        if (spr_light > 31) { spr_light = 31; }
+
+        # Draw sprite columns
+        for (var c = 0; c < sprite_w; c = c + 1) {
+            var scr_x = sx1 + c;
+            if (scr_x < 0) { continue; }
+            if (scr_x >= SCREEN_WIDTH) { continue; }
+
+            # Clip to walls: only draw if within the open clip region
+            var clip_t = load64(clip_top + scr_x * 8);
+            var clip_b = load64(clip_bottom + scr_x * 8);
+
+            # Source column in patch
+            var src_col = c * pw / sprite_w;
+            if (src_col >= pw) { src_col = pw - 1; }
+
+            # Get column offset from patch
+            var col_off = read_le32(pdata + 8 + src_col * 4);
+            var post_ptr = pdata + col_off;
+
+            # Read posts
+            var safety = 0;
+            while (safety < 128) {
+                var topdelta = load8(post_ptr);
+                if (topdelta == 255) { break; }
+                var length = load8(post_ptr + 1);
+                var pixels = post_ptr + 3;
+
+                for (var py = 0; py < length; py = py + 1) {
+                    var src_y = topdelta + py;
+                    var scr_y = sy1 + src_y * sprite_h / ph;
+                    if (scr_y < 0) { continue; }
+                    if (scr_y >= SCREEN_HEIGHT) { continue; }
+                    if (scr_y < clip_t) { continue; }
+                    if (scr_y > clip_b) { continue; }
+
+                    var pal = load8(pixels + py);
+                    if (pal != 0) {
+                        framebuf_pixel(scr_x, scr_y, render_shade(pal, spr_light));
+                    }
+                }
+
+                post_ptr = post_ptr + 4 + length;
+                safety = safety + 1;
+            }
+        }
+    }
+
+    return 0;
+}
