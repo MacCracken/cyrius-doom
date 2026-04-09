@@ -18,6 +18,7 @@ include "src/tables.cyr"
 include "src/wad.cyr"
 include "src/framebuf.cyr"
 include "src/map.cyr"
+include "src/texture.cyr"
 include "src/render.cyr"
 include "src/input.cyr"
 include "src/player.cyr"
@@ -60,6 +61,8 @@ fn doom_main() {
 
     framebuf_init();
     render_load_colormap();
+    sakshi_debug("loading textures", 16);
+    texture_init();
 
     var ppm_mode = 0;
     var map_name = "E1M1";

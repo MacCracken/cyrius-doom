@@ -65,6 +65,34 @@ fn render_shade(pal_idx, light_level) {
     return load8(colormap + light_level * 256 + pal_idx);
 }
 
+# Column buffer for texture lookups (max 256 pixels tall)
+var tex_col_buf = 0;
+
+# Draw a textured wall column
+# x = screen column, y1/y2 = screen top/bottom
+# tex_idx = texture index, tex_col = texture column (U coord)
+# tex_y_start = texture Y at screen y1 (16.16 fixed), tex_y_step = dY per screen pixel (16.16)
+# light_level = COLORMAP level (0-31)
+fn render_draw_tex_column(x, y1, y2, tex_idx, tex_col, tex_y_start, tex_y_step, light_level) {
+    if (tex_col_buf == 0) { tex_col_buf = alloc(256); }
+    if (tex_idx < 0) { return 0; }
+
+    var th = texture_get_column(tex_idx, tex_col, tex_col_buf);
+    if (th <= 0) { return 0; }
+
+    var tex_y = tex_y_start;
+    for (var y = y1; y <= y2; y = y + 1) {
+        var ty = fixed_to_int(tex_y) % th;
+        if (ty < 0) { ty = ty + th; }
+        var pal = load8(tex_col_buf + ty);
+        if (pal != 0) {
+            framebuf_pixel(x, y, render_shade(pal, light_level));
+        }
+        tex_y = tex_y + tex_y_step;
+    }
+    return 0;
+}
+
 fn render_init_clip() {
     if (clip_top == 0) {
         clip_top = alloc(2560);
@@ -214,31 +242,39 @@ fn render_seg(seg_idx) {
     var ceil_h = map_sector_ceilh(sector_idx);
     var light = map_sector_light(sector_idx);
 
-    # Base COLORMAP level from sector light (0=full bright, 31=dark)
-    # DOOM formula: sector_light ranges 0-255, COLORMAP has 32 levels
+    # Base COLORMAP level from sector light
     var base_light = 31 - (light >> 3);
     if (base_light < 0) { base_light = 0; }
     if (base_light > 31) { base_light = 31; }
 
-    # Wall orientation: N/S vs E/W (DOOM dims N/S by ~2 COLORMAP levels)
+    # N/S vs E/W dimming
     var seg_dx = fixed_abs(map_vertex_x(v2_idx) - map_vertex_x(v1_idx));
     var seg_dy = fixed_abs(map_vertex_y(v2_idx) - map_vertex_y(v1_idx));
     var orient_dim = 0;
-    if (seg_dx > seg_dy) {
-        # N/S facing wall: dim by 2 levels
-        orient_dim = 2;
-    }
+    if (seg_dx > seg_dy) { orient_dim = 2; }
 
-    # Base palette indices for wall, ceiling, floor
-    # Without textures, we use characteristic palette colors:
-    # Walls: 96 (grey), ceiling: 192 (blue) or 104 (dark grey), floor: 128 (beige)
+    # Look up sidedef textures
+    var sd_base = map_sidedefs + sidedef_idx * MAP_SIDEDEF_SIZE;
+    var mid_tex = texture_find(sd_base + 32);
+    var upper_tex = texture_find(sd_base + 16);
+    var lower_tex = texture_find(sd_base + 24);
+    var sd_xoff = map_sidedef_xoff(sidedef_idx);
+    var sd_yoff = map_sidedef_yoff(sidedef_idx);
+
+    # Fallback palette colors when texture not found
     var wall_base_pal = 96;
     if (seg_dy > seg_dx) { wall_base_pal = 64; }
-
     var ceil_base_pal = 192;
     if (ceil_h <= 200) { ceil_base_pal = 104; }
-
     var floor_base_pal = 128;
+
+    # Seg offset along linedef (for texture U coordinate)
+    var seg_offset = map_seg_offset(seg_idx);
+
+    # World length of seg for U interpolation
+    var world_dx = map_vertex_x(v2_idx) - map_vertex_x(v1_idx);
+    var world_dy = map_vertex_y(v2_idx) - map_vertex_y(v1_idx);
+    var seg_len = fixed_approx_dist(world_dx, world_dy);
 
     # Check for two-sided linedef (portal to another sector)
     var is_twosided = map_linedef_flags(line_idx) & ML_TWOSIDED;
@@ -295,8 +331,6 @@ fn render_seg(seg_idx) {
         if (col_light > 31) { col_light = 31; }
         if (col_light < 0) { col_light = 0; }
 
-        # Apply COLORMAP to get final shaded colors
-        var wall_color = render_shade(wall_base_pal, col_light);
         var cc = render_shade(ceil_base_pal, col_light);
         var fc = render_shade(floor_base_pal, col_light);
 
@@ -310,6 +344,10 @@ fn render_seg(seg_idx) {
             framebuf_vline(col, floor_screen + 1, cb, fc);
         }
 
+        # Texture U coordinate for this column
+        # Interpolate along seg length, add sidedef x offset
+        var tex_u = fixed_to_int(fixed_mul(frac, seg_len)) + sd_xoff + seg_offset;
+
         if (is_twosided != 0) {
             var back_ceil_screen = HALF_HEIGHT - fixed_to_int(
                 fixed_div(fixed_mul((back_ceil_h << 16) - eye_h, PROJ_DIST), depth));
@@ -318,24 +356,52 @@ fn render_seg(seg_idx) {
 
             # Upper wall
             if (back_ceil_screen > ceil_screen) {
-                framebuf_vline(col, ceil_screen, back_ceil_screen - 1, wall_color);
+                if (upper_tex >= 0) {
+                    var uh = back_ceil_screen - ceil_screen;
+                    if (uh > 0) {
+                        var tex_h = texture_height(upper_tex);
+                        var ty_step = fixed_div(tex_h << 16, uh << 16);
+                        render_draw_tex_column(col, ceil_screen, back_ceil_screen - 1,
+                            upper_tex, tex_u, sd_yoff << 16, ty_step, col_light);
+                    }
+                } else {
+                    framebuf_vline(col, ceil_screen, back_ceil_screen - 1,
+                        render_shade(wall_base_pal, col_light));
+                }
             }
 
-            # Lower wall (step texture color)
+            # Lower wall
             if (back_floor_screen < floor_screen) {
-                var lower_color = render_shade(128, col_light);
-                framebuf_vline(col, back_floor_screen + 1, floor_screen, lower_color);
+                if (lower_tex >= 0) {
+                    var lh = floor_screen - back_floor_screen;
+                    if (lh > 0) {
+                        var tex_h = texture_height(lower_tex);
+                        var ty_step = fixed_div(tex_h << 16, lh << 16);
+                        render_draw_tex_column(col, back_floor_screen + 1, floor_screen,
+                            lower_tex, tex_u, sd_yoff << 16, ty_step, col_light);
+                    }
+                } else {
+                    framebuf_vline(col, back_floor_screen + 1, floor_screen,
+                        render_shade(128, col_light));
+                }
             }
 
-            if (back_ceil_screen > ct) {
-                store64(clip_top + col * 8, back_ceil_screen);
-            }
-            if (back_floor_screen < cb) {
-                store64(clip_bottom + col * 8, back_floor_screen);
-            }
+            if (back_ceil_screen > ct) { store64(clip_top + col * 8, back_ceil_screen); }
+            if (back_floor_screen < cb) { store64(clip_bottom + col * 8, back_floor_screen); }
         } else {
-            # One-sided: solid wall
-            framebuf_vline(col, ceil_screen, floor_screen, wall_color);
+            # One-sided: mid texture
+            if (mid_tex >= 0) {
+                var wh = floor_screen - ceil_screen;
+                if (wh > 0) {
+                    var tex_h = texture_height(mid_tex);
+                    var ty_step = fixed_div(tex_h << 16, wh << 16);
+                    render_draw_tex_column(col, ceil_screen, floor_screen,
+                        mid_tex, tex_u, sd_yoff << 16, ty_step, col_light);
+                }
+            } else {
+                framebuf_vline(col, ceil_screen, floor_screen,
+                    render_shade(wall_base_pal, col_light));
+            }
 
             store64(clip_solid + col * 8, 1);
             clip_count = clip_count + 1;

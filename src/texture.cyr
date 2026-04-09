@@ -1,0 +1,243 @@
+# texture.cyr -- wall texture loading and column lookup
+# Usage: include "src/texture.cyr" (after wad.cyr, fixed.cyr)
+#
+# DOOM textures are composed from patches:
+#   PNAMES lump: list of patch lump names
+#   TEXTURE1 lump: texture definitions (name, size, patch references)
+#   Patches: column-based images (P_START..P_END)
+#
+# Patch format (column-major, for efficient vertical drawing):
+#   Header: width(2) height(2) leftoff(2) topoff(2)
+#   Column offsets: width * 4 bytes (offset from patch start to each column)
+#   Column data: series of posts: topdelta(1) length(1) padding(1) pixels(length) padding(1)
+#   Column terminated by topdelta = 0xFF
+
+# Texture name hash table: maps 8-char name to texture index
+# We store texture definitions (width, height, patch list) in heap
+
+enum TexConst {
+    TEX_MAX = 128;
+    TEX_ENTRY_SIZE = 32;
+    PATCH_MAX = 350;
+    FLAT_SIZE = 4096;
+    FLAT_MAX = 64;
+}
+
+# Texture table: name_hash(8) width(8) height(8) lump_data_ptr(8) = 32 bytes each
+var tex_table = 0;
+var tex_count = 0;
+
+# Patch names -> lump indices
+var patch_lumps = 0;
+var patch_count = 0;
+
+# Flat (floor/ceiling) texture cache
+var flat_cache = 0;
+var flat_names = 0;
+var flat_count = 0;
+
+# Simple 8-char name hash for fast lookup
+fn tex_name_hash(name_ptr) {
+    var h = 0;
+    for (var i = 0; i < 8; i = i + 1) {
+        var c = load8(name_ptr + i);
+        if (c == 0) { break; }
+        # Uppercase
+        if (c >= 97) { if (c <= 122) { c = c - 32; } }
+        h = h * 31 + c;
+    }
+    return h;
+}
+
+fn texture_init() {
+    tex_table = alloc(TEX_MAX * TEX_ENTRY_SIZE);
+    patch_lumps = alloc(PATCH_MAX * 8);
+    flat_cache = alloc(FLAT_MAX * FLAT_SIZE);
+    flat_names = alloc(FLAT_MAX * 8);
+    tex_count = 0;
+    patch_count = 0;
+    flat_count = 0;
+
+    # Load PNAMES: patch name -> WAD lump index mapping
+    var pn_idx = wad_find_lump("PNAMES");
+    if (pn_idx < 0) { return 0; }
+
+    # Read into a dedicated buffer (not shared lump buf)
+    var pn_size = wad_lump_size(pn_idx);
+    var pn_data = alloc(pn_size);
+    wad_read_lump_into(pn_idx, pn_data, pn_size);
+
+    patch_count = read_le32(pn_data);
+    if (patch_count > PATCH_MAX) { patch_count = PATCH_MAX; }
+
+    for (var i = 0; i < patch_count; i = i + 1) {
+        var name = pn_data + 4 + i * 8;
+        var lump = wad_find_lump(name);
+        store64(patch_lumps + i * 8, lump);
+    }
+
+    # Load TEXTURE1 definitions
+    var t1_idx = wad_find_lump("TEXTURE1");
+    if (t1_idx < 0) { return 0; }
+
+    var t1_size = wad_lump_size(t1_idx);
+    var t1_data = alloc(t1_size);
+    wad_read_lump_into(t1_idx, t1_data, t1_size);
+
+    var num_tex = read_le32(t1_data);
+    if (num_tex > TEX_MAX) { num_tex = TEX_MAX; }
+
+    for (var i = 0; i < num_tex; i = i + 1) {
+        var off = read_le32(t1_data + 4 + i * 4);
+        var tex = t1_data + off;
+
+        var entry = tex_table + i * TEX_ENTRY_SIZE;
+        # Store name hash
+        store64(entry, tex_name_hash(tex));
+        # Width and height
+        var tw = read_le16(tex + 12);
+        var th = read_le16(tex + 14);
+        store64(entry + 8, tw);
+        store64(entry + 16, th);
+        # Store pointer to raw texture definition (for patch lookup later)
+        store64(entry + 24, tex);
+    }
+    tex_count = num_tex;
+
+    # Load flats (F_START..F_END)
+    var f_start = wad_find_lump("F_START");
+    var f_end = wad_find_lump("F_END");
+    if (f_start >= 0) {
+        if (f_end >= 0) {
+            var fi = 0;
+            for (var li = f_start + 1; li < f_end; li = li + 1) {
+                if (fi >= FLAT_MAX) { break; }
+                var sz = wad_lump_size(li);
+                if (sz == FLAT_SIZE) {
+                    # Store flat name hash
+                    var fname = wad_dir + li * WAD_DIR_ENTRY_SIZE + 16;
+                    store64(flat_names + fi * 8, tex_name_hash(fname));
+                    # Load flat data (64x64 raw palette indices)
+                    wad_read_lump_into(li, flat_cache + fi * FLAT_SIZE, FLAT_SIZE);
+                    fi = fi + 1;
+                }
+            }
+            flat_count = fi;
+        }
+    }
+
+    return 0;
+}
+
+# Find texture index by name (8-char, null-padded)
+fn texture_find(name) {
+    var h = tex_name_hash(name);
+    for (var i = 0; i < tex_count; i = i + 1) {
+        if (load64(tex_table + i * TEX_ENTRY_SIZE) == h) {
+            return i;
+        }
+    }
+    return 0 - 1;
+}
+
+fn texture_width(idx) { return load64(tex_table + idx * TEX_ENTRY_SIZE + 8); }
+fn texture_height(idx) { return load64(tex_table + idx * TEX_ENTRY_SIZE + 16); }
+
+# Get a column of pixels from a texture
+# Returns pointer to column data (palette indices), writes height to out_height
+# tex_idx = texture index, col = column number (wrapped by texture width)
+# dest = buffer to write column pixels into (caller provides, must be >= tex_height)
+fn texture_get_column(tex_idx, col, dest) {
+    if (tex_idx < 0) { return 0; }
+    if (tex_idx >= tex_count) { return 0; }
+
+    var entry = tex_table + tex_idx * TEX_ENTRY_SIZE;
+    var tw = load64(entry + 8);
+    var th = load64(entry + 16);
+    var tex_def = load64(entry + 24);
+
+    if (tw == 0) { return 0; }
+    col = col % tw;
+    if (col < 0) { col = col + tw; }
+
+    # Texture definition: patches start at offset 22
+    # Each patch ref: originx(2) originy(2) patch_idx(2) stepdir(2) colormap(2) = 10 bytes
+    var num_patches = read_le16(tex_def + 20);
+
+    # Clear destination column
+    for (var y = 0; y < th; y = y + 1) {
+        store8(dest + y, 0);
+    }
+
+    # Composite patches into the column
+    for (var pi = 0; pi < num_patches; pi = pi + 1) {
+        var pref = tex_def + 22 + pi * 10;
+        var ox = read_le16(pref);
+        if (ox >= 0x8000) { ox = ox - 0x10000; }
+        var oy = read_le16(pref + 2);
+        if (oy >= 0x8000) { oy = oy - 0x10000; }
+        var pidx = read_le16(pref + 4);
+
+        if (pidx >= patch_count) { continue; }
+        var plump = load64(patch_lumps + pidx * 8);
+        if (plump < 0) { continue; }
+
+        # Read patch header
+        var pdata = wad_read_lump(plump);
+        if (pdata == 0) { continue; }
+
+        var pw = read_le16(pdata);
+        var ph = read_le16(pdata + 2);
+
+        # Which column of the patch do we need?
+        var pcol = col - ox;
+        if (pcol < 0) { continue; }
+        if (pcol >= pw) { continue; }
+
+        # Get column offset from patch header
+        var col_off = read_le32(pdata + 8 + pcol * 4);
+        var post_ptr = pdata + col_off;
+
+        # Read posts: topdelta(1) length(1) pad(1) pixels(length) pad(1)
+        # Terminated by topdelta = 0xFF
+        var safety = 0;
+        while (safety < 256) {
+            var topdelta = load8(post_ptr);
+            if (topdelta == 255) { break; }
+            var length = load8(post_ptr + 1);
+            # Skip padding byte
+            var pixels = post_ptr + 3;
+
+            for (var py = 0; py < length; py = py + 1) {
+                var dy = oy + topdelta + py;
+                if (dy >= 0) {
+                    if (dy < th) {
+                        store8(dest + dy, load8(pixels + py));
+                    }
+                }
+            }
+
+            post_ptr = post_ptr + 4 + length;
+            safety = safety + 1;
+        }
+    }
+
+    return th;
+}
+
+# Find flat index by name hash
+fn flat_find(name) {
+    var h = tex_name_hash(name);
+    for (var i = 0; i < flat_count; i = i + 1) {
+        if (load64(flat_names + i * 8) == h) { return i; }
+    }
+    return 0 - 1;
+}
+
+# Get flat pixel at (x, y) — both wrapped to 0..63
+fn flat_get_pixel(flat_idx, x, y) {
+    if (flat_idx < 0) { return 0; }
+    x = x & 63;
+    y = y & 63;
+    return load8(flat_cache + flat_idx * FLAT_SIZE + y * 64 + x);
+}
