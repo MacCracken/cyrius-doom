@@ -87,15 +87,59 @@
 | 4 | Sector floor anchoring | Done | BSP walk for per-sprite floor height |
 | 5 | Sprite lighting | Done | COLORMAP + distance falloff |
 
+## v0.12.0 — Audit Quick Fixes (DONE)
+
+| # | Item | Status | Detail |
+|---|------|--------|--------|
+| 1 | Fake contrast direction | Done | E-W dark, N-S bright (±1 colormap level) |
+| 2 | Light level scale | Done | >> 4 for 16 levels, ×2 even indexing |
+| 3 | Texture pegging | Done | DONTPEGTOP / DONTPEGBOTTOM applied |
+| 4 | Sprite rotation | Done | 8 rotations based on viewer-thing angle |
+
+## v0.13.0 — Medium Gaps
+
+| # | Item | Status | Detail |
+|---|------|--------|--------|
+| 1 | Masked midtextures | Not started | Transparent middle textures on two-sided lines |
+| 2 | BLOCKMAP loading | Not started | WAD BLOCKMAP for O(1) collision |
+| 3 | Weapon sprite overlay | Not started | Draw current weapon on screen |
+| 4 | Animated textures/flats | Not started | Cycle names per frame (nukage, lights) |
+
+## v0.14.0 — Doors & Lifts
+
+| # | Item | Status | Detail |
+|---|------|--------|--------|
+| 1 | Door open/close | Not started | Sector ceiling height animation |
+| 2 | Lift/platform movement | Not started | Sector floor height animation |
+| 3 | Switch/button triggers | Not started | Linedef special actions |
+| 4 | REJECT table | Not started | Fast sector-to-sector sight rejection |
+
+## v0.15.0 — Automap & Polish
+
+| # | Item | Status | Detail |
+|---|------|--------|--------|
+| 1 | Automap | Not started | 2D overhead line drawing |
+| 2 | Visplane merging | Not started | Reduce redundant flat rendering |
+| 3 | Screen wipe | Not started | Melt transition between levels |
+| 4 | ENDOOM screen | Not started | Exit text screen |
+
+## v0.16.0 — Level Transitions
+
+| # | Item | Status | Detail |
+|---|------|--------|--------|
+| 1 | Exit switch → next level | Not started | E1M1 → E1M2 etc. |
+| 2 | Intermission screen | Not started | Kill %, item %, secret %, time |
+| 3 | Secret exits | Not started | E1M3 → E1M9 |
+| 4 | Episode select | Not started | Knee Deep / Shores / Inferno |
+
 ## v1.0.0 — Ship
 
 | # | Item | Status | Detail |
 |---|------|--------|--------|
-| 1 | Performance: span-based flats | Not started | Horizontal spans instead of per-pixel |
-| 2 | All 13 modules in game loop | Not started | Needs cyrius 2.4.0 gvar expansion |
-| 3 | Plays E1M1-E1M9 (shareware) | Not started | Full episode 1 |
-| 4 | Runs on AGNOS kernel | Not started | Kernel framebuffer + PS/2 |
-| 5 | Runs on Linux /dev/fb0 | Not started | Userspace fallback |
+| 1 | Plays E1M1-E1M9 (shareware) | Not started | Full episode 1 |
+| 2 | Runs on AGNOS kernel | Not started | Kernel framebuffer + PS/2 |
+| 3 | Runs on Linux /dev/fb0 | Not started | Userspace fallback |
+| 4 | In AGNOS initrd | Not started | Boot → shell → doom |
 
 ## v1.0.0 — Ship
 

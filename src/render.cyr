@@ -315,16 +315,20 @@ fn render_seg(seg_idx) {
     var ceil_h = map_sector_ceilh(sector_idx);
     var light = map_sector_light(sector_idx);
 
-    # Base COLORMAP level from sector light
-    var base_light = 31 - (light >> 3);
+    # Base COLORMAP level from sector light (16 distinct levels, matching original DOOM)
+    # light 0-255, >> 4 gives 0-15, then *2 for even-numbered colormaps (DOOM quirk)
+    var base_light = (15 - (light >> 4)) * 2;
     if (base_light < 0) { base_light = 0; }
     if (base_light > 31) { base_light = 31; }
 
-    # N/S vs E/W dimming
+    # Fake contrast: original DOOM dims E-W walls (same Y), brightens N-S walls (same X)
+    # Exact axis: if v1.y == v2.y → lightnum--, if v1.x == v2.x → lightnum++
+    # Approximate: seg_dy == 0 means E-W, seg_dx == 0 means N-S
     var seg_dx = fixed_abs(map_vertex_x(v2_idx) - map_vertex_x(v1_idx));
     var seg_dy = fixed_abs(map_vertex_y(v2_idx) - map_vertex_y(v1_idx));
     var orient_dim = 0;
-    if (seg_dx > seg_dy) { orient_dim = 2; }
+    if (seg_dy < 256) { orient_dim = 1; }
+    if (seg_dx < 256) { orient_dim = 0 - 1; }
 
     # Look up sidedef textures
     var sd_base = map_sidedefs + sidedef_idx * MAP_SIDEDEF_SIZE;
@@ -333,6 +337,11 @@ fn render_seg(seg_idx) {
     var lower_tex = texture_find(sd_base + 24);
     var sd_xoff = map_sidedef_xoff(sidedef_idx);
     var sd_yoff = map_sidedef_yoff(sidedef_idx);
+
+    # Texture pegging flags
+    var line_flags = map_linedef_flags(line_idx);
+    var dont_peg_top = line_flags & ML_DONTPEGTOP;
+    var dont_peg_bottom = line_flags & ML_DONTPEGBOTTOM;
 
     # Fallback palette colors when texture not found
     var wall_base_pal = 96;
@@ -483,8 +492,15 @@ fn render_seg(seg_idx) {
                     if (uh > 0) {
                         var tex_h = texture_height(upper_tex);
                         var ty_step = fixed_div(tex_h << 16, uh << 16);
+                        # Upper peg: if DONTPEGTOP, anchor at top (y_start = yoff)
+                        # else anchor at bottom of upper section
+                        var upper_ystart = sd_yoff << 16;
+                        if (dont_peg_top == 0) {
+                            upper_ystart = (tex_h - (ceil_h - back_ceil_h)) << 16;
+                            upper_ystart = upper_ystart + (sd_yoff << 16);
+                        }
                         render_draw_tex_column(col, ceil_screen, back_ceil_screen - 1,
-                            upper_tex, tex_u, sd_yoff << 16, ty_step, col_light);
+                            upper_tex, tex_u, upper_ystart, ty_step, col_light);
                     }
                 } else {
                     framebuf_vline(col, ceil_screen, back_ceil_screen - 1,
@@ -499,8 +515,12 @@ fn render_seg(seg_idx) {
                     if (lh > 0) {
                         var tex_h = texture_height(lower_tex);
                         var ty_step = fixed_div(tex_h << 16, lh << 16);
+                        var lower_ystart = sd_yoff << 16;
+                        if (dont_peg_bottom != 0) {
+                            lower_ystart = (ceil_h - back_floor_h + sd_yoff) << 16;
+                        }
                         render_draw_tex_column(col, back_floor_screen + 1, floor_screen,
-                            lower_tex, tex_u, sd_yoff << 16, ty_step, col_light);
+                            lower_tex, tex_u, lower_ystart, ty_step, col_light);
                     }
                 } else {
                     framebuf_vline(col, back_floor_screen + 1, floor_screen,

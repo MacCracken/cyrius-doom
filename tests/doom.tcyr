@@ -1,0 +1,267 @@
+# doom.tcyr -- cyrius-doom test suite
+# Run: cyrius test tests/doom.tcyr
+#   or: cat tests/doom.tcyr | cc2 > build/test && chmod +x build/test && ./build/test wad/DOOM1.WAD
+
+include "lib/string.cyr"
+include "lib/alloc.cyr"
+include "lib/vec.cyr"
+include "lib/fmt.cyr"
+include "lib/io.cyr"
+include "lib/args.cyr"
+include "lib/assert.cyr"
+include "lib/sakshi.cyr"
+
+include "src/fixed.cyr"
+include "src/tables.cyr"
+include "src/wad.cyr"
+include "src/framebuf.cyr"
+include "src/map.cyr"
+include "src/texture.cyr"
+include "src/render.cyr"
+include "src/sprite.cyr"
+
+fn main() {
+    alloc_init();
+    args_init();
+
+    # ============================================================
+    test_group("asr (arithmetic shift right)");
+    # ============================================================
+
+    assert_eq(asr(256, 4), 16, "asr(256,4) = 16");
+    assert_eq(asr(0, 8), 0, "asr(0,8) = 0");
+    assert_eq(asr(1, 0), 1, "asr(1,0) = 1");
+
+    # Negative values — the critical case
+    var neg100 = 0 - 100;
+    assert_eq(asr(neg100, 1), 0 - 50, "asr(-100,1) = -50");
+    assert_eq(asr(neg100, 2), 0 - 25, "asr(-100,2) = -25");
+
+    # ============================================================
+    test_group("fixed-point conversion");
+    # ============================================================
+
+    assert_eq(fixed_from_int(0), 0, "from_int(0)");
+    assert_eq(fixed_from_int(1), 65536, "from_int(1)");
+    assert_eq(fixed_from_int(100), 6553600, "from_int(100)");
+
+    assert_eq(fixed_to_int(65536), 1, "to_int(1.0)");
+    assert_eq(fixed_to_int(131072), 2, "to_int(2.0)");
+    assert_eq(fixed_to_int(0), 0, "to_int(0)");
+
+    # Negative round-trip
+    var neg5 = fixed_from_int(0 - 5);
+    assert_eq(fixed_to_int(neg5), 0 - 5, "to_int(from_int(-5)) = -5");
+    var neg1000 = fixed_from_int(0 - 1000);
+    assert_eq(fixed_to_int(neg1000), 0 - 1000, "to_int(from_int(-1000)) = -1000");
+
+    # ============================================================
+    test_group("fixed-point arithmetic");
+    # ============================================================
+
+    var a10 = fixed_from_int(10);
+    var a3 = fixed_from_int(3);
+
+    assert_eq(fixed_to_int(fixed_mul(a10, a3)), 30, "10*3 = 30");
+    assert_eq(fixed_to_int(fixed_div(a10, a3)), 3, "10/3 = 3 (trunc)");
+    assert_eq(fixed_div(a10, 0), FIXED_MAX, "div by zero = MAX");
+
+    # Negative multiplication
+    var neg3 = fixed_from_int(0 - 3);
+    assert_eq(fixed_to_int(fixed_mul(a10, neg3)), 0 - 30, "10 * -3 = -30");
+    assert_eq(fixed_to_int(fixed_mul(neg3, neg3)), 9, "-3 * -3 = 9");
+
+    # Abs
+    assert_eq(fixed_abs(neg3), a3, "abs(-3) = 3");
+    assert_eq(fixed_abs(a10), a10, "abs(10) = 10");
+    assert_eq(fixed_abs(0), 0, "abs(0) = 0");
+
+    # Lerp
+    var half = FIXED_HALF;
+    assert_eq(fixed_to_int(fixed_lerp(0, a10, half)), 5, "lerp(0,10,0.5) = 5");
+    assert_eq(fixed_to_int(fixed_lerp(a10, a10, half)), 10, "lerp(10,10,0.5) = 10");
+
+    # Approx distance
+    var d = fixed_approx_dist(a3, fixed_from_int(4));
+    assert(fixed_to_int(d) >= 4, "approx_dist(3,4) >= 4");
+    assert(fixed_to_int(d) <= 6, "approx_dist(3,4) <= 6");
+
+    # ============================================================
+    test_group("trig tables");
+    # ============================================================
+
+    tables_init();
+
+    # sin(0) = 0
+    assert_eq(fixed_sin(0), 0, "sin(0) = 0");
+
+    # sin(256) = sin(90°) = 1.0 = 65536
+    assert_eq(fixed_sin(ANG90), 65536, "sin(90) = 1.0");
+
+    # sin(512) = sin(180°) = 0
+    assert_eq(fixed_sin(ANG180), 0, "sin(180) = 0");
+
+    # cos(0) = 1.0
+    assert_eq(fixed_cos(0), 65536, "cos(0) = 1.0");
+
+    # cos(256) = cos(90°) = 0
+    assert_eq(fixed_cos(ANG90), 0, "cos(90) = 0");
+
+    # sin^2 + cos^2 ≈ 1 for angle 128 (45°)
+    var s45 = fixed_sin(128);
+    var c45 = fixed_cos(128);
+    var sum_sq = fixed_mul(s45, s45) + fixed_mul(c45, c45);
+    var sq_int = fixed_to_int(sum_sq);
+    assert(sq_int >= 0, "sin^2+cos^2 >= 0");
+    assert(sq_int <= 2, "sin^2+cos^2 <= 2");
+
+    # ============================================================
+    test_group("angle math");
+    # ============================================================
+
+    assert_eq(angle_normalize(0), 0, "norm(0)");
+    assert_eq(angle_normalize(1024), 0, "norm(1024) wraps to 0");
+    assert_eq(angle_normalize(1025), 1, "norm(1025) wraps to 1");
+    assert_eq(angle_add(ANG270, ANG90), 0, "270+90 = 0 (wrap)");
+    assert_eq(angle_sub(0, 1), ANG_MASK, "0-1 = 1023 (wrap)");
+
+    # ============================================================
+    # WAD tests require DOOM1.WAD — skip if not available
+    # ============================================================
+
+    var has_wad = 0;
+    if (argc() > 1) {
+        if (wad_open(argv(1)) == 0) { has_wad = 1; }
+    }
+
+    if (has_wad == 1) {
+        test_group("WAD parsing");
+
+        assert_eq(wad_numlumps, 1264, "DOOM1.WAD has 1264 lumps");
+
+        var pal = wad_find_lump("PLAYPAL");
+        assert(pal >= 0, "PLAYPAL found");
+        assert_eq(wad_lump_size(pal), 10752, "PLAYPAL size = 10752");
+
+        var cmap = wad_find_lump("COLORMAP");
+        assert(cmap >= 0, "COLORMAP found");
+        assert_eq(wad_lump_size(cmap), 8704, "COLORMAP size = 8704");
+
+        var tex1 = wad_find_lump("TEXTURE1");
+        assert(tex1 >= 0, "TEXTURE1 found");
+
+        var pnames = wad_find_lump("PNAMES");
+        assert(pnames >= 0, "PNAMES found");
+
+        var e1m1 = wad_find_lump("E1M1");
+        assert(e1m1 >= 0, "E1M1 marker found");
+
+        # ============================================================
+        test_group("WAD lump read");
+        # ============================================================
+
+        var pd = wad_read_lump(pal);
+        assert(pd != 0, "PLAYPAL data non-null");
+        # Palette index 0 = black (0,0,0)
+        assert_eq(load8(pd), 0, "pal[0].r = 0");
+        assert_eq(load8(pd + 1), 0, "pal[0].g = 0");
+        assert_eq(load8(pd + 2), 0, "pal[0].b = 0");
+        # Palette index 4 = white (255,255,255)
+        assert_eq(load8(pd + 12), 255, "pal[4].r = 255");
+
+        # ============================================================
+        test_group("map loading");
+        # ============================================================
+
+        framebuf_set_palette(pd);
+        framebuf_init();
+
+        assert_eq(map_load("E1M1"), 0, "E1M1 loads");
+        assert_eq(map_num_vertexes, 467, "E1M1 vertexes = 467");
+        assert_eq(map_num_linedefs, 475, "E1M1 linedefs = 475");
+        assert_eq(map_num_sidedefs, 648, "E1M1 sidedefs = 648");
+        assert_eq(map_num_sectors, 85, "E1M1 sectors = 85");
+        assert_eq(map_num_segs, 732, "E1M1 segs = 732");
+        assert_eq(map_num_ssectors, 237, "E1M1 subsectors = 237");
+        assert_eq(map_num_nodes, 236, "E1M1 nodes = 236");
+        assert_eq(map_num_things, 138, "E1M1 things = 138");
+
+        # ============================================================
+        test_group("player start");
+        # ============================================================
+
+        assert_eq(map_find_player_start(), 0, "player start found");
+        assert_eq(fixed_to_int(player_start_x()), 1056, "start x = 1056");
+        assert_eq(fixed_to_int(player_start_y()), 0 - 3616, "start y = -3616");
+
+        # ============================================================
+        test_group("sector data");
+        # ============================================================
+
+        # Sector 0 should have valid height data
+        var fh = map_sector_floorh(0);
+        var ch = map_sector_ceilh(0);
+        assert(ch > fh, "ceil > floor for sector 0");
+
+        var light = map_sector_light(0);
+        assert(light >= 0, "light >= 0");
+        assert(light <= 255, "light <= 255");
+
+        # ============================================================
+        test_group("texture loading");
+        # ============================================================
+
+        render_load_colormap();
+        texture_init();
+
+        var startan = texture_find("STARTAN3");
+        assert(startan >= 0, "STARTAN3 found");
+        assert_eq(texture_height(startan), 128, "STARTAN3 height = 128");
+
+        var door3 = texture_find("DOOR3");
+        assert(door3 >= 0, "DOOR3 found");
+
+        # ============================================================
+        test_group("COLORMAP");
+        # ============================================================
+
+        # Level 0 = full bright (identity map)
+        assert_eq(render_shade(96, 0), 96, "shade(96, bright) = 96");
+        # Level 31 = very dark
+        var dark96 = render_shade(96, 31);
+        assert(dark96 != 96, "shade(96, dark) != 96");
+        # White stays white at full bright
+        assert_eq(render_shade(4, 0), 4, "shade(white, bright) = white");
+
+        # ============================================================
+        test_group("rendering");
+        # ============================================================
+
+        render_load_sky();
+        sprite_init();
+
+        view_x = player_start_x();
+        view_y = player_start_y();
+        view_angle = player_start_angle();
+
+        render_frame();
+        sprite_render_all();
+
+        # Should have drawn most of the screen
+        var nonzero = 0;
+        for (var i = 0; i < 64000; i = i + 1) {
+            if (load8(screen_buf + i) != 0) { nonzero = nonzero + 1; }
+        }
+        assert(nonzero > 40000, "rendered > 40000 non-black pixels");
+        assert_eq(clip_count, 320, "all 320 columns clipped");
+
+        wad_close();
+    } else {
+        syscall(1, 1, "(WAD tests skipped — pass WAD path as arg)\n", 44);
+    }
+
+    return assert_summary();
+}
+
+var exit_code = main();
+syscall(60, exit_code);

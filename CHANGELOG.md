@@ -5,6 +5,44 @@ All notable changes to cyrius-doom will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2026-04-09
+
+### Fixed (Audit Quick Wins)
+
+- **Fake contrast** — reversed to match original DOOM: E-W walls (same Y) darkened, N-S walls (same X) brightened. ±1 COLORMAP level = ±16 light units
+- **Light level scale** — changed from `>> 3` to `>> 4` for correct 16 distinct sector light levels (×2 for even colormap indexing, matching DOOM quirk)
+- **Texture pegging** — `ML_DONTPEGTOP` and `ML_DONTPEGBOTTOM` flags now applied to upper/lower texture Y offsets. Door frames and window sills align correctly
+- **Sprite rotation** — sprites now select rotation 1-8 based on angle between viewer and thing. Monsters show correct facing direction (front, side, back)
+
+### Added
+
+- `sprite_find_rotated()` — rotation-aware sprite lump lookup
+- `sprite_calc_rotation()` — computes rotation from viewer-thing angle delta
+- `docs/audit.md` — full gap analysis vs original DOOM engine (from doomwiki.org + Sanglard analysis)
+
+### Changed
+
+- Binary size: 109KB
+
+## [0.11.0] - 2026-04-08
+
+### Added
+
+- **tests/doom.tcyr** — 73 assertions across 13 test groups (asr, fixed-point, trig, WAD, map, textures, COLORMAP, rendering)
+- **benches/doom.bcyr** — 14 benchmarks (fixed_mul through render_frame+sprites)
+- **scripts/bench-history.sh** — CSV benchmark tracking with version/date/binary size
+- **docs/architecture/overview.md** — full module dependency graph, memory layout, performance table, game loop diagram
+- **docs/sources.md** — DOOM Black Book chapter references, WAD spec, mathematical sources, internal vidya refs
+- **CLAUDE.md** rewritten — ecosystem-aligned with P(-1) research steps, references section, key principles, build commands
+
+### Performance (baseline recorded)
+
+- render_frame: 2.2ms avg
+- render_frame+sprites: 2.9ms avg (10x headroom vs 28ms budget)
+- fixed_mul: 410ns
+- pcache_get (hit): 462ns
+- texture_get_column: 1μs
+
 ## [0.10.0] - 2026-04-08
 
 ### Added
