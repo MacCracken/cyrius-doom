@@ -105,14 +105,14 @@
 | 3 | Animated textures | Stub | Framework in place, needs animation sequences |
 | 4 | Masked midtextures | Deferred | Needs R_DrawMasked pass |
 
-## v0.14.0 — Doors & Lifts
+## v0.14.0 — Doors & Lifts (DONE)
 
 | # | Item | Status | Detail |
 |---|------|--------|--------|
-| 1 | Door open/close | Not started | Sector ceiling height animation |
-| 2 | Lift/platform movement | Not started | Sector floor height animation |
-| 3 | Switch/button triggers | Not started | Linedef special actions |
-| 4 | REJECT table | Not started | Fast sector-to-sector sight rejection |
+| 1 | Door open/close | Done | Ceiling animation with wait timer |
+| 2 | Lift/platform movement | Done | Floor drops to lowest neighbor, raises back |
+| 3 | Use action | Done | Ray cast to nearest special linedef |
+| 4 | Common specials | Done | Door types 1,26-28,31,117; lift types 62,88 |
 
 ## v0.15.0 — Automap & Polish
 

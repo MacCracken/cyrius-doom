@@ -1,0 +1,285 @@
+# doors.cyr -- door and lift sector animations
+# Usage: include "src/doors.cyr" (after map.cyr, player.cyr, input.cyr)
+#
+# DOOM doors: sector ceiling moves up to neighbor ceiling height, waits, closes.
+# DOOM lifts: sector floor moves down to lowest neighbor floor, waits, raises.
+#
+# Active animations stored in a fixed array of "thinkers".
+# Each tick, all active thinkers are updated.
+
+enum DoorConst {
+    DOOR_MAX = 32;
+    DOOR_ENTRY_SIZE = 48;
+    DOOR_SPEED = 2;
+    DOOR_WAIT = 105;
+    LIFT_SPEED = 4;
+    LIFT_WAIT = 105;
+}
+
+# Door states
+enum DoorState {
+    DS_NONE = 0;
+    DS_OPENING = 1;
+    DS_OPEN = 2;
+    DS_CLOSING = 3;
+    DS_CLOSED = 4;
+    DS_LIFT_DOWN = 5;
+    DS_LIFT_WAIT = 6;
+    DS_LIFT_UP = 7;
+}
+
+# Thinker entry: sector(8) state(8) height(8) target(8) wait(8) original(8) = 48 bytes
+var door_thinkers = 0;
+var door_count = 0;
+
+fn doors_init() {
+    door_thinkers = alloc(DOOR_MAX * DOOR_ENTRY_SIZE);
+    door_count = 0;
+    return 0;
+}
+
+fn door_sector(idx) { return load64(door_thinkers + idx * DOOR_ENTRY_SIZE); }
+fn door_state(idx) { return load64(door_thinkers + idx * DOOR_ENTRY_SIZE + 8); }
+fn door_height(idx) { return load64(door_thinkers + idx * DOOR_ENTRY_SIZE + 16); }
+fn door_target(idx) { return load64(door_thinkers + idx * DOOR_ENTRY_SIZE + 24); }
+fn door_wait(idx) { return load64(door_thinkers + idx * DOOR_ENTRY_SIZE + 32); }
+fn door_original(idx) { return load64(door_thinkers + idx * DOOR_ENTRY_SIZE + 40); }
+
+fn door_set_state(idx, v) { store64(door_thinkers + idx * DOOR_ENTRY_SIZE + 8, v); return 0; }
+fn door_set_height(idx, v) { store64(door_thinkers + idx * DOOR_ENTRY_SIZE + 16, v); return 0; }
+fn door_set_wait(idx, v) { store64(door_thinkers + idx * DOOR_ENTRY_SIZE + 32, v); return 0; }
+
+# Find the highest ceiling of sectors neighboring a given sector
+fn find_highest_neighbor_ceil(sector_idx) {
+    var best = map_sector_ceilh(sector_idx);
+    for (var i = 0; i < map_num_linedefs; i = i + 1) {
+        var rs = map_linedef_side_right(i);
+        var ls = map_linedef_side_left(i);
+        if (rs < 0) { continue; }
+        if (ls < 0) { continue; }
+        var rs_sec = map_sidedef_sector(rs);
+        var ls_sec = map_sidedef_sector(ls);
+        if (rs_sec == sector_idx) {
+            var ch = map_sector_ceilh(ls_sec);
+            if (ch > best) { best = ch; }
+        }
+        if (ls_sec == sector_idx) {
+            var ch = map_sector_ceilh(rs_sec);
+            if (ch > best) { best = ch; }
+        }
+    }
+    return best;
+}
+
+# Find the lowest floor of sectors neighboring a given sector
+fn find_lowest_neighbor_floor(sector_idx) {
+    var best = map_sector_floorh(sector_idx);
+    for (var i = 0; i < map_num_linedefs; i = i + 1) {
+        var rs = map_linedef_side_right(i);
+        var ls = map_linedef_side_left(i);
+        if (rs < 0) { continue; }
+        if (ls < 0) { continue; }
+        var rs_sec = map_sidedef_sector(rs);
+        var ls_sec = map_sidedef_sector(ls);
+        if (rs_sec == sector_idx) {
+            var fh = map_sector_floorh(ls_sec);
+            if (fh < best) { best = fh; }
+        }
+        if (ls_sec == sector_idx) {
+            var fh = map_sector_floorh(rs_sec);
+            if (fh < best) { best = fh; }
+        }
+    }
+    return best;
+}
+
+# Check if sector already has an active thinker
+fn door_find_sector(sector_idx) {
+    for (var i = 0; i < door_count; i = i + 1) {
+        if (door_sector(i) == sector_idx) { return i; }
+    }
+    return 0 - 1;
+}
+
+# Open a door (raise ceiling)
+fn door_open(sector_idx) {
+    if (door_find_sector(sector_idx) >= 0) { return 0; }
+    if (door_count >= DOOR_MAX) { return 0; }
+
+    var idx = door_count;
+    var base = door_thinkers + idx * DOOR_ENTRY_SIZE;
+    var floor_h = map_sector_floorh(sector_idx);
+    var ceil_h = map_sector_ceilh(sector_idx);
+    var target = find_highest_neighbor_ceil(sector_idx) - 4;
+
+    store64(base, sector_idx);
+    store64(base + 8, DS_OPENING);
+    store64(base + 16, ceil_h);
+    store64(base + 24, target);
+    store64(base + 32, 0);
+    store64(base + 40, ceil_h);
+
+    door_count = door_count + 1;
+    return 0;
+}
+
+# Activate a lift (lower floor)
+fn lift_activate(sector_idx) {
+    if (door_find_sector(sector_idx) >= 0) { return 0; }
+    if (door_count >= DOOR_MAX) { return 0; }
+
+    var idx = door_count;
+    var base = door_thinkers + idx * DOOR_ENTRY_SIZE;
+    var floor_h = map_sector_floorh(sector_idx);
+    var target = find_lowest_neighbor_floor(sector_idx);
+
+    store64(base, sector_idx);
+    store64(base + 8, DS_LIFT_DOWN);
+    store64(base + 16, floor_h);
+    store64(base + 24, target);
+    store64(base + 32, 0);
+    store64(base + 40, floor_h);
+
+    door_count = door_count + 1;
+    return 0;
+}
+
+# Tick all active door/lift thinkers
+fn doors_tick() {
+    for (var i = 0; i < door_count; i = i + 1) {
+        var sec = door_sector(i);
+        var state = door_state(i);
+        var h = door_height(i);
+        var target = door_target(i);
+        var w = door_wait(i);
+        var orig = door_original(i);
+
+        if (state == DS_OPENING) {
+            h = h + DOOR_SPEED;
+            if (h >= target) {
+                h = target;
+                door_set_state(i, DS_OPEN);
+                door_set_wait(i, DOOR_WAIT);
+            }
+            door_set_height(i, h);
+            # Update sector ceiling
+            store64(map_sectors + sec * MAP_SECTOR_SIZE + 8, h);
+        }
+
+        if (state == DS_OPEN) {
+            w = w - 1;
+            door_set_wait(i, w);
+            if (w <= 0) {
+                door_set_state(i, DS_CLOSING);
+            }
+        }
+
+        if (state == DS_CLOSING) {
+            h = h - DOOR_SPEED;
+            if (h <= orig) {
+                h = orig;
+                door_set_state(i, DS_CLOSED);
+            }
+            door_set_height(i, h);
+            store64(map_sectors + sec * MAP_SECTOR_SIZE + 8, h);
+        }
+
+        if (state == DS_LIFT_DOWN) {
+            h = h - LIFT_SPEED;
+            if (h <= target) {
+                h = target;
+                door_set_state(i, DS_LIFT_WAIT);
+                door_set_wait(i, LIFT_WAIT);
+            }
+            door_set_height(i, h);
+            store64(map_sectors + sec * MAP_SECTOR_SIZE, h);
+        }
+
+        if (state == DS_LIFT_WAIT) {
+            w = w - 1;
+            door_set_wait(i, w);
+            if (w <= 0) {
+                door_set_state(i, DS_LIFT_UP);
+            }
+        }
+
+        if (state == DS_LIFT_UP) {
+            h = h + LIFT_SPEED;
+            if (h >= orig) {
+                h = orig;
+                door_set_state(i, DS_CLOSED);
+            }
+            door_set_height(i, h);
+            store64(map_sectors + sec * MAP_SECTOR_SIZE, h);
+        }
+    }
+    return 0;
+}
+
+# ================================================================
+# Use action: player presses E/Space on a linedef
+# ================================================================
+# Cast a short ray forward from the player, find the nearest linedef,
+# check its special type, and trigger the appropriate action.
+
+fn doors_use() {
+    # Ray from player position in facing direction, length 64 map units
+    var use_dist = 64 << 16;
+    var rx = player_x + fixed_mul(fixed_cos(player_angle), use_dist);
+    var ry = player_y + fixed_mul(fixed_sin(player_angle), use_dist);
+
+    # Find nearest linedef that the use ray crosses
+    var best_line = 0 - 1;
+    var best_dist = use_dist;
+
+    for (var i = 0; i < map_num_linedefs; i = i + 1) {
+        var v1 = map_linedef_v1(i);
+        var v2 = map_linedef_v2(i);
+        var lx1 = map_vertex_x(v1);
+        var ly1 = map_vertex_y(v1);
+        var lx2 = map_vertex_x(v2);
+        var ly2 = map_vertex_y(v2);
+
+        # Quick distance check
+        var midx = asr(lx1 + lx2, 1);
+        var midy = asr(ly1 + ly2, 1);
+        var d = fixed_approx_dist(midx - player_x, midy - player_y);
+        if (d > use_dist * 2) { continue; }
+
+        # Check linedef special
+        var special = load64(map_linedefs + i * MAP_LINEDEF_SIZE + 24);
+        if (special == 0) { continue; }
+
+        if (d < best_dist) {
+            best_dist = d;
+            best_line = i;
+        }
+    }
+
+    if (best_line < 0) { return 0; }
+
+    var special = load64(map_linedefs + best_line * MAP_LINEDEF_SIZE + 24);
+
+    # Common door specials: 1 (open wait close), 26-28 (keyed doors), 31 (open stay)
+    # Common lift specials: 62 (lower wait raise), 88 (lower wait raise fast)
+    # We handle the most common ones
+    var rs = map_linedef_side_right(best_line);
+    var ls = map_linedef_side_left(best_line);
+
+    # Door: activate sector on the BACK side of the linedef
+    var door_sec = 0 - 1;
+    if (ls >= 0) { door_sec = map_sidedef_sector(ls); }
+
+    if (special == 1) { if (door_sec >= 0) { door_open(door_sec); } }
+    if (special == 31) { if (door_sec >= 0) { door_open(door_sec); } }
+    if (special == 26) { if (door_sec >= 0) { door_open(door_sec); } }
+    if (special == 27) { if (door_sec >= 0) { door_open(door_sec); } }
+    if (special == 28) { if (door_sec >= 0) { door_open(door_sec); } }
+    if (special == 117) { if (door_sec >= 0) { door_open(door_sec); } }
+
+    # Lifts
+    if (special == 62) { if (door_sec >= 0) { lift_activate(door_sec); } }
+    if (special == 88) { if (door_sec >= 0) { lift_activate(door_sec); } }
+
+    return 0;
+}

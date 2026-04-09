@@ -5,6 +5,25 @@ All notable changes to cyrius-doom will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] - 2026-04-09
+
+### Added
+
+- **doors.cyr** — Door and lift sector animation system
+- Door open/wait/close cycle: ceiling raises to highest neighbor, waits 3s, closes
+- Lift lower/wait/raise cycle: floor drops to lowest neighbor, waits 3s, raises
+- "Use" action (E/Space): ray cast from player to find nearest special linedef
+- Supports door specials: 1 (normal), 26-28 (keyed), 31 (open stay), 117 (fast)
+- Supports lift specials: 62 (lower wait raise), 88 (fast)
+- Neighbor sector height search for door targets (`find_highest_neighbor_ceil`, `find_lowest_neighbor_floor`)
+- 32-slot thinker array for concurrent door/lift animations
+- Sector heights modified in-place — renderer automatically reflects changes
+
+### Changed
+
+- Binary size: 119KB
+- Game loop: input → use → doors → player → things → sound → render → sprites → weapon → HUD → flip
+
 ## [0.13.0] - 2026-04-09
 
 ### Added

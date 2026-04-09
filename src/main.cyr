@@ -23,6 +23,7 @@ include "src/tick.cyr"
 include "src/things.cyr"
 include "src/status.cyr"
 include "src/sound.cyr"
+include "src/doors.cyr"
 include "src/menu.cyr"
 
 var game_running = 0;
@@ -30,7 +31,7 @@ var game_running = 0;
 fn doom_main() {
     alloc_init();
     args_init();
-    sakshi_info("cyrius-doom v0.13.0", 19);
+    sakshi_info("cyrius-doom v0.14.0", 19);
 
     if (argc() < 2) {
         sakshi_error("usage: doom <wad> [map] [--ppm]", 31);
@@ -74,6 +75,7 @@ fn doom_main() {
     status_init_font();
     sound_init();
     things_spawn_from_map();
+    doors_init();
     render_set_weapon(1);
     things_print_stats();
 
@@ -103,6 +105,8 @@ fn doom_main() {
         input_poll();
         if (input_quit == 1) { game_running = 0; continue; }
         player_tick();
+        if (input_use() == 1) { doors_use(); }
+        doors_tick();
         things_tick();
         sound_tick();
         render_frame();
