@@ -24,6 +24,10 @@ include "src/sprite.cyr"
 include "src/input.cyr"
 include "src/player.cyr"
 include "src/tick.cyr"
+include "src/things.cyr"
+include "src/status.cyr"
+include "src/sound.cyr"
+include "src/menu.cyr"
 
 var game_running = 0;
 
@@ -31,7 +35,7 @@ fn doom_main() {
     alloc_init();
     args_init();
 
-    sakshi_info("cyrius-doom v0.9.0", 18);
+    sakshi_info("cyrius-doom v0.10.0", 18);
 
     if (argc() < 2) {
         sakshi_error("usage: doom <wad> [map] [--ppm]", 31);
@@ -88,7 +92,10 @@ fn doom_main() {
     }
 
     player_init();
-    sakshi_debug("player init done", 16);
+    status_init_font();
+    sound_init();
+    things_spawn_from_map();
+    things_print_stats();
 
     if (ppm_mode == 1) {
         sakshi_info("PPM screenshot mode", 19);
@@ -96,25 +103,9 @@ fn doom_main() {
         view_y = player_start_y();
         view_angle = player_start_angle();
 
-        view_x = player_start_x();
-        view_y = player_start_y();
-        view_angle = player_start_angle();
-        syscall(1, 1, "view: ", 6);
-        fmt_int(fixed_to_int(view_x)); syscall(1, 1, ",", 1);
-        fmt_int(fixed_to_int(view_y)); syscall(1, 1, " a=", 3);
-        fmt_int(view_angle); syscall(1, 1, "\n", 1);
-
         render_frame();
         sprite_render_all();
-
-        # Count non-zero pixels
-        var nz = 0;
-        for (var pi = 0; pi < 64000; pi = pi + 1) {
-            if (load8(screen_buf + pi) != 0) { nz = nz + 1; }
-        }
-        syscall(1, 1, "pixels: ", 8); fmt_int(nz);
-        syscall(1, 1, "/64000 clip=", 12); fmt_int(clip_count);
-        syscall(1, 1, "/320\n", 5);
+        status_render();
 
         framebuf_write_ppm("/tmp/doom_e1m1.ppm");
         sakshi_info("wrote /tmp/doom_e1m1.ppm", 24);
@@ -125,8 +116,7 @@ fn doom_main() {
     input_init();
     tick_init();
 
-    sakshi_info("game loop starting", 18);
-    sakshi_info("WASD=move arrows=turn Q=quit", 28);
+    sakshi_info("WASD=move arrows=turn F=fire E=use Q=quit", 41);
 
     game_running = 1;
     while (game_running == 1) {
@@ -134,13 +124,17 @@ fn doom_main() {
         input_poll();
         if (input_quit == 1) { game_running = 0; continue; }
         player_tick();
+        things_tick();
+        sound_tick();
         render_frame();
         sprite_render_all();
+        status_render();
         framebuf_flip();
         tick_wait();
     }
 
     input_shutdown();
+    sound_shutdown();
     framebuf_write_ppm("/tmp/doom_final.ppm");
     sakshi_info("wrote /tmp/doom_final.ppm", 25);
     wad_close();

@@ -440,7 +440,7 @@ fn thing_ai_tick(idx) {
             # Deal damage to player
             if (dist < MONSTER_MELEE_RANGE) {
                 # Melee: 3-24 damage (approx with fixed range)
-                var dmg = 3 + (tick_count % 22);
+                var dmg = 3 + (tick_get_count() % 22);
                 player_health = player_health - dmg;
             }
             # Return to chase

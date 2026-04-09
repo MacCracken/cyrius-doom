@@ -204,22 +204,22 @@ fn menu_draw_skill() {
 fn menu_handle_input() {
     if (menu_screen == MENU_TITLE) {
         # Any key advances to main menu
-        if (input_forward == 1) { menu_screen = MENU_MAIN; menu_cursor = 0; }
-        if (input_fire == 1) { menu_screen = MENU_MAIN; menu_cursor = 0; }
-        if (input_use == 1) { menu_screen = MENU_MAIN; menu_cursor = 0; }
+        if (input_forward() == 1) { menu_screen = MENU_MAIN; menu_cursor = 0; }
+        if (input_fire() == 1) { menu_screen = MENU_MAIN; menu_cursor = 0; }
+        if (input_use() == 1) { menu_screen = MENU_MAIN; menu_cursor = 0; }
         return 0;
     }
 
     # Navigate up/down
-    if (input_forward == 1) {
+    if (input_forward() == 1) {
         if (menu_cursor > 0) { menu_cursor = menu_cursor - 1; }
     }
-    if (input_backward == 1) {
+    if (input_backward() == 1) {
         if (menu_cursor < menu_item_count - 1) { menu_cursor = menu_cursor + 1; }
     }
 
     # Select
-    if (input_use == 1) {
+    if (input_use() == 1) {
         if (menu_screen == MENU_MAIN) {
             if (menu_cursor == 0) {
                 # New Game -> skill select

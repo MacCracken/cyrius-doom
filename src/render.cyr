@@ -76,18 +76,32 @@ var vp_floor_x2 = 0;
 var vp_ceil_x1 = 0;
 var vp_ceil_x2 = 0;
 
+# Per-row flat index and light (set during wall rendering, used by span pass)
+var vp_floor_flat = 0;
+var vp_ceil_flat = 0;
+var vp_floor_light = 0;
+var vp_ceil_light = 0;
+
 fn render_init_visplanes() {
     if (vp_floor_x1 == 0) {
         vp_floor_x1 = alloc(200 * 8);
         vp_floor_x2 = alloc(200 * 8);
         vp_ceil_x1 = alloc(200 * 8);
         vp_ceil_x2 = alloc(200 * 8);
+        vp_floor_flat = alloc(200 * 8);
+        vp_ceil_flat = alloc(200 * 8);
+        vp_floor_light = alloc(200 * 8);
+        vp_ceil_light = alloc(200 * 8);
     }
     for (var y = 0; y < SCREEN_HEIGHT; y = y + 1) {
         store64(vp_floor_x1 + y * 8, SCREEN_WIDTH);
         store64(vp_floor_x2 + y * 8, 0);
         store64(vp_ceil_x1 + y * 8, SCREEN_WIDTH);
         store64(vp_ceil_x2 + y * 8, 0);
+        store64(vp_floor_flat + y * 8, 0 - 1);
+        store64(vp_ceil_flat + y * 8, 0 - 1);
+        store64(vp_floor_light + y * 8, 16);
+        store64(vp_ceil_light + y * 8, 16);
     }
     return 0;
 }
@@ -409,45 +423,33 @@ fn render_seg(seg_idx) {
         if (col_light > 31) { col_light = 31; }
         if (col_light < 0) { col_light = 0; }
 
-        # Draw ceiling
+        # Draw ceiling — store bounds for deferred span rendering
         if (ceil_screen > ct) {
-            if (ceil_flat >= 0) {
-                for (var cy = ct; cy < ceil_screen; cy = cy + 1) {
-                    var cdy = HALF_HEIGHT - cy;
-                    if (cdy > 0) {
-                        var cdist = fixed_div(plane_eye_h, cdy << 16);
-                        var csx = fixed_div((col - HALF_WIDTH) << 16, PROJ_DIST);
-                        var cwx = view_x + fixed_mul(cdist, view_cos) + fixed_mul(fixed_mul(csx, cdist), view_sin);
-                        var cwy = view_y + fixed_mul(cdist, view_sin) - fixed_mul(fixed_mul(csx, cdist), view_cos);
-                        var cp = flat_get_pixel(ceil_flat, fixed_to_int(cwx) & 63, fixed_to_int(cwy) & 63);
-                        framebuf_pixel(col, cy, render_shade(cp, col_light));
-                    } else {
-                        framebuf_pixel(col, cy, render_shade(ceil_base_pal, col_light));
-                    }
-                }
-            } else {
+            if (ceil_flat < 0) {
                 framebuf_vline(col, ct, ceil_screen - 1, render_shade(ceil_base_pal, col_light));
+            }
+            for (var cy = ct; cy < ceil_screen; cy = cy + 1) {
+                var cx1 = load64(vp_ceil_x1 + cy * 8);
+                if (col < cx1) { store64(vp_ceil_x1 + cy * 8, col); }
+                var cx2 = load64(vp_ceil_x2 + cy * 8);
+                if (col > cx2) { store64(vp_ceil_x2 + cy * 8, col); }
+                store64(vp_ceil_flat + cy * 8, ceil_flat);
+                store64(vp_ceil_light + cy * 8, base_light);
             }
         }
 
-        # Draw floor
+        # Draw floor — store bounds for deferred span rendering
         if (floor_screen < cb) {
-            if (floor_flat >= 0) {
-                for (var fy = floor_screen + 1; fy <= cb; fy = fy + 1) {
-                    var fdy = fy - HALF_HEIGHT;
-                    if (fdy > 0) {
-                        var fdist = fixed_div(plane_eye_h, fdy << 16);
-                        var fsx = fixed_div((col - HALF_WIDTH) << 16, PROJ_DIST);
-                        var fwx = view_x + fixed_mul(fdist, view_cos) + fixed_mul(fixed_mul(fsx, fdist), view_sin);
-                        var fwy = view_y + fixed_mul(fdist, view_sin) - fixed_mul(fixed_mul(fsx, fdist), view_cos);
-                        var fp = flat_get_pixel(floor_flat, fixed_to_int(fwx) & 63, fixed_to_int(fwy) & 63);
-                        framebuf_pixel(col, fy, render_shade(fp, col_light));
-                    } else {
-                        framebuf_pixel(col, fy, render_shade(floor_base_pal, col_light));
-                    }
-                }
-            } else {
+            if (floor_flat < 0) {
                 framebuf_vline(col, floor_screen + 1, cb, render_shade(floor_base_pal, col_light));
+            }
+            for (var fy = floor_screen + 1; fy <= cb; fy = fy + 1) {
+                var fx1 = load64(vp_floor_x1 + fy * 8);
+                if (col < fx1) { store64(vp_floor_x1 + fy * 8, col); }
+                var fx2 = load64(vp_floor_x2 + fy * 8);
+                if (col > fx2) { store64(vp_floor_x2 + fy * 8, col); }
+                store64(vp_floor_flat + fy * 8, floor_flat);
+                store64(vp_floor_light + fy * 8, base_light);
             }
         }
 
@@ -575,21 +577,96 @@ fn render_bsp_node(node_idx) {
 # Render a full frame
 # ================================================================
 
+fn render_flat_spans() {
+    # Draw all floor/ceiling spans row by row
+    # For each row, we have x1..x2 bounds and the flat index + light
+    # Per-row: compute distance once, then step world coords horizontally
+
+    for (var y = 0; y < SCREEN_HEIGHT; y = y + 1) {
+        # Ceiling spans
+        var cx1 = load64(vp_ceil_x1 + y * 8);
+        var cx2 = load64(vp_ceil_x2 + y * 8);
+        var cf = load64(vp_ceil_flat + y * 8);
+        if (cx1 <= cx2) {
+            if (cf >= 0) {
+                var cdy = HALF_HEIGHT - y;
+                if (cdy > 0) {
+                    var cdist = fixed_div(VIEW_HEIGHT, cdy << 16);
+                    var cl = load64(vp_ceil_light + y * 8);
+                    var cd_dim = fixed_to_int(cdist) / 96;
+                    if (cd_dim > 16) { cd_dim = 16; }
+                    var clv = cl + cd_dim;
+                    if (clv > 31) { clv = 31; }
+
+                    # World coords at left edge of span
+                    var csx_left = fixed_div((cx1 - HALF_WIDTH) << 16, PROJ_DIST);
+                    var cwx = view_x + fixed_mul(cdist, view_cos) + fixed_mul(fixed_mul(csx_left, cdist), view_sin);
+                    var cwy = view_y + fixed_mul(cdist, view_sin) - fixed_mul(fixed_mul(csx_left, cdist), view_cos);
+
+                    # Step per pixel in X
+                    var cstep_wx = fixed_mul(fixed_div(cdist, PROJ_DIST), view_sin);
+                    var cstep_wy = fixed_mul(fixed_div(cdist, PROJ_DIST), 0 - view_cos);
+
+                    for (var x = cx1; x <= cx2; x = x + 1) {
+                        var cp = flat_get_pixel(cf, fixed_to_int(cwx) & 63, fixed_to_int(cwy) & 63);
+                        framebuf_pixel(x, y, render_shade(cp, clv));
+                        cwx = cwx + cstep_wx;
+                        cwy = cwy + cstep_wy;
+                    }
+                }
+            }
+        }
+
+        # Floor spans
+        var fx1 = load64(vp_floor_x1 + y * 8);
+        var fx2 = load64(vp_floor_x2 + y * 8);
+        var ff = load64(vp_floor_flat + y * 8);
+        if (fx1 <= fx2) {
+            if (ff >= 0) {
+                var fdy = y - HALF_HEIGHT;
+                if (fdy > 0) {
+                    var fdist = fixed_div(VIEW_HEIGHT, fdy << 16);
+                    var fl = load64(vp_floor_light + y * 8);
+                    var fd_dim = fixed_to_int(fdist) / 96;
+                    if (fd_dim > 16) { fd_dim = 16; }
+                    var flv = fl + fd_dim;
+                    if (flv > 31) { flv = 31; }
+
+                    var fsx_left = fixed_div((fx1 - HALF_WIDTH) << 16, PROJ_DIST);
+                    var fwx = view_x + fixed_mul(fdist, view_cos) + fixed_mul(fixed_mul(fsx_left, fdist), view_sin);
+                    var fwy = view_y + fixed_mul(fdist, view_sin) - fixed_mul(fixed_mul(fsx_left, fdist), view_cos);
+
+                    var fstep_wx = fixed_mul(fixed_div(fdist, PROJ_DIST), view_sin);
+                    var fstep_wy = fixed_mul(fixed_div(fdist, PROJ_DIST), 0 - view_cos);
+
+                    for (var x = fx1; x <= fx2; x = x + 1) {
+                        var fp = flat_get_pixel(ff, fixed_to_int(fwx) & 63, fixed_to_int(fwy) & 63);
+                        framebuf_pixel(x, y, render_shade(fp, flv));
+                        fwx = fwx + fstep_wx;
+                        fwy = fwy + fstep_wy;
+                    }
+                }
+            }
+        }
+    }
+    return 0;
+}
+
 fn render_frame() {
-    # Set up view transform
     view_cos = fixed_cos(view_angle);
     view_sin = fixed_sin(view_angle);
 
-    # Clear screen
     framebuf_clear(0);
-
-    # Reset column clipping
     render_init_clip();
+    render_init_visplanes();
 
-    # Traverse BSP tree from root (last node)
+    # BSP pass: walls + collect floor/ceiling spans
     if (map_num_nodes > 0) {
         render_bsp_node(map_num_nodes - 1);
     }
+
+    # Flat pass: draw all floor/ceiling spans (row-by-row, much faster)
+    render_flat_spans();
 
     return 0;
 }

@@ -5,6 +5,31 @@ All notable changes to cyrius-doom will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-04-08
+
+### Added
+
+- **All 13 modules compiled** — things, status, menu, sound now included in game loop
+- Span-based floor/ceiling rendering (row-by-row with horizontal stepping)
+- Deferred visplane system: walls collect span bounds, flats drawn in second pass
+- Full game loop: input → AI → sound → render → sprites → HUD → flip
+- Things system active: 29 monsters, 67 items, 38 decorations spawned from E1M1
+- Status bar HUD: ammo, health, armor, weapon slots, face, keys, ammo totals
+- Sound system: PC speaker tone queue (ready for /dev/console)
+- Menu system: title screen, main menu, skill select
+
+### Changed
+
+- Binary size: 108KB (all 13 modules, was 81KB with 9 modules)
+- Requires cyrius 2.4.0+ (expanded gvar_toks from 64 to 1024)
+- Floor/ceiling rendering uses span-based approach (faster than per-pixel)
+- Compile time: 79ms
+
+### Fixed
+
+- `tick_count` reference in things.cyr → use `tick_get_count()` (packed state)
+- Menu input references → use function accessors `input_forward()` etc.
+
 ## [0.9.0] - 2026-04-08
 
 ### Added
