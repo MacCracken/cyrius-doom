@@ -11,5 +11,5 @@ stdlib = ["string", "alloc", "fmt", "args"]
 
 [deps.bsp]
 git = "https://github.com/MacCracken/bsp"
-tag = "0.5.0"
+tag = "0.7.0"
 modules = ["src/fixed.cyr", "src/aabb.cyr", "src/intersect.cyr", "src/tree.cyr", "src/traverse.cyr", "src/query.cyr", "src/blockmap.cyr", "src/frustum.cyr"]
