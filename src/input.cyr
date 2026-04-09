@@ -30,6 +30,7 @@ enum InputBit {
     INP_RUN = 64;
     INP_FIRE = 128;
     INP_USE = 256;
+    INP_TAB = 512;
 }
 
 # Convenience accessors (read-only, derived from input_flags)
@@ -196,6 +197,7 @@ fn input_poll() {
     if (load64(key_state + KEY_E * 8) == 1) { input_flags = input_flags | INP_USE; }
     if (load64(key_state + 102 * 8) == 1) { input_flags = input_flags | INP_FIRE; }
     if (load64(key_state + KEY_R * 8) == 1) { input_flags = input_flags | INP_RUN; }
+    if (load64(key_state + KEY_TAB * 8) == 1) { input_flags = input_flags | INP_TAB; }
     if (load64(key_state + KEY_Q * 8) == 1) { input_quit = 1; }
 
     for (var i = 0; i < 256; i = i + 1) { store64(key_state + i * 8, 0); }

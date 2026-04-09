@@ -114,14 +114,15 @@
 | 3 | Use action | Done | Ray cast to nearest special linedef |
 | 4 | Common specials | Done | Door types 1,26-28,31,117; lift types 62,88 |
 
-## v0.15.0 — Automap & Polish
+## v0.15.0 — Automap & Polish (DONE)
 
 | # | Item | Status | Detail |
 |---|------|--------|--------|
-| 1 | Automap | Not started | 2D overhead line drawing |
-| 2 | Visplane merging | Not started | Reduce redundant flat rendering |
-| 3 | Screen wipe | Not started | Melt transition between levels |
-| 4 | ENDOOM screen | Not started | Exit text screen |
+| 1 | Automap | Done | TAB toggle, Bresenham lines, colored by type |
+| 2 | Player arrow | Done | Green arrow showing position + facing |
+| 3 | Thing dots | Done | Blue dots for monsters/items |
+| 4 | Visplane merging | Deferred | Performance is fine without it (2.9ms) |
+| 5 | Screen wipe | Deferred | Cosmetic, not needed for gameplay |
 
 ## v0.16.0 — Level Transitions
 

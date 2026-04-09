@@ -24,6 +24,7 @@ include "src/things.cyr"
 include "src/status.cyr"
 include "src/sound.cyr"
 include "src/doors.cyr"
+include "src/automap.cyr"
 include "src/menu.cyr"
 
 var game_running = 0;
@@ -31,7 +32,7 @@ var game_running = 0;
 fn doom_main() {
     alloc_init();
     args_init();
-    sakshi_info("cyrius-doom v0.14.0", 19);
+    sakshi_info("cyrius-doom v0.15.0", 19);
 
     if (argc() < 2) {
         sakshi_error("usage: doom <wad> [map] [--ppm]", 31);
@@ -76,6 +77,7 @@ fn doom_main() {
     sound_init();
     things_spawn_from_map();
     doors_init();
+    automap_init();
     render_set_weapon(1);
     things_print_stats();
 
@@ -90,6 +92,14 @@ fn doom_main() {
         status_render();
         framebuf_write_ppm("/tmp/doom_e1m1.ppm");
         sakshi_info("wrote /tmp/doom_e1m1.ppm", 24);
+        # Also render automap
+        automap_active = 1;
+        player_x = view_x;
+        player_y = view_y;
+        automap_render();
+        status_render();
+        framebuf_write_ppm("/tmp/doom_automap.ppm");
+        sakshi_info("wrote /tmp/doom_automap.ppm", 27);
         wad_close();
         syscall(60, 0);
     }
@@ -104,14 +114,22 @@ fn doom_main() {
         tick_begin();
         input_poll();
         if (input_quit == 1) { game_running = 0; continue; }
+        # TAB toggles automap (check via input flags, TAB = key code 9)
+        if ((input_flags & 512) != 0) { automap_toggle(); }
+
         player_tick();
         if (input_use() == 1) { doors_use(); }
         doors_tick();
         things_tick();
         sound_tick();
-        render_frame();
-        sprite_render_all();
-        render_draw_weapon(4);
+
+        if (automap_active == 1) {
+            automap_render();
+        } else {
+            render_frame();
+            sprite_render_all();
+            render_draw_weapon(4);
+        }
         status_render();
         framebuf_flip();
         tick_wait();

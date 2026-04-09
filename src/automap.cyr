@@ -1,0 +1,173 @@
+# automap.cyr -- 2D overhead map display
+# Usage: include "src/automap.cyr" (after map.cyr, framebuf.cyr, player.cyr, fixed.cyr)
+#
+# TAB toggles automap. When active, replaces the 3D view.
+# Shows linedefs as colored lines, player as arrow.
+#
+# Colors (palette indices):
+#   176 (red) — one-sided walls (solid)
+#   160 (yellow) — two-sided with height change (step/door)
+#   96 (grey) — two-sided same height (portal)
+#   112 (green) — player arrow
+#   200 (blue) — things
+
+var automap_active = 0;
+var automap_scale = 0;
+var automap_cx = 0;
+var automap_cy = 0;
+
+fn automap_init() {
+    automap_active = 0;
+    automap_scale = 2048;
+    return 0;
+}
+
+fn automap_toggle() {
+    if (automap_active == 0) { automap_active = 1; }
+    else { automap_active = 0; }
+    return 0;
+}
+
+# Transform world coords to screen coords
+fn am_screen_x(wx) {
+    return HALF_WIDTH + asr(fixed_mul(wx - automap_cx, automap_scale), 16);
+}
+
+fn am_screen_y(wy) {
+    return HALF_HEIGHT - asr(fixed_mul(wy - automap_cy, automap_scale), 16);
+}
+
+# Draw a line using Bresenham's algorithm
+fn am_draw_line(x1, y1, x2, y2, color) {
+    var dx = x2 - x1;
+    var dy = y2 - y1;
+    if (dx < 0) { dx = 0 - dx; }
+    if (dy < 0) { dy = 0 - dy; }
+
+    var sx = 1;
+    if (x1 > x2) { sx = 0 - 1; }
+    var sy = 1;
+    if (y1 > y2) { sy = 0 - 1; }
+
+    var err = dx - dy;
+    var safety = 0;
+
+    while (safety < 1000) {
+        framebuf_pixel(x1, y1, color);
+        if (x1 == x2) { if (y1 == y2) { break; } }
+
+        var e2 = err * 2;
+        if (e2 > 0 - dy) {
+            err = err - dy;
+            x1 = x1 + sx;
+        }
+        if (e2 < dx) {
+            err = err + dx;
+            y1 = y1 + sy;
+        }
+        safety = safety + 1;
+    }
+    return 0;
+}
+
+# Draw player arrow
+fn am_draw_player() {
+    var px = am_screen_x(player_x);
+    var py = am_screen_y(player_y);
+
+    # Arrow: 3 lines from center in facing direction
+    var arrow_len = 8;
+    var cos = fixed_cos(player_angle);
+    var sin = fixed_sin(player_angle);
+
+    var fx = px + asr(cos * arrow_len, 16);
+    var fy = py - asr(sin * arrow_len, 16);
+
+    # Arrow head
+    am_draw_line(px, py, fx, fy, 112);
+
+    # Arrow wings (±135 degrees from facing)
+    var wing_len = 5;
+    var lang = angle_add(player_angle, 640);
+    var rang = angle_sub(player_angle, 640);
+    var lx = px + asr(fixed_cos(lang) * wing_len, 16);
+    var ly = py - asr(fixed_sin(lang) * wing_len, 16);
+    var rx = px + asr(fixed_cos(rang) * wing_len, 16);
+    var ry = py - asr(fixed_sin(rang) * wing_len, 16);
+
+    am_draw_line(fx, fy, lx, ly, 112);
+    am_draw_line(fx, fy, rx, ry, 112);
+    return 0;
+}
+
+# Draw the full automap
+fn automap_render() {
+    if (automap_active == 0) { return 0; }
+
+    # Center on player
+    automap_cx = player_x;
+    automap_cy = player_y;
+
+    # Clear screen
+    framebuf_clear(0);
+
+    # Draw all linedefs
+    for (var i = 0; i < map_num_linedefs; i = i + 1) {
+        var v1 = map_linedef_v1(i);
+        var v2 = map_linedef_v2(i);
+        var flags = map_linedef_flags(i);
+
+        var x1 = am_screen_x(map_vertex_x(v1));
+        var y1 = am_screen_y(map_vertex_y(v1));
+        var x2 = am_screen_x(map_vertex_x(v2));
+        var y2 = am_screen_y(map_vertex_y(v2));
+
+        # Skip if entirely off screen
+        if (x1 < 0) { if (x2 < 0) { continue; } }
+        if (x1 >= SCREEN_WIDTH) { if (x2 >= SCREEN_WIDTH) { continue; } }
+        if (y1 < 0) { if (y2 < 0) { continue; } }
+        if (y1 >= SCREEN_HEIGHT) { if (y2 >= SCREEN_HEIGHT) { continue; } }
+
+        # Don't draw hidden lines
+        if ((flags & ML_DONTDRAW) != 0) { continue; }
+
+        var color = 96;
+        if ((flags & ML_TWOSIDED) == 0) {
+            # One-sided: solid wall (red)
+            color = 176;
+        } else {
+            # Two-sided: check for height change
+            var rs = map_linedef_side_right(i);
+            var ls = map_linedef_side_left(i);
+            if (rs >= 0) { if (ls >= 0) {
+                var rs_sec = map_sidedef_sector(rs);
+                var ls_sec = map_sidedef_sector(ls);
+                var rf = map_sector_floorh(rs_sec);
+                var lf = map_sector_floorh(ls_sec);
+                var rc = map_sector_ceilh(rs_sec);
+                var lc = map_sector_ceilh(ls_sec);
+                if (rf != lf) { color = 160; }
+                if (rc != lc) { color = 160; }
+            } }
+        }
+
+        am_draw_line(x1, y1, x2, y2, color);
+    }
+
+    # Draw things as dots
+    for (var i = 0; i < map_num_things; i = i + 1) {
+        var ttype = map_thing_type(i);
+        if (ttype >= 1) { if (ttype <= 4) { continue; } }
+        var tx = am_screen_x(map_thing_x(i));
+        var ty = am_screen_y(map_thing_y(i));
+        framebuf_pixel(tx, ty, 200);
+        framebuf_pixel(tx + 1, ty, 200);
+        framebuf_pixel(tx, ty + 1, 200);
+        framebuf_pixel(tx + 1, ty + 1, 200);
+    }
+
+    # Draw player arrow
+    am_draw_player();
+
+    return 0;
+}

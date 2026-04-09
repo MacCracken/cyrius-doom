@@ -5,6 +5,25 @@ All notable changes to cyrius-doom will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2026-04-09
+
+### Added
+
+- **automap.cyr** — 2D overhead map display (TAB toggle)
+- Bresenham line drawing for all linedefs
+- Color-coded lines: red (solid walls), yellow (height changes), grey (portals)
+- Blue dots for things (monsters, items, decorations)
+- Green player arrow showing position and facing direction
+- Map centered on player, auto-scrolls with movement
+- TAB input flag added to input bitmask (INP_TAB = 512)
+- `--ppm` mode now outputs both 3D view and automap screenshots
+
+### Changed
+
+- Binary size: 123KB
+- Source: 17 .cyr files
+- Game loop: TAB toggles between 3D view and automap
+
 ## [0.14.0] - 2026-04-09
 
 ### Added
