@@ -135,28 +135,20 @@ var TF_CORPSE = 32;
 # Field accessors
 fn thing_x(idx) { return load64(things + idx * THING_SIZE); }
 fn thing_y(idx) { return load64(things + idx * THING_SIZE + 8); }
-fn thing_z(idx) { return load64(things + idx * THING_SIZE + 16); }
 fn thing_angle(idx) { return load64(things + idx * THING_SIZE + 24); }
 fn thing_type(idx) { return load64(things + idx * THING_SIZE + 32); }
 fn thing_state(idx) { return load64(things + idx * THING_SIZE + 40); }
 fn thing_health(idx) { return load64(things + idx * THING_SIZE + 48); }
 fn thing_category(idx) { return load64(things + idx * THING_SIZE + 56); }
-fn thing_dx(idx) { return load64(things + idx * THING_SIZE + 64); }
-fn thing_dy(idx) { return load64(things + idx * THING_SIZE + 72); }
-fn thing_radius(idx) { return load64(things + idx * THING_SIZE + 80); }
-fn thing_height(idx) { return load64(things + idx * THING_SIZE + 88); }
 fn thing_tics(idx) { return load64(things + idx * THING_SIZE + 96); }
 fn thing_flags(idx) { return load64(things + idx * THING_SIZE + 104); }
 
 fn thing_set_state(idx, st) { store64(things + idx * THING_SIZE + 40, st); return 0; }
 fn thing_set_health(idx, h) { store64(things + idx * THING_SIZE + 48, h); return 0; }
-fn thing_set_dx(idx, v) { store64(things + idx * THING_SIZE + 64, v); return 0; }
-fn thing_set_dy(idx, v) { store64(things + idx * THING_SIZE + 72, v); return 0; }
 fn thing_set_tics(idx, t) { store64(things + idx * THING_SIZE + 96, t); return 0; }
 fn thing_set_flags(idx, f) { store64(things + idx * THING_SIZE + 104, f); return 0; }
 fn thing_set_x(idx, v) { store64(things + idx * THING_SIZE, v); return 0; }
 fn thing_set_y(idx, v) { store64(things + idx * THING_SIZE + 8, v); return 0; }
-fn thing_set_z(idx, v) { store64(things + idx * THING_SIZE + 16, v); return 0; }
 fn thing_set_angle(idx, v) { store64(things + idx * THING_SIZE + 24, v); return 0; }
 
 # ================================================================

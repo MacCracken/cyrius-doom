@@ -50,12 +50,6 @@ fn fixed_abs(f) {
     return f;
 }
 
-fn fixed_sign(f) {
-    if (f < 0) { return FIXED_NEG_ONE; }
-    if (f > 0) { return FIXED_ONE; }
-    return 0;
-}
-
 fn fixed_min(a, b) { if (a < b) { return a; } return b; }
 fn fixed_max(a, b) { if (a > b) { return a; } return b; }
 
@@ -74,10 +68,6 @@ fn fixed_approx_dist(dx, dy) {
     var ady = fixed_abs(dy);
     if (adx > ady) { return adx + asr(ady, 1); }
     return ady + asr(adx, 1);
-}
-
-fn fixed_dot2(ax, ay, bx, by) {
-    return fixed_mul(ax, bx) + fixed_mul(ay, by);
 }
 
 fn fixed_lerp(a, b, t) {

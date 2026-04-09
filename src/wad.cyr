@@ -161,23 +161,3 @@ fn wad_read_lump_into(lump_index, buf, bufsize) {
     return file_read(wad_fd, buf, size);
 }
 
-fn wad_dump_directory() {
-    syscall(1, 1, "WAD: ", 5);
-    fmt_int(wad_numlumps);
-    syscall(1, 1, " lumps\n", 7);
-
-    for (var i = 0; i < wad_numlumps; i = i + 1) {
-        var entry = wad_dir + i * WAD_DIR_ENTRY_SIZE;
-        fmt_int(i);
-        syscall(1, 1, ": ", 2);
-        for (var j = 0; j < 8; j = j + 1) {
-            var c = load8(entry + 16 + j);
-            if (c == 0) { break; }
-            syscall(1, 1, entry + 16 + j, 1);
-        }
-        syscall(1, 1, " sz=", 4);
-        fmt_int(load64(entry + 8));
-        syscall(1, 1, "\n", 1);
-    }
-    return 0;
-}

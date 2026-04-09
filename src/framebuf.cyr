@@ -85,23 +85,6 @@ fn framebuf_fill_rect(x, y, w, h, color) {
     return 0;
 }
 
-fn framebuf_blit(src, dst_x, dst_y, w, h) {
-    for (var row = 0; row < h; row = row + 1) {
-        var sy = dst_y + row;
-        if (sy >= 0) { if (sy < SCREEN_HEIGHT) {
-            var dst_off = sy * SCREEN_WIDTH + dst_x;
-            var src_off = row * w;
-            for (var col = 0; col < w; col = col + 1) {
-                var sx = dst_x + col;
-                if (sx >= 0) { if (sx < SCREEN_WIDTH) {
-                    store8(screen_buf + dst_off + col, load8(src + src_off + col));
-                } }
-            }
-        } }
-    }
-    return 0;
-}
-
 fn framebuf_flip() {
     for (var i = 0; i < SCREEN_SIZE; i = i + 1) {
         var ci = load8(screen_buf + i);

@@ -12,23 +12,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **All 13 modules compiled** — things, status, menu, sound now included in game loop
 - Span-based floor/ceiling rendering (row-by-row with horizontal stepping)
 - Deferred visplane system: walls collect span bounds, flats drawn in second pass
+- **Patch data cache** — 8-slot LRU cache eliminates WAD I/O during rendering (**200x speedup**)
+- **Sky texture rendering** — F_SKY1 ceiling replaced with SKY1 wall texture mapped to view angle
+- Dead code elimination: removed 40 unused functions
+- Switched to `lib/io.cyr` (no more inline file_* functions)
 - Full game loop: input → AI → sound → render → sprites → HUD → flip
-- Things system active: 29 monsters, 67 items, 38 decorations spawned from E1M1
-- Status bar HUD: ammo, health, armor, weapon slots, face, keys, ammo totals
-- Sound system: PC speaker tone queue (ready for /dev/console)
-- Menu system: title screen, main menu, skill select
+- Things: 29 monsters, 67 items, 38 decorations
+- Status bar HUD, sound system, menu system
 
 ### Changed
 
-- Binary size: 108KB (all 13 modules, was 81KB with 9 modules)
-- Requires cyrius 2.4.0+ (expanded gvar_toks from 64 to 1024)
-- Floor/ceiling rendering uses span-based approach (faster than per-pixel)
+- Binary size: 107KB (down from 108KB despite adding features — dead code removal)
+- Frame render time: **22ms** (was ~5 seconds — patch cache + span optimization)
+- Runs at full 35Hz framerate within tick budget (28ms)
+- Requires cyrius 2.4.0+ (expanded gvar_toks to 1024)
 - Compile time: 79ms
+- Source: 3,905 lines across 16 files
 
 ### Fixed
 
-- `tick_count` reference in things.cyr → use `tick_get_count()` (packed state)
-- Menu input references → use function accessors `input_forward()` etc.
+- `tick_count` → `tick_get_count()` (packed state)
+- Menu input refs → function accessors
+- Cleaned up main.cyr (removed debug prints, tightened structure)
 
 ## [0.9.0] - 2026-04-08
 

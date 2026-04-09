@@ -1,17 +1,13 @@
-# main.cyr -- DOOM entry point
-# Build: cat src/main.cyr | cc2 > build/doom && chmod +x build/doom
-# Run:   ./build/doom /path/to/doom1.wad [mapname] [--ppm]
+# main.cyr -- DOOM engine entry point
+# Build: cyrius build src/main.cyr build/doom
+# Run:   ./build/doom <wadfile> [mapname] [--ppm]
 
 include "lib/string.cyr"
 include "lib/alloc.cyr"
 include "lib/fmt.cyr"
+include "lib/io.cyr"
 include "lib/args.cyr"
 include "lib/sakshi.cyr"
-
-fn file_open(p, f, m) { return syscall(2, p, f, m); }
-fn file_close(fd) { return syscall(3, fd); }
-fn file_read(fd, b, l) { return syscall(0, fd, b, l); }
-fn file_write(fd, b, l) { return syscall(1, fd, b, l); }
 
 include "src/fixed.cyr"
 include "src/tables.cyr"
@@ -34,42 +30,31 @@ var game_running = 0;
 fn doom_main() {
     alloc_init();
     args_init();
-
-    sakshi_info("cyrius-doom v0.10.0", 18);
+    sakshi_info("cyrius-doom v0.10.0", 19);
 
     if (argc() < 2) {
         sakshi_error("usage: doom <wad> [map] [--ppm]", 31);
         syscall(60, 1);
     }
 
-    sakshi_debug("init tables", 11);
+    # Init subsystems
     tables_init();
-
-    var wad_path = argv(1);
-    sakshi_info("opening WAD", 11);
-    if (wad_open(wad_path) != 0) {
-        sakshi_error("cannot open WAD", 15);
-        syscall(60, 1);
-    }
+    if (wad_open(argv(1)) != 0) { sakshi_error("cannot open WAD", 15); syscall(60, 1); }
     sakshi_info("wad loaded", 10);
 
     var pal_idx = wad_find_lump("PLAYPAL");
     if (pal_idx >= 0) {
-        var pal_data = wad_read_lump(pal_idx);
-        if (pal_data != 0) {
-            framebuf_set_palette(pal_data);
-            sakshi_debug("palette loaded", 14);
-        }
-    } else {
-        sakshi_warn("PLAYPAL not found", 17);
+        var pd = wad_read_lump(pal_idx);
+        if (pd != 0) { framebuf_set_palette(pd); }
     }
 
     framebuf_init();
     render_load_colormap();
-    sakshi_debug("loading textures", 16);
     texture_init();
+    render_load_sky();
     sprite_init();
 
+    # Parse args
     var ppm_mode = 0;
     var map_name = "E1M1";
     if (argc() >= 3) {
@@ -80,16 +65,10 @@ fn doom_main() {
         if (streq(argv(3), "--ppm") == 1) { ppm_mode = 1; }
     }
 
-    sakshi_info("loading map", 11);
-    if (map_load(map_name) != 0) {
-        sakshi_error("cannot load map", 15);
-        syscall(60, 1);
-    }
+    # Load map
+    if (map_load(map_name) != 0) { sakshi_error("cannot load map", 15); syscall(60, 1); }
     map_print_stats();
-
-    if (map_find_player_start() != 0) {
-        sakshi_warn("no player start found", 21);
-    }
+    map_find_player_start();
 
     player_init();
     status_init_font();
@@ -97,26 +76,24 @@ fn doom_main() {
     things_spawn_from_map();
     things_print_stats();
 
+    # Screenshot mode
     if (ppm_mode == 1) {
-        sakshi_info("PPM screenshot mode", 19);
         view_x = player_start_x();
         view_y = player_start_y();
         view_angle = player_start_angle();
-
         render_frame();
         sprite_render_all();
         status_render();
-
         framebuf_write_ppm("/tmp/doom_e1m1.ppm");
         sakshi_info("wrote /tmp/doom_e1m1.ppm", 24);
         wad_close();
         syscall(60, 0);
     }
 
+    # Game loop
     input_init();
     tick_init();
-
-    sakshi_info("WASD=move arrows=turn F=fire E=use Q=quit", 41);
+    sakshi_info("WASD=move arrows=turn F=fire E=use Q=quit", 42);
 
     game_running = 1;
     while (game_running == 1) {
@@ -133,10 +110,10 @@ fn doom_main() {
         tick_wait();
     }
 
+    # Shutdown
     input_shutdown();
     sound_shutdown();
     framebuf_write_ppm("/tmp/doom_final.ppm");
-    sakshi_info("wrote /tmp/doom_final.ppm", 25);
     wad_close();
     framebuf_shutdown();
     sakshi_info("clean exit", 10);

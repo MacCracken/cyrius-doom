@@ -83,8 +83,6 @@ fn map_vertex_y(idx) { return load64(map_vertexes + idx * MAP_VERTEX_SIZE + 8); 
 fn map_linedef_v1(idx) { return load64(map_linedefs + idx * MAP_LINEDEF_SIZE); }
 fn map_linedef_v2(idx) { return load64(map_linedefs + idx * MAP_LINEDEF_SIZE + 8); }
 fn map_linedef_flags(idx) { return load64(map_linedefs + idx * MAP_LINEDEF_SIZE + 16); }
-fn map_linedef_special(idx) { return load64(map_linedefs + idx * MAP_LINEDEF_SIZE + 24); }
-fn map_linedef_tag(idx) { return load64(map_linedefs + idx * MAP_LINEDEF_SIZE + 32); }
 fn map_linedef_side_right(idx) { return load64(map_linedefs + idx * MAP_LINEDEF_SIZE + 40); }
 fn map_linedef_side_left(idx) { return load64(map_linedefs + idx * MAP_LINEDEF_SIZE + 48); }
 
@@ -97,12 +95,10 @@ fn map_sector_ceilh(idx) { return load64(map_sectors + idx * MAP_SECTOR_SIZE + 8
 fn map_sector_floor_tex(idx) { return map_sectors + idx * MAP_SECTOR_SIZE + 16; }
 fn map_sector_ceil_tex(idx) { return map_sectors + idx * MAP_SECTOR_SIZE + 24; }
 fn map_sector_light(idx) { return load64(map_sectors + idx * MAP_SECTOR_SIZE + 32); }
-fn map_sector_special(idx) { return load64(map_sectors + idx * MAP_SECTOR_SIZE + 40); }
-fn map_sector_tag(idx) { return load64(map_sectors + idx * MAP_SECTOR_SIZE + 48); }
+
 
 fn map_seg_v1(idx) { return load64(map_segs + idx * MAP_SEG_SIZE); }
 fn map_seg_v2(idx) { return load64(map_segs + idx * MAP_SEG_SIZE + 8); }
-fn map_seg_angle(idx) { return load64(map_segs + idx * MAP_SEG_SIZE + 16); }
 fn map_seg_linedef(idx) { return load64(map_segs + idx * MAP_SEG_SIZE + 24); }
 fn map_seg_side(idx) { return load64(map_segs + idx * MAP_SEG_SIZE + 32); }
 fn map_seg_offset(idx) { return load64(map_segs + idx * MAP_SEG_SIZE + 40); }
@@ -114,8 +110,6 @@ fn map_node_x(idx) { return load64(map_nodes + idx * MAP_NODE_SIZE); }
 fn map_node_y(idx) { return load64(map_nodes + idx * MAP_NODE_SIZE + 8); }
 fn map_node_dx(idx) { return load64(map_nodes + idx * MAP_NODE_SIZE + 16); }
 fn map_node_dy(idx) { return load64(map_nodes + idx * MAP_NODE_SIZE + 24); }
-fn map_node_bbox_r(idx, field) { return load64(map_nodes + idx * MAP_NODE_SIZE + 32 + field * 8); }
-fn map_node_bbox_l(idx, field) { return load64(map_nodes + idx * MAP_NODE_SIZE + 64 + field * 8); }
 fn map_node_child_r(idx) { return load64(map_nodes + idx * MAP_NODE_SIZE + 96); }
 fn map_node_child_l(idx) { return load64(map_nodes + idx * MAP_NODE_SIZE + 104); }
 
@@ -123,7 +117,7 @@ fn map_thing_x(idx) { return load64(map_things + idx * MAP_THING_SIZE); }
 fn map_thing_y(idx) { return load64(map_things + idx * MAP_THING_SIZE + 8); }
 fn map_thing_angle(idx) { return load64(map_things + idx * MAP_THING_SIZE + 16); }
 fn map_thing_type(idx) { return load64(map_things + idx * MAP_THING_SIZE + 24); }
-fn map_thing_flags(idx) { return load64(map_things + idx * MAP_THING_SIZE + 32); }
+
 
 fn map_is_subsector(child) {
     if ((child & NF_SUBSECTOR) != 0) { return 1; }

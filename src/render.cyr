@@ -47,6 +47,14 @@ var clip_count = 0;
 # Loaded from WAD, used for proper DOOM lighting
 var colormap = 0;
 
+# Sky texture: drawn when ceiling flat is F_SKY1
+var sky_tex_idx = 0 - 1;
+
+fn render_load_sky() {
+    sky_tex_idx = texture_find("SKY1");
+    return 0;
+}
+
 fn render_load_colormap() {
     var idx = wad_find_lump("COLORMAP");
     if (idx >= 0) {
@@ -200,26 +208,6 @@ fn render_init_clip() {
 # Convert a world-space angle to a screen column.
 # angle is relative to view direction (negative = left, positive = right)
 # Returns column index 0..319, or -1 if off-screen.
-fn render_angle_to_col(angle) {
-    # Normalize to view-relative angle
-    var rel = angle_sub(angle, view_angle);
-
-    # Map: center = 160, left edge = +FOV/2, right edge = -FOV/2
-    # Each angle unit = 320 / FOV pixels = 320/256 = 1.25 pixels
-    # col = 160 - rel * 320 / FOV
-
-    # Handle wrapping: if rel > 512, it wrapped around
-    if (rel > ANG180) { rel = rel - ANG360; }
-
-    # Check if within FOV
-    if (rel > VIEW_FOV_HALF) { return 0 - 1; }
-    if (rel < 0 - VIEW_FOV_HALF) { return 0 - 1; }
-
-    var col = HALF_WIDTH - rel * SCREEN_WIDTH / VIEW_FOV;
-    if (col < 0) { col = 0; }
-    if (col >= SCREEN_WIDTH) { col = SCREEN_WIDTH - 1; }
-    return col;
-}
 
 # ================================================================
 # Transform a vertex from world space to view space
@@ -357,6 +345,15 @@ fn render_seg(seg_idx) {
     var floor_flat = flat_find(map_sector_floor_tex(sector_idx));
     var ceil_flat = flat_find(map_sector_ceil_tex(sector_idx));
 
+    # Check for sky ceiling (F_SKY1)
+    var is_sky = 0;
+    var sky_name = map_sector_ceil_tex(sector_idx);
+    if (load8(sky_name) == 70) { if (load8(sky_name + 1) == 95) {
+        if (load8(sky_name + 2) == 83) { if (load8(sky_name + 3) == 75) {
+            is_sky = 1;
+        } }
+    } }
+
     # Eye height for floor plane distance calculation
     var plane_eye_h = VIEW_HEIGHT;
 
@@ -423,10 +420,26 @@ fn render_seg(seg_idx) {
         if (col_light > 31) { col_light = 31; }
         if (col_light < 0) { col_light = 0; }
 
-        # Draw ceiling — store bounds for deferred span rendering
+        # Draw ceiling
         if (ceil_screen > ct) {
-            if (ceil_flat < 0) {
-                framebuf_vline(col, ct, ceil_screen - 1, render_shade(ceil_base_pal, col_light));
+            if (is_sky == 1) {
+                # Sky: draw from sky texture mapped to view angle
+                if (sky_tex_idx >= 0) {
+                    var sky_w = load64(tex_table + sky_tex_idx * TEX_ENTRY_SIZE + 8);
+                    var sky_h = load64(tex_table + sky_tex_idx * TEX_ENTRY_SIZE + 16);
+                    if (sky_w > 0) {
+                        if (sky_h > 0) {
+                            var sky_col = (view_angle * sky_w / ANG360 + col) % sky_w;
+                            if (sky_col < 0) { sky_col = sky_col + sky_w; }
+                            var sky_step = fixed_div(sky_h << 16, HALF_HEIGHT << 16);
+                            render_draw_tex_column(col, ct, ceil_screen - 1, sky_tex_idx, sky_col, 0, sky_step, 0);
+                        }
+                    }
+                }
+            } else {
+                if (ceil_flat < 0) {
+                    framebuf_vline(col, ct, ceil_screen - 1, render_shade(ceil_base_pal, col_light));
+                }
             }
             for (var cy = ct; cy < ceil_screen; cy = cy + 1) {
                 var cx1 = load64(vp_ceil_x1 + cy * 8);

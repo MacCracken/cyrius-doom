@@ -52,6 +52,7 @@ fn tex_name_hash(name_ptr) {
 fn texture_init() {
     tex_table = alloc(TEX_MAX * TEX_ENTRY_SIZE);
     patch_lumps = alloc(PATCH_MAX * 8);
+    pcache_init();
     flat_cache = alloc(FLAT_MAX * FLAT_SIZE);
     flat_names = alloc(FLAT_MAX * 8);
     tex_count = 0;
@@ -129,6 +130,46 @@ fn texture_init() {
     return 0;
 }
 
+# ================================================================
+# Patch data cache: keep last 8 patches in memory
+# Each slot: lump_idx(8) + data(8KB) = 8 slots * 8200 = 65600 bytes
+# ================================================================
+enum PatchCache {
+    PCACHE_SLOTS = 8;
+    PCACHE_DATA_SIZE = 8192;
+    PCACHE_SLOT_SIZE = 8200;
+}
+
+var pcache = 0;
+var pcache_next = 0;
+
+fn pcache_init() {
+    pcache = alloc(PCACHE_SLOTS * PCACHE_SLOT_SIZE);
+    pcache_next = 0;
+    for (var i = 0; i < PCACHE_SLOTS; i = i + 1) {
+        store64(pcache + i * PCACHE_SLOT_SIZE, 0 - 1);
+    }
+    return 0;
+}
+
+fn pcache_get(lump_idx) {
+    # Check if already cached
+    for (var i = 0; i < PCACHE_SLOTS; i = i + 1) {
+        if (load64(pcache + i * PCACHE_SLOT_SIZE) == lump_idx) {
+            return pcache + i * PCACHE_SLOT_SIZE + 8;
+        }
+    }
+    # Cache miss: load into next slot (round-robin)
+    var slot = pcache_next;
+    pcache_next = (pcache_next + 1) % PCACHE_SLOTS;
+    var base = pcache + slot * PCACHE_SLOT_SIZE;
+    store64(base, lump_idx);
+    var sz = wad_lump_size(lump_idx);
+    if (sz > PCACHE_DATA_SIZE) { sz = PCACHE_DATA_SIZE; }
+    wad_read_lump_into(lump_idx, base + 8, sz);
+    return base + 8;
+}
+
 # Find texture index by name (8-char, null-padded)
 fn texture_find(name) {
     var h = tex_name_hash(name);
@@ -140,7 +181,6 @@ fn texture_find(name) {
     return 0 - 1;
 }
 
-fn texture_width(idx) { return load64(tex_table + idx * TEX_ENTRY_SIZE + 8); }
 fn texture_height(idx) { return load64(tex_table + idx * TEX_ENTRY_SIZE + 16); }
 
 # Get a column of pixels from a texture
@@ -182,8 +222,8 @@ fn texture_get_column(tex_idx, col, dest) {
         var plump = load64(patch_lumps + pidx * 8);
         if (plump < 0) { continue; }
 
-        # Read patch header
-        var pdata = wad_read_lump(plump);
+        # Read patch from cache
+        var pdata = pcache_get(plump);
         if (pdata == 0) { continue; }
 
         var pw = read_le16(pdata);
