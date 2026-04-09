@@ -294,22 +294,28 @@ fn map_load(map_name) {
     return 0;
 }
 
-# Player start
-var player_start_x = 0;
-var player_start_y = 0;
-var player_start_angle = 0;
+# Player start: packed into one heap block [0]=x [8]=y [16]=angle
+var player_start = 0;
 
 fn map_find_player_start() {
+    if (player_start == 0) { player_start = alloc(24); }
     for (var i = 0; i < map_num_things; i = i + 1) {
         if (map_thing_type(i) == THING_PLAYER1) {
-            player_start_x = map_thing_x(i);
-            player_start_y = map_thing_y(i);
-            player_start_angle = map_thing_angle(i) * 1024 / 360;
+            store64(player_start, map_thing_x(i));
+            store64(player_start + 8, map_thing_y(i));
+            store64(player_start + 16, map_thing_angle(i) * 1024 / 360);
             return 0;
         }
     }
+    store64(player_start, 0);
+    store64(player_start + 8, 0);
+    store64(player_start + 16, 0);
     return 0 - 1;
 }
+
+fn player_start_x() { return load64(player_start); }
+fn player_start_y() { return load64(player_start + 8); }
+fn player_start_angle() { return load64(player_start + 16); }
 
 fn map_point_on_side(x, y, node_idx) {
     var nx = map_node_x(node_idx);

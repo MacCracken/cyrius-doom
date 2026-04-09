@@ -40,16 +40,20 @@ enum PlayerConst {
 var player_health = 100;
 var player_armor = 0;
 var player_weapon = 1;
+var player_ammo_bullets = 50;
+var player_ammo_shells = 0;
+var player_ammo_rockets = 0;
+var player_ammo_cells = 0;
 
 # ================================================================
 # Player initialization
 # ================================================================
 
 fn player_init() {
-    player_x = player_start_x;
-    player_y = player_start_y;
+    player_x = player_start_x();
+    player_y = player_start_y();
     player_z = 0;
-    player_angle = player_start_angle;
+    player_angle = player_start_angle();
 
     player_health = 100;
     player_armor = 0;

@@ -3,10 +3,7 @@
 # Run:   ./build/doom /path/to/doom1.wad [mapname]
 #
 # Full game loop: walk through E1M1
-# BUG: fails to compile with all modules included
-# Error: "unexpected ';'" at preprocessed line ~1984
-# Root cause: unknown -- likely a cc2 compiler limit
-# The core engine (without input/player/tick) compiles at 45KB
+# Compiles with cc2 2.2.2+ (56KB binary, 64 globals)
 
 include "lib/string.cyr"
 include "lib/alloc.cyr"
