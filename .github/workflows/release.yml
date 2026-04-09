@@ -46,12 +46,15 @@ jobs:
           chmod +x build/doom
           echo "doom: $(wc -c < build/doom) bytes"
 
+      - name: Clean toolchain artifacts
+        run: rm -f cyrius-*.tar.gz
+
       - name: Archive
         run: |
           TAG="${GITHUB_REF_NAME}"
           tar czf "cyrius-doom-${TAG}-x86_64-linux.tar.gz" build/doom
           git archive --format=tar.gz --prefix="cyrius-doom-${TAG}/" -o "cyrius-doom-${TAG}-src.tar.gz" HEAD
-          sha256sum *.tar.gz > SHA256SUMS
+          sha256sum cyrius-doom-*.tar.gz > SHA256SUMS
 
       - uses: actions/upload-artifact@v4
         with:
@@ -77,5 +80,5 @@ jobs:
           body_path: /tmp/body.md
           prerelease: ${{ startsWith(github.ref_name, '0.') }}
           files: |
-            *.tar.gz
+            cyrius-doom-*.tar.gz
             SHA256SUMS

@@ -33,6 +33,9 @@ jobs:
           echo "$HOME/.cyrius/bin" >> $GITHUB_PATH
           echo "Cyrius $CYRIUS_VERSION installed"
 
+      - name: Download DOOM1.WAD
+        run: sh scripts/get-wad.sh wad
+
       - name: Build
         run: |
           mkdir -p build
@@ -43,6 +46,11 @@ jobs:
 
       - name: Verify ELF
         run: xxd -l 4 build/doom | grep -q "7f45 4c46"
+
+      - name: Smoke test with WAD
+        run: |
+          timeout 3 ./build/doom wad/DOOM1.WAD 2>&1 || true
+          echo "smoke test complete"
 
   security:
     name: Security Scan

@@ -1,0 +1,78 @@
+# Fuzz: fixed-point math with extreme values
+# Verify no division by zero crashes, overflow handling
+
+include "lib/string.cyr"
+include "lib/alloc.cyr"
+include "lib/vec.cyr"
+include "lib/fmt.cyr"
+include "lib/args.cyr"
+
+fn file_open(p, f, m) { return syscall(2, p, f, m); }
+fn file_close(fd) { return syscall(3, fd); }
+fn file_read(fd, b, l) { return syscall(0, fd, b, l); }
+fn file_write(fd, b, l) { return syscall(1, fd, b, l); }
+
+include "src/fixed.cyr"
+include "src/tables.cyr"
+
+var _fz_state = 42424;
+
+fn _fz_rand() {
+    _fz_state = _fz_state * 6364136223846793005 + 1442695040888963407;
+    return _fz_state;
+}
+
+fn main() {
+    alloc_init();
+    args_init();
+
+    var iters = 50000;
+    if (argc() > 1) { iters = str_to_int(str_from(argv(1))); }
+
+    _fz_state = 42424;
+    if (argc() > 2) { _fz_state = str_to_int(str_from(argv(2))); }
+
+    tables_init();
+
+    for (var i = 0; i < iters; i = i + 1) {
+        var a = _fz_rand();
+        var b = _fz_rand();
+
+        # Arithmetic (must not crash)
+        fixed_mul(a, b);
+        fixed_div(a, b);
+        fixed_div(a, 0);
+        fixed_abs(a);
+        fixed_min(a, b);
+        fixed_max(a, b);
+        fixed_clamp(a, b, a);
+        fixed_lerp(a, b, FIXED_HALF);
+        fixed_approx_dist(a, b);
+
+        # Trig with random angles (must not crash)
+        var ang = _fz_rand();
+        if (ang < 0) { ang = 0 - ang; }
+        fixed_sin(ang % 1024);
+        fixed_cos(ang % 1024);
+        fixed_tan(ang % 1024);
+
+        # atan2 with random inputs including zero
+        fixed_atan2(a, b);
+        fixed_atan2(0, b);
+        fixed_atan2(a, 0);
+        fixed_atan2(0, 0);
+
+        # Extreme values
+        fixed_mul(FIXED_MAX, FIXED_MAX);
+        fixed_div(FIXED_MAX, 1);
+        fixed_mul(0, FIXED_MAX);
+    }
+
+    syscall(1, 1, "fuzz_fixed: ", 12);
+    fmt_int(iters);
+    syscall(1, 1, " iterations OK\n", 15);
+    return 0;
+}
+
+var r = main();
+syscall(60, r);

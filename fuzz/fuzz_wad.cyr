@@ -1,0 +1,105 @@
+# Fuzz: WAD parser with malformed data
+# Write random bytes to a temp file, try to parse as WAD
+# Must not crash, must return errors gracefully
+
+include "lib/string.cyr"
+include "lib/alloc.cyr"
+include "lib/vec.cyr"
+include "lib/fmt.cyr"
+include "lib/args.cyr"
+
+fn file_open(p, f, m) { return syscall(2, p, f, m); }
+fn file_close(fd) { return syscall(3, fd); }
+fn file_read(fd, b, l) { return syscall(0, fd, b, l); }
+fn file_write(fd, b, l) { return syscall(1, fd, b, l); }
+
+include "src/fixed.cyr"
+include "src/tables.cyr"
+include "src/wad.cyr"
+
+var _fz_state = 31337;
+
+fn _fz_rand() {
+    _fz_state = _fz_state * 6364136223846793005 + 1442695040888963407;
+    return _fz_state;
+}
+
+fn _fz_byte() {
+    var r = _fz_rand();
+    if (r < 0) { r = 0 - r; }
+    return r % 256;
+}
+
+fn main() {
+    alloc_init();
+    args_init();
+
+    var iters = 1000;
+    if (argc() > 1) { iters = str_to_int(str_from(argv(1))); }
+
+    _fz_state = 31337;
+    if (argc() > 2) { _fz_state = str_to_int(str_from(argv(2))); }
+
+    tables_init();
+
+    var tmppath = "/tmp/fuzz_wad.bin";
+    var buf = alloc(4096);
+
+    for (var i = 0; i < iters; i = i + 1) {
+        # Generate random WAD-like data
+        var size = _fz_rand();
+        if (size < 0) { size = 0 - size; }
+        size = (size % 2048) + 12;
+
+        # Sometimes start with valid IWAD magic
+        var magic_roll = _fz_rand();
+        if (magic_roll < 0) { magic_roll = 0 - magic_roll; }
+        if (magic_roll % 4 == 0) {
+            store8(buf, 73);
+            store8(buf + 1, 87);
+            store8(buf + 2, 65);
+            store8(buf + 3, 68);
+        } else {
+            store8(buf, _fz_byte());
+            store8(buf + 1, _fz_byte());
+            store8(buf + 2, _fz_byte());
+            store8(buf + 3, _fz_byte());
+        }
+
+        # Random lump count and dir offset
+        for (var j = 4; j < size; j = j + 1) {
+            store8(buf + j, _fz_byte());
+        }
+
+        # Write to temp file
+        var fd = file_open(tmppath, 65, 0x1A4);
+        if (fd >= 0) {
+            file_write(fd, buf, size);
+            file_close(fd);
+
+            # Try to open as WAD (must not crash, may return error)
+            var rc = wad_open(tmppath);
+            if (rc == 0) {
+                # Parsed successfully -- try lump operations
+                if (wad_numlumps > 0) {
+                    wad_find_lump("E1M1");
+                    wad_find_lump("PLAYPAL");
+                    wad_lump_size(0);
+                    wad_read_lump(0);
+                }
+                wad_close();
+            }
+        }
+    }
+
+    # Cleanup
+    syscall(87, tmppath);
+
+    syscall(1, 1, "fuzz_wad: ", 10);
+    fmt_int(iters);
+    syscall(1, 1, " iterations OK\n", 15);
+    return 0;
+}
+
+var r = main();
+syscall(60, r);

@@ -29,6 +29,7 @@ fn framebuf_init() {
 }
 
 fn framebuf_set_palette(data) {
+    if (palette == 0) { palette = alloc(768); }
     memcpy(palette, data, 768);
     return 0;
 }
