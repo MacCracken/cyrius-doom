@@ -265,6 +265,32 @@ fn texture_get_column(tex_idx, col, dest) {
     return th;
 }
 
+# ================================================================
+# Animated flats: cycle between frames at ~8 tics per frame
+# DOOM animated flats: NUKAGE1/2/3, FWATER1/2/3/4, BLOOD1/2/3, etc.
+# We swap flat indices in the cache every N game ticks.
+# ================================================================
+
+var anim_tick_counter = 0;
+
+fn texture_animate() {
+    anim_tick_counter = anim_tick_counter + 1;
+    if (anim_tick_counter < 8) { return 0; }
+    anim_tick_counter = 0;
+
+    # Cycle animated flat sets by rotating their cache data
+    # Find NUKAGE1 and swap with NUKAGE2/3
+    for (var i = 0; i < flat_count; i = i + 1) {
+        var h = load64(flat_names + i * 8);
+        # Check for NUKAGE1 hash — swap data with next flat
+        # Simple approach: rotate pixel data between consecutive animated flats
+        # This works because DOOM WADs store animated flats in sequence
+    }
+    # For now, animation is a stub — full implementation needs
+    # the ANIMATED lump or hardcoded animation sequences
+    return 0;
+}
+
 # Find flat index by name hash
 fn flat_find(name) {
     var h = tex_name_hash(name);

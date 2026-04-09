@@ -33,6 +33,13 @@ var map_num_ssectors = 0;
 var map_num_nodes = 0;
 var map_num_things = 0;
 
+# BLOCKMAP for fast collision
+var map_blockmap = 0;
+var map_bm_originx = 0;
+var map_bm_originy = 0;
+var map_bm_cols = 0;
+var map_bm_rows = 0;
+
 enum MapSize {
     MAP_VERTEX_SIZE = 16;
     MAP_LINEDEF_SIZE = 56;
@@ -290,6 +297,19 @@ fn map_load(map_name) {
         store64(base + 16, read_le16(src + 4));
         store64(base + 24, read_le16(src + 6));
         store64(base + 32, read_le16(src + 8));
+    }
+
+    # BLOCKMAP (marker + 10) — grid for fast collision
+    lump_idx = marker + 10;
+    lump_size = wad_lump_size(lump_idx);
+    if (lump_size > 0) {
+        map_blockmap = alloc(lump_size);
+        wad_read_lump_into(lump_idx, map_blockmap, lump_size);
+        # Header: originx(2) originy(2) columns(2) rows(2)
+        map_bm_originx = sign_extend_16(read_le16(map_blockmap)) << 16;
+        map_bm_originy = sign_extend_16(read_le16(map_blockmap + 2)) << 16;
+        map_bm_cols = read_le16(map_blockmap + 4);
+        map_bm_rows = read_le16(map_blockmap + 6);
     }
 
     return 0;

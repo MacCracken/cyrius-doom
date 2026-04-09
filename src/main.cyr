@@ -30,7 +30,7 @@ var game_running = 0;
 fn doom_main() {
     alloc_init();
     args_init();
-    sakshi_info("cyrius-doom v0.12.0", 19);
+    sakshi_info("cyrius-doom v0.13.0", 19);
 
     if (argc() < 2) {
         sakshi_error("usage: doom <wad> [map] [--ppm]", 31);
@@ -74,6 +74,7 @@ fn doom_main() {
     status_init_font();
     sound_init();
     things_spawn_from_map();
+    render_set_weapon(1);
     things_print_stats();
 
     # Screenshot mode
@@ -83,6 +84,7 @@ fn doom_main() {
         view_angle = player_start_angle();
         render_frame();
         sprite_render_all();
+        render_draw_weapon(4);
         status_render();
         framebuf_write_ppm("/tmp/doom_e1m1.ppm");
         sakshi_info("wrote /tmp/doom_e1m1.ppm", 24);
@@ -105,6 +107,7 @@ fn doom_main() {
         sound_tick();
         render_frame();
         sprite_render_all();
+        render_draw_weapon(4);
         status_render();
         framebuf_flip();
         tick_wait();

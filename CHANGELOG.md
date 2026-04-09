@@ -5,6 +5,23 @@ All notable changes to cyrius-doom will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] - 2026-04-09
+
+### Added
+
+- **Weapon sprite overlay** — pistol rendered as screen overlay above status bar, COLORMAP shaded
+- `render_set_weapon()` / `render_draw_weapon()` — weapon sprite system with dedicated patch buffer
+- **BLOCKMAP collision** — loads WAD BLOCKMAP lump for O(1) cell-based collision detection
+- `player_check_linedef()` — extracted single-linedef collision check for blockmap + brute-force paths
+- `texture_animate()` stub — animation framework for cycling flat/texture names
+- `asr()` applied to collision math — fixed signed shift bugs in point-to-line distance
+
+### Changed
+
+- Binary size: 113KB
+- Collision detection: BLOCKMAP path when available, brute-force fallback
+- Player collision uses `asr()` for all signed shifts in distance calculations
+
 ## [0.12.0] - 2026-04-09
 
 ### Fixed (Audit Quick Wins)

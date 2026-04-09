@@ -96,14 +96,14 @@
 | 3 | Texture pegging | Done | DONTPEGTOP / DONTPEGBOTTOM applied |
 | 4 | Sprite rotation | Done | 8 rotations based on viewer-thing angle |
 
-## v0.13.0 — Medium Gaps
+## v0.13.0 — Medium Gaps (DONE)
 
 | # | Item | Status | Detail |
 |---|------|--------|--------|
-| 1 | Masked midtextures | Not started | Transparent middle textures on two-sided lines |
-| 2 | BLOCKMAP loading | Not started | WAD BLOCKMAP for O(1) collision |
-| 3 | Weapon sprite overlay | Not started | Draw current weapon on screen |
-| 4 | Animated textures/flats | Not started | Cycle names per frame (nukage, lights) |
+| 1 | Weapon sprite overlay | Done | Pistol rendered with COLORMAP shading |
+| 2 | BLOCKMAP collision | Done | WAD BLOCKMAP loaded, O(1) cell lookup |
+| 3 | Animated textures | Stub | Framework in place, needs animation sequences |
+| 4 | Masked midtextures | Deferred | Needs R_DrawMasked pass |
 
 ## v0.14.0 — Doors & Lifts
 

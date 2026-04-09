@@ -108,54 +108,94 @@ fn player_find_sector() {
 # ================================================================
 # Collision detection
 # ================================================================
-# Check if position (nx, ny) is valid (not inside a solid wall).
-# Uses linedef blocking checks within a radius around the position.
-#
-# Simple approach: test against all linedefs within range.
-# Original DOOM uses blockmap for efficiency -- we can add that later.
+# Uses BLOCKMAP when available for O(1) cell lookup, falls back to brute-force.
 
 fn player_check_position(nx, ny) {
     var radius = PLAYER_RADIUS;
 
-    for (var i = 0; i < map_num_linedefs; i = i + 1) {
-        var flags = map_linedef_flags(i);
+    # Use BLOCKMAP if loaded
+    if (map_blockmap != 0) {
+        # Find which blockmap cells the player radius covers
+        var bx1 = fixed_to_int(asr(nx - radius - map_bm_originx, 16)) / 128;
+        var by1 = fixed_to_int(asr(ny - radius - map_bm_originy, 16)) / 128;
+        var bx2 = fixed_to_int(asr(nx + radius - map_bm_originx, 16)) / 128;
+        var by2 = fixed_to_int(asr(ny + radius - map_bm_originy, 16)) / 128;
 
-        # Only check blocking lines
-        if ((flags & ML_BLOCKING) == 0) {
-            # Two-sided non-blocking lines need step/height check
-            if ((flags & ML_TWOSIDED) == 0) { continue; }
+        if (bx1 < 0) { bx1 = 0; }
+        if (by1 < 0) { by1 = 0; }
+        if (bx2 >= map_bm_cols) { bx2 = map_bm_cols - 1; }
+        if (by2 >= map_bm_rows) { by2 = map_bm_rows - 1; }
+
+        for (var by = by1; by <= by2; by = by + 1) {
+            for (var bx = bx1; bx <= bx2; bx = bx + 1) {
+                # Blockmap offset table starts at byte 8, each entry is 2 bytes
+                var cell_idx = by * map_bm_cols + bx;
+                var list_offset = read_le16(map_blockmap + 8 + cell_idx * 2) * 2;
+                var ptr = map_blockmap + list_offset;
+
+                # Skip the 0x0000 header
+                if (read_le16(ptr) == 0) { ptr = ptr + 2; }
+
+                # Read linedef indices until 0xFFFF terminator
+                var safety = 0;
+                while (safety < 256) {
+                    var li = read_le16(ptr);
+                    if (li == 0xFFFF) { break; }
+                    if (li >= 0x8000) { break; }
+                    if (li < map_num_linedefs) {
+                        var ok = player_check_linedef(nx, ny, radius, li);
+                        if (ok == 0) { return 0; }
+                    }
+                    ptr = ptr + 2;
+                    safety = safety + 1;
+                }
+            }
         }
+        return 1;
+    }
 
-        # Get linedef vertices
-        var v1 = map_linedef_v1(i);
-        var v2 = map_linedef_v2(i);
-        var lx1 = map_vertex_x(v1);
-        var ly1 = map_vertex_y(v1);
-        var lx2 = map_vertex_x(v2);
-        var ly2 = map_vertex_y(v2);
+    # Fallback: brute-force all linedefs
+    for (var i = 0; i < map_num_linedefs; i = i + 1) {
+        var ok = player_check_linedef(nx, ny, radius, i);
+        if (ok == 0) { return 0; }
+    }
+    return 1;
+}
 
-        # Quick bounding box reject
-        var min_x = fixed_min(lx1, lx2) - radius;
-        var max_x = fixed_max(lx1, lx2) + radius;
-        var min_y = fixed_min(ly1, ly2) - radius;
-        var max_y = fixed_max(ly1, ly2) + radius;
+# Check a single linedef for collision. Returns 1 if OK, 0 if blocked.
+fn player_check_linedef(nx, ny, radius, i) {
+    var flags = map_linedef_flags(i);
 
-        if (nx < min_x) { continue; }
-        if (nx > max_x) { continue; }
-        if (ny < min_y) { continue; }
-        if (ny > max_y) { continue; }
+    if ((flags & ML_BLOCKING) == 0) {
+        if ((flags & ML_TWOSIDED) == 0) { return 1; }
+    }
 
-        # Point-to-line-segment distance test
-        var ldx = lx2 - lx1;
-        var ldy = ly2 - ly1;
-        var pdx = nx - lx1;
-        var pdy = ny - ly1;
+    var v1 = map_linedef_v1(i);
+    var v2 = map_linedef_v2(i);
+    var lx1 = map_vertex_x(v1);
+    var ly1 = map_vertex_y(v1);
+    var lx2 = map_vertex_x(v2);
+    var ly2 = map_vertex_y(v2);
 
-        # Project point onto line: t = dot(p-v1, v2-v1) / dot(v2-v1, v2-v1)
-        var len_sq = fixed_mul(ldx >> 8, ldx >> 8) + fixed_mul(ldy >> 8, ldy >> 8);
-        if (len_sq == 0) { continue; }
+    var min_x = fixed_min(lx1, lx2) - radius;
+    var max_x = fixed_max(lx1, lx2) + radius;
+    var min_y = fixed_min(ly1, ly2) - radius;
+    var max_y = fixed_max(ly1, ly2) + radius;
 
-        var dot = fixed_mul(pdx >> 8, ldx >> 8) + fixed_mul(pdy >> 8, ldy >> 8);
+    if (nx < min_x) { return 1; }
+    if (nx > max_x) { return 1; }
+    if (ny < min_y) { return 1; }
+    if (ny > max_y) { return 1; }
+
+    var ldx = lx2 - lx1;
+    var ldy = ly2 - ly1;
+    var pdx = nx - lx1;
+    var pdy = ny - ly1;
+
+    var len_sq = fixed_mul(asr(ldx, 8), asr(ldx, 8)) + fixed_mul(asr(ldy, 8), asr(ldy, 8));
+    if (len_sq <= 0) { return 1; }
+
+        var dot = fixed_mul(asr(pdx, 8), asr(ldx, 8)) + fixed_mul(asr(pdy, 8), asr(ldy, 8));
         var t = fixed_div(dot, len_sq);
         t = fixed_clamp(t, 0, FIXED_ONE);
 
@@ -201,7 +241,6 @@ fn player_check_position(nx, ny) {
                 } }
             }
         }
-    }
 
     return 1;
 }

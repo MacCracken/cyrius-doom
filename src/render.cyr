@@ -55,6 +55,73 @@ fn render_load_sky() {
     return 0;
 }
 
+# Weapon sprite: drawn as screen overlay after all 3D rendering
+var weapon_lump = 0 - 1;
+var weapon_patch_buf = 0;
+
+fn render_set_weapon(weapon_id) {
+    if (weapon_patch_buf == 0) { weapon_patch_buf = alloc(16384); }
+    # Map weapon ID to sprite lump name
+    var name = alloc(8);
+    store64(name, 0);
+    if (weapon_id == 1) { memcpy(name, "PISGA0", 6); }
+    if (weapon_id == 2) { memcpy(name, "SHTGA0", 6); }
+    if (weapon_id == 3) { memcpy(name, "CHGGA0", 6); }
+    if (weapon_id == 5) { memcpy(name, "SAWGA0", 6); }
+    weapon_lump = wad_find_lump(name);
+    return 0;
+}
+
+fn render_draw_weapon(light_level) {
+    if (weapon_lump < 0) { return 0; }
+    if (weapon_patch_buf == 0) { weapon_patch_buf = alloc(16384); }
+
+    var psz = wad_lump_size(weapon_lump);
+    if (psz > 16384) { return 0; }
+    wad_read_lump_into(weapon_lump, weapon_patch_buf, psz);
+
+    var pw = read_le16(weapon_patch_buf);
+    var ph = read_le16(weapon_patch_buf + 2);
+    var loff = read_le16(weapon_patch_buf + 4);
+    var toff = read_le16(weapon_patch_buf + 6);
+    if (loff >= 0x8000) { loff = loff - 0x10000; }
+    if (toff >= 0x8000) { toff = toff - 0x10000; }
+
+    # Position weapon: DOOM centers at x=160, y offset from status bar
+    var sx = HALF_WIDTH + loff + 40;
+    var sy = SCREEN_HEIGHT - 32 + toff;
+
+    for (var col = 0; col < pw; col = col + 1) {
+        var scr_x = sx + col;
+        if (scr_x < 0) { continue; }
+        if (scr_x >= SCREEN_WIDTH) { continue; }
+
+        var col_off = read_le32(weapon_patch_buf + 8 + col * 4);
+        var post = weapon_patch_buf + col_off;
+
+        var safety = 0;
+        while (safety < 128) {
+            var td = load8(post);
+            if (td == 255) { break; }
+            var length = load8(post + 1);
+            var pixels = post + 3;
+
+            for (var py = 0; py < length; py = py + 1) {
+                var scr_y = sy + td + py;
+                if (scr_y < 0) { continue; }
+                if (scr_y >= SCREEN_HEIGHT) { continue; }
+                var pal = load8(pixels + py);
+                if (pal != 0) {
+                    framebuf_pixel(scr_x, scr_y, render_shade(pal, light_level));
+                }
+            }
+            post = post + 4 + length;
+            safety = safety + 1;
+        }
+    }
+    return 0;
+}
+
 fn render_load_colormap() {
     var idx = wad_find_lump("COLORMAP");
     if (idx >= 0) {
