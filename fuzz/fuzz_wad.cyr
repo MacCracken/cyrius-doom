@@ -5,13 +5,11 @@
 include "lib/string.cyr"
 include "lib/alloc.cyr"
 include "lib/vec.cyr"
+include "lib/str.cyr"
 include "lib/fmt.cyr"
+include "lib/io.cyr"
 include "lib/args.cyr"
-
-fn file_open(p, f, m) { return syscall(2, p, f, m); }
-fn file_close(fd) { return syscall(3, fd); }
-fn file_read(fd, b, l) { return syscall(0, fd, b, l); }
-fn file_write(fd, b, l) { return syscall(1, fd, b, l); }
+include "lib/sakshi.cyr"
 
 include "src/fixed.cyr"
 include "src/tables.cyr"
