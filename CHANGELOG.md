@@ -5,6 +5,46 @@ All notable changes to cyrius-doom will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.0] - 2026-04-10
+
+### Added
+
+- **WAD-native status bar** — STBAR background texture, STTNUM red numbers, STYSNUM yellow numbers, STTPRCNT percent sign, all loaded from WAD
+- **Weapon ownership tracking** — `player_weapons` bitmask, yellow/grey arms display
+- **Face background layering** — black rect behind STBAR cutout, Doomguy face on top
+- **Weapon sprite at 1:1** — correct scale, positioned by patch offsets
+- Wolfenstein Black Book audit started — raycasting fundamentals, compiled scalers, deferred rendering documented
+
+### Fixed
+
+- Status bar number positioning — AMMO and ARMOR shifted to match original DOOM layout
+- ARMS display — grey (STGNUM) for unowned weapons, yellow (STYSNUM) for owned
+- Row spacing for weapons 5-6-7 tightened from 12px to 10px
+- Weapon pickup now sets `player_weapons` bitmask (shotgun=bit3, chaingun=bit4, etc.)
+- `STBAR_BG_COLOR` removed — was undefined after status bar rewrite
+
+### Changed
+
+- Binary size: 129KB
+- Status bar rendered from WAD graphics instead of procedural drawing
+- Minimum Cyrius version: 3.3.11+ (stack args fix required)
+- Benchmarks updated to batch mode (`bench_batch_start/stop`) for accurate timing
+- cc3 3.3.13 verified: 73/73 DOOM tests, 74/74 BSP tests
+
+### Performance (cc3 3.3.13, batch benchmarks)
+
+- fixed_mul: 6ns
+- asr: 5ns  
+- render_frame: 3.9ms
+- render+sprites: 4.8ms
+
+### Known Issues (polish for 0.19.0)
+
+- Weapon sprite X position slightly left of original DOOM
+- Ammo totals right-side numbers could be better aligned
+- Key indicators not yet drawn
+- Weapon switching (1-7 keys) not implemented
+
 ## [0.17.2] - 2026-04-09
 
 ### Changed

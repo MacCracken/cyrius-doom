@@ -198,26 +198,26 @@ fn player_check_linedef(nx, ny, radius, i) {
     var len_sq = fixed_mul(asr(ldx, 8), asr(ldx, 8)) + fixed_mul(asr(ldy, 8), asr(ldy, 8));
     if (len_sq <= 0) { return 1; }
 
-        var dot = fixed_mul(asr(pdx, 8), asr(ldx, 8)) + fixed_mul(asr(pdy, 8), asr(ldy, 8));
-        var t = fixed_div(dot, len_sq);
-        t = fixed_clamp(t, 0, FIXED_ONE);
+    var dot = fixed_mul(asr(pdx, 8), asr(ldx, 8)) + fixed_mul(asr(pdy, 8), asr(ldy, 8));
+    var t = fixed_div(dot, len_sq);
+    t = fixed_clamp(t, 0, FIXED_ONE);
 
-        # Closest point on segment
-        var cx = lx1 + fixed_mul(t, ldx);
-        var cy = ly1 + fixed_mul(t, ldy);
+    # Closest point on segment
+    var cx = lx1 + fixed_mul(t, ldx);
+    var cy = ly1 + fixed_mul(t, ldy);
 
-        # Distance from player to closest point
-        var dist = fixed_approx_dist(nx - cx, ny - cy);
+    # Distance from player to closest point
+    var dist = fixed_approx_dist(nx - cx, ny - cy);
 
-        if (dist < radius) {
-            # Blocking line -- reject this position
-            if ((flags & ML_BLOCKING) != 0) { return 0; }
+    if (dist < radius) {
+        # Blocking line -- reject this position
+        if ((flags & ML_BLOCKING) != 0) { return 0; }
 
-            # Two-sided: check if player can step over height difference
-            if ((flags & ML_TWOSIDED) != 0) {
-                var right_side = map_linedef_side_right(i);
-                var left_side = map_linedef_side_left(i);
-                if (right_side >= 0) { if (left_side >= 0) {
+        # Two-sided: check if player can step over height difference
+        if ((flags & ML_TWOSIDED) != 0) {
+            var right_side = map_linedef_side_right(i);
+            var left_side = map_linedef_side_left(i);
+            if (right_side >= 0) { if (left_side >= 0) {
                     var rs = map_sidedef_sector(right_side);
                     var ls = map_sidedef_sector(left_side);
                     var rf = map_sector_floorh(rs);
@@ -242,8 +242,8 @@ fn player_check_linedef(nx, ny, radius, i) {
                         return 0;
                     }
                 } }
-            }
         }
+    }
 
     return 1;
 }

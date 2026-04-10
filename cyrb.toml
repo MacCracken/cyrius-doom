@@ -1,9 +1,9 @@
 name = "cyrius-doom"
-version = "0.10.0"
+version = "0.18.0"
 license = "GPL-3.0-only"
 entry = "src/main.cyr"
 output = "doom"
-description = "DOOM in Cyrius — 56KB, direct framebuffer, no libc, just syscalls."
+description = "DOOM in Cyrius — 129KB, direct framebuffer, no libc, just syscalls."
 repository = "https://github.com/MacCracken/cyrius-doom"
 
 [deps]

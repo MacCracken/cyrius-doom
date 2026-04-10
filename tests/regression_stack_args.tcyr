@@ -1,0 +1,45 @@
+# regression_stack_args.tcyr — cc3 stack argument regression test
+# Bug: cc3 3.3.8-3.3.10 passed garbage for function args 7+
+# Fixed: cc3 3.3.11
+# Guardrail: ensures 7+ arg functions never break again.
+
+include "lib/string.cyr"
+include "lib/alloc.cyr"
+include "lib/vec.cyr"
+include "lib/str.cyr"
+include "lib/fmt.cyr"
+include "lib/assert.cyr"
+
+fn sum6(a, b, c, d, e, f) { return a + b + c + d + e + f; }
+fn sum7(a, b, c, d, e, f, g) { return a + b + c + d + e + f + g; }
+fn sum8(a, b, c, d, e, f, g, h) { return a + b + c + d + e + f + g + h; }
+fn get7(a, b, c, d, e, f, g) { return g; }
+fn get8(a, b, c, d, e, f, g, h) { return h; }
+fn both78(a, b, c, d, e, f, g, h) { return g * 100 + h; }
+
+fn main() {
+    alloc_init();
+
+    test_group("register args (1-6)");
+    assert_eq(sum6(1, 2, 3, 4, 5, 6), 21, "sum 1-6 = 21");
+    assert_eq(sum6(10, 20, 30, 40, 50, 60), 210, "sum tens = 210");
+
+    test_group("stack arg 7");
+    assert_eq(get7(1, 2, 3, 4, 5, 6, 7), 7, "arg7 = 7");
+    assert_eq(get7(10, 20, 30, 40, 50, 60, 70), 70, "arg7 = 70");
+    assert_eq(get7(1, 2, 3, 4, 5, 6, 0 - 42), 0 - 42, "arg7 negative");
+    assert_eq(sum7(1, 2, 3, 4, 5, 6, 7), 28, "sum 1-7 = 28");
+
+    test_group("stack args 7+8");
+    assert_eq(get8(1, 2, 3, 4, 5, 6, 7, 8), 8, "arg8 = 8");
+    assert_eq(get8(10, 20, 30, 40, 50, 60, 70, 80), 80, "arg8 = 80");
+    assert_eq(get8(1, 2, 3, 4, 5, 6, 7, 0 - 99), 0 - 99, "arg8 negative");
+    assert_eq(sum8(1, 2, 3, 4, 5, 6, 7, 8), 36, "sum 1-8 = 36");
+    assert_eq(both78(1, 2, 3, 4, 5, 6, 7, 8), 708, "g*100+h = 708");
+    assert_eq(sum8(0-1, 0-2, 0-3, 0-4, 0-5, 0-6, 0-7, 0-8), 0 - 36, "sum neg = -36");
+
+    return assert_summary();
+}
+
+var r = main();
+syscall(60, r);

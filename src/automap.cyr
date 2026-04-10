@@ -140,15 +140,15 @@ fn automap_render() {
             var rs = map_linedef_side_right(i);
             var ls = map_linedef_side_left(i);
             if (rs >= 0) { if (ls >= 0) {
-                var rs_sec = map_sidedef_sector(rs);
-                var ls_sec = map_sidedef_sector(ls);
-                var rf = map_sector_floorh(rs_sec);
-                var lf = map_sector_floorh(ls_sec);
-                var rc = map_sector_ceilh(rs_sec);
-                var lc = map_sector_ceilh(ls_sec);
-                if (rf != lf) { color = 160; }
-                if (rc != lc) { color = 160; }
-            } }
+                    var rs_sec = map_sidedef_sector(rs);
+                    var ls_sec = map_sidedef_sector(ls);
+                    var rf = map_sector_floorh(rs_sec);
+                    var lf = map_sector_floorh(ls_sec);
+                    var rc = map_sector_ceilh(rs_sec);
+                    var lc = map_sector_ceilh(ls_sec);
+                    if (rf != lf) { color = 160; }
+                    if (rc != lc) { color = 160; }
+                } }
         }
 
         am_draw_line(x1, y1, x2, y2, color);

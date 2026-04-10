@@ -1,0 +1,60 @@
+# regression_asr.tcyr — logical vs arithmetic right shift regression
+# Bug: Cyrius >> is logical (zero-fill), not arithmetic (sign-extend)
+# Every negative fixed-point value was garbage without asr()
+# Guardrail: ensures asr() and fixed-point math handle negatives correctly.
+
+include "lib/string.cyr"
+include "lib/alloc.cyr"
+include "lib/vec.cyr"
+include "lib/str.cyr"
+include "lib/fmt.cyr"
+include "lib/io.cyr"
+include "lib/assert.cyr"
+
+include "src/fixed.cyr"
+include "src/tables.cyr"
+
+fn main() {
+    alloc_init();
+    tables_init();
+
+    test_group("asr positive values");
+    assert_eq(asr(256, 4), 16, "256>>4 = 16");
+    assert_eq(asr(65536, 16), 1, "65536>>16 = 1");
+    assert_eq(asr(0, 8), 0, "0>>8 = 0");
+    assert_eq(asr(1, 0), 1, "1>>0 = 1");
+
+    test_group("asr negative values (the critical bug)");
+    assert_eq(asr(0 - 100, 1), 0 - 50, "-100>>1 = -50");
+    assert_eq(asr(0 - 256, 4), 0 - 16, "-256>>4 = -16");
+    assert_eq(asr(0 - 65536, 16), 0 - 1, "-65536>>16 = -1");
+    assert_eq(asr(0 - 1000000, 16), 0 - 15, "-1000000>>16 = -15");
+
+    test_group("fixed_to_int negative round-trip");
+    var neg5 = fixed_from_int(0 - 5);
+    assert_eq(fixed_to_int(neg5), 0 - 5, "to_int(from_int(-5)) = -5");
+    var neg1000 = fixed_from_int(0 - 1000);
+    assert_eq(fixed_to_int(neg1000), 0 - 1000, "to_int(from_int(-1000)) = -1000");
+    var neg3616 = fixed_from_int(0 - 3616);
+    assert_eq(fixed_to_int(neg3616), 0 - 3616, "to_int(from_int(-3616)) = -3616 (E1M1 player Y)");
+
+    test_group("fixed_mul with negatives");
+    var pos10 = fixed_from_int(10);
+    var neg3 = fixed_from_int(0 - 3);
+    assert_eq(fixed_to_int(fixed_mul(pos10, neg3)), 0 - 30, "10 * -3 = -30");
+    assert_eq(fixed_to_int(fixed_mul(neg3, neg3)), 9, "-3 * -3 = 9");
+    assert_eq(fixed_to_int(fixed_mul(neg3, pos10)), 0 - 30, "-3 * 10 = -30");
+
+    test_group("sign_extend_16");
+    # 61920 = 0xF1E0 = -3616 as signed i16
+    var raw = 61920;
+    var lo = raw & 0xFFFF;
+    var extended = lo;
+    if (lo >= 0x8000) { extended = lo - 0x10000; }
+    assert_eq(extended, 0 - 3616, "sign_extend(61920) = -3616");
+
+    return assert_summary();
+}
+
+var r = main();
+syscall(60, r);

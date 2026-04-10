@@ -433,10 +433,10 @@ fn render_seg(seg_idx) {
     var is_sky = 0;
     var sky_name = map_sector_ceil_tex(sector_idx);
     if (load8(sky_name) == 70) { if (load8(sky_name + 1) == 95) {
-        if (load8(sky_name + 2) == 83) { if (load8(sky_name + 3) == 75) {
-            is_sky = 1;
+            if (load8(sky_name + 2) == 83) { if (load8(sky_name + 3) == 75) {
+                    is_sky = 1;
+                } }
         } }
-    } }
 
     # Eye height for floor plane distance calculation
     var plane_eye_h = VIEW_HEIGHT;
@@ -486,9 +486,9 @@ fn render_seg(seg_idx) {
         var eye_h = (floor_h << 16) + VIEW_HEIGHT;
 
         var ceil_screen = HALF_HEIGHT - fixed_to_int(
-            fixed_div(fixed_mul((ceil_h << 16) - eye_h, PROJ_DIST), depth));
+        fixed_div(fixed_mul((ceil_h << 16) - eye_h, PROJ_DIST), depth));
         var floor_screen = HALF_HEIGHT - fixed_to_int(
-            fixed_div(fixed_mul((floor_h << 16) - eye_h, PROJ_DIST), depth));
+        fixed_div(fixed_mul((floor_h << 16) - eye_h, PROJ_DIST), depth));
 
         # Clamp to clip region
         if (ceil_screen < ct) { ceil_screen = ct; }
@@ -556,9 +556,9 @@ fn render_seg(seg_idx) {
 
         if (is_twosided != 0) {
             var back_ceil_screen = HALF_HEIGHT - fixed_to_int(
-                fixed_div(fixed_mul((back_ceil_h << 16) - eye_h, PROJ_DIST), depth));
+            fixed_div(fixed_mul((back_ceil_h << 16) - eye_h, PROJ_DIST), depth));
             var back_floor_screen = HALF_HEIGHT - fixed_to_int(
-                fixed_div(fixed_mul((back_floor_h << 16) - eye_h, PROJ_DIST), depth));
+            fixed_div(fixed_mul((back_floor_h << 16) - eye_h, PROJ_DIST), depth));
 
             # Upper wall
             if (back_ceil_screen > ceil_screen) {
@@ -575,11 +575,11 @@ fn render_seg(seg_idx) {
                             upper_ystart = upper_ystart + (sd_yoff << 16);
                         }
                         render_draw_tex_column(col, ceil_screen, back_ceil_screen - 1,
-                            upper_tex, tex_u, upper_ystart, ty_step, col_light);
+                        upper_tex, tex_u, upper_ystart, ty_step, col_light);
                     }
                 } else {
                     framebuf_vline(col, ceil_screen, back_ceil_screen - 1,
-                        render_shade(wall_base_pal, col_light));
+                    render_shade(wall_base_pal, col_light));
                 }
             }
 
@@ -595,11 +595,11 @@ fn render_seg(seg_idx) {
                             lower_ystart = (ceil_h - back_floor_h + sd_yoff) << 16;
                         }
                         render_draw_tex_column(col, back_floor_screen + 1, floor_screen,
-                            lower_tex, tex_u, lower_ystart, ty_step, col_light);
+                        lower_tex, tex_u, lower_ystart, ty_step, col_light);
                     }
                 } else {
                     framebuf_vline(col, back_floor_screen + 1, floor_screen,
-                        render_shade(128, col_light));
+                    render_shade(128, col_light));
                 }
             }
 
@@ -613,11 +613,11 @@ fn render_seg(seg_idx) {
                     var tex_h = texture_height(mid_tex);
                     var ty_step = fixed_div(tex_h << 16, wh << 16);
                     render_draw_tex_column(col, ceil_screen, floor_screen,
-                        mid_tex, tex_u, sd_yoff << 16, ty_step, col_light);
+                    mid_tex, tex_u, sd_yoff << 16, ty_step, col_light);
                 }
             } else {
                 framebuf_vline(col, ceil_screen, floor_screen,
-                    render_shade(wall_base_pal, col_light));
+                render_shade(wall_base_pal, col_light));
             }
 
             store64(clip_solid + col * 8, 1);

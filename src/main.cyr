@@ -95,8 +95,8 @@ fn doom_main() {
                 var ep = load8(mn + 1) - 48;
                 var mp = load8(mn + 3) - 48;
                 if (ep >= 1) { if (ep <= 3) { if (mp >= 1) { if (mp <= 9) {
-                    level_set(ep, mp);
-                } } } }
+                                level_set(ep, mp);
+                            } } } }
             }
         }
     }

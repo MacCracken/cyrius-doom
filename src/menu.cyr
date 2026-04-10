@@ -37,9 +37,9 @@ var menu_result = 0;
 fn menu_draw_char(ch, px, py, color) {
     # Digits
     if (ch >= 48) { if (ch <= 57) {
-        status_draw_digit(ch - 48, px, py, color);
-        return 8;
-    } }
+            status_draw_digit(ch - 48, px, py, color);
+            return 8;
+        } }
 
     # Space
     if (ch == 32) { return 6; }
@@ -47,22 +47,22 @@ fn menu_draw_char(ch, px, py, color) {
     # Letters A-Z: draw as simple block approximation
     # Each letter: draw a 5x8 filled block with cutouts
     if (ch >= 65) { if (ch <= 90) {
-        # Simple: draw letter as a colored rectangle
-        framebuf_fill_rect(px, py, 5, 8, color);
-        # Cut interior to make it look like a letter shape
-        framebuf_pixel(px + 1, py + 1, 0);
-        framebuf_pixel(px + 2, py + 1, 0);
-        framebuf_pixel(px + 3, py + 1, 0);
-        framebuf_pixel(px + 1, py + 5, 0);
-        framebuf_pixel(px + 2, py + 5, 0);
-        framebuf_pixel(px + 3, py + 5, 0);
-        return 7;
-    } }
+            # Simple: draw letter as a colored rectangle
+            framebuf_fill_rect(px, py, 5, 8, color);
+            # Cut interior to make it look like a letter shape
+            framebuf_pixel(px + 1, py + 1, 0);
+            framebuf_pixel(px + 2, py + 1, 0);
+            framebuf_pixel(px + 3, py + 1, 0);
+            framebuf_pixel(px + 1, py + 5, 0);
+            framebuf_pixel(px + 2, py + 5, 0);
+            framebuf_pixel(px + 3, py + 5, 0);
+            return 7;
+        } }
 
     # Lowercase: treat as uppercase
     if (ch >= 97) { if (ch <= 122) {
-        return menu_draw_char(ch - 32, px, py, color);
-    } }
+            return menu_draw_char(ch - 32, px, py, color);
+        } }
 
     # Punctuation
     if (ch == 46) {
