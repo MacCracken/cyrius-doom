@@ -40,6 +40,7 @@ enum PlayerConst {
 var player_health = 100;
 var player_armor = 0;
 var player_weapon = 1;
+var player_weapons = 0;
 var player_ammo_bullets = 50;
 var player_ammo_shells = 0;
 var player_ammo_rockets = 0;
@@ -58,7 +59,9 @@ fn player_init() {
     player_health = 100;
     player_armor = 0;
     player_ammo_bullets = 50;
-    player_weapon = 1;
+    player_weapon = 2;
+    # Bitmask: bit N = has weapon N (bit 1=fists, bit 2=pistol)
+    player_weapons = 6;
 
     # Find the floor height at player start
     var sector = player_find_sector();

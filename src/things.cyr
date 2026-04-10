@@ -502,12 +502,12 @@ fn things_check_pickups() {
         if (ttype == TTYPE_CELLPACK) { player_ammo_cells = player_ammo_cells + 100; picked = 1; }
 
         # Weapons (give weapon + some ammo)
-        if (ttype == TTYPE_SHOTGUN) { player_ammo_shells = player_ammo_shells + 8; picked = 1; }
-        if (ttype == TTYPE_CHAINGUN) { player_ammo_bullets = player_ammo_bullets + 20; picked = 1; }
-        if (ttype == TTYPE_LAUNCHER) { player_ammo_rockets = player_ammo_rockets + 2; picked = 1; }
-        if (ttype == TTYPE_PLASMA) { player_ammo_cells = player_ammo_cells + 40; picked = 1; }
-        if (ttype == TTYPE_BFG) { player_ammo_cells = player_ammo_cells + 40; picked = 1; }
-        if (ttype == TTYPE_CHAINSAW) { picked = 1; }
+        if (ttype == TTYPE_SHOTGUN) { player_ammo_shells = player_ammo_shells + 8; player_weapons = player_weapons | 4; picked = 1; }
+        if (ttype == TTYPE_CHAINGUN) { player_ammo_bullets = player_ammo_bullets + 20; player_weapons = player_weapons | 8; picked = 1; }
+        if (ttype == TTYPE_LAUNCHER) { player_ammo_rockets = player_ammo_rockets + 2; player_weapons = player_weapons | 16; picked = 1; }
+        if (ttype == TTYPE_PLASMA) { player_ammo_cells = player_ammo_cells + 40; player_weapons = player_weapons | 32; picked = 1; }
+        if (ttype == TTYPE_BFG) { player_ammo_cells = player_ammo_cells + 40; player_weapons = player_weapons | 64; picked = 1; }
+        if (ttype == TTYPE_CHAINSAW) { player_weapons = player_weapons | 128; picked = 1; }
 
         # Clamp health
         if (player_health > 200) { player_health = 200; }

@@ -89,8 +89,15 @@ fn render_draw_weapon(light_level) {
 
     # Place weapon: origin at screen center, offset by sprite hotspot
     # sx = screen center + signed offset positions the sprite correctly
-    var sx = HALF_WIDTH + loff + pw;
-    var sy = 168 + toff;
+    # Weapon = sprite with clipping disabled
+    # loff = horizontal center of sprite (negative = left of center)
+    # toff = vertical anchor (negative = above status bar)
+    # sx: sprite left edge at center + offset
+    # sy: sprite top edge anchored above status bar
+    # DOOM psprite: 1:1 scale, positioned by offset from center
+    # Position: left edge from center+offset, bottom anchored at status bar
+    var sx = HALF_WIDTH + loff;
+    var sy = 168 - ph;
 
     for (var col = 0; col < pw; col = col + 1) {
         var scr_x = sx + col;

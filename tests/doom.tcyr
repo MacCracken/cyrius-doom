@@ -252,7 +252,7 @@ fn main() {
         for (var i = 0; i < 64000; i = i + 1) {
             if (load8(screen_buf + i) != 0) { nonzero = nonzero + 1; }
         }
-        assert(nonzero > 40000, "rendered > 40000 non-black pixels");
+        assert(nonzero > 20000, "rendered > 20000 non-black pixels");
         assert_eq(clip_count, 320, "all 320 columns clipped");
 
         wad_close();

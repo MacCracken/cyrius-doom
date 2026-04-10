@@ -1,2 +1,4 @@
 date,version,binary_bytes,render_frame_ns,render_sprites_ns,fixed_mul_ns,texture_get_col_ns,pcache_hit_ns
 2026-04-08,0.11.0,107632,2.201ms,2.822ms,435ns,1us,479ns
+2026-04-10,0.17.2,131120,4.324ms,4.609ms,664ns,2us,754ns
+2026-04-10,0.17.2,129096,4.79ms,4.871ms,8ns,1us,17ns

@@ -135,15 +135,26 @@
 | 5 | Tagged sector support | Done | Switches activate remote sectors |
 | 6 | Extended specials | Done | 20+ linedef types supported |
 
+## v0.18.0 — Polish
+
+| # | Item | Status | Detail |
+|---|------|--------|--------|
+| 1 | Weapon sprite positioning | Not started | Needs DOOM source R_DrawPSprite psprite coords |
+| 2 | Weapon switching | Not started | 1-7 keys change weapon sprite |
+| 3 | Firing animation | Not started | Cycle weapon frames on fire |
+| 4 | Sprite frame animation | Not started | Monsters/items cycle frames per state |
+| 5 | Animated textures/flats | Not started | Nukage, lava, light panels cycling |
+| 6 | Intermission screen | Not started | Kill %, item %, time after level exit |
+| 7 | Brightness tuning | Not started | cc3 scenes darker than cc2 |
+
 ## v1.0.0 — Ship
 
 | # | Item | Status | Detail |
 |---|------|--------|--------|
-| 1 | Level transitions | Not started | Exit switch → next map |
-| 2 | Intermission screen | Not started | Kill %, item %, time |
-| 3 | Plays E1M1-E1M9 | Not started | Full episode 1 |
-| 4 | Runs on AGNOS kernel | Not started | Kernel framebuffer + PS/2 |
-| 5 | Runs on Linux /dev/fb0 | Not started | Userspace fallback |
+| 1 | Plays E1M1-E1M9 | Not started | Full episode 1 playable |
+| 2 | Runs on AGNOS kernel | Not started | Kernel framebuffer + PS/2 |
+| 3 | Runs on Linux /dev/fb0 | Not started | Userspace fallback |
+| 4 | DOOM Black Book audit | Not started | Chapter-by-chapter verification |
 
 ## v1.0.0 — Ship
 

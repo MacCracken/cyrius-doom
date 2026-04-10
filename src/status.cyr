@@ -1,163 +1,80 @@
 # status.cyr -- HUD / status bar rendering
-# Usage: include "src/status.cyr" (after framebuf.cyr, player.cyr)
-#
-# The DOOM status bar occupies the bottom 32 pixels of the screen
-# (rows 168..199 of the 320x200 display).
-#
-# Layout (left to right):
-#   AMMO count | HEALTH % | ARMS (weapon slots) | FACE | ARMOR % | KEYS | AMMO totals
-#
-# Original DOOM renders the status bar from a pre-drawn graphic
-# (STBAR lump) with numbers overlaid. We draw it procedurally
-# since we don't have sprite rendering yet.
+# Renders the DOOM status bar from WAD graphics:
+#   STBAR — 320x32 background (has cutout for face)
+#   STTNUM0-9 — 14x16 red numbers (ammo, health, armor)
+#   STYSNUM0-9 — 4x6 yellow numbers (arms, ammo totals)
+#   STFST*0 — 24x29 face sprites
+#   STARMS — 40x32 arms box
 
-# ================================================================
-# Status bar dimensions
-# ================================================================
+enum StBarConst {
+    STBAR_Y = 168;
+    STBAR_HEIGHT = 32;
+}
 
-var STBAR_Y = 168;
-var STBAR_HEIGHT = 32;
-var STBAR_BG_COLOR = 0;
-
-# ================================================================
-# Digit rendering (3x5 bitmap font)
-# ================================================================
-# Each digit is a 3-wide by 5-tall bitmap stored as a 15-bit value.
-# Bits read left-to-right, top-to-bottom.
-#   bit 14 = top-left, bit 0 = bottom-right
-
-var digit_bitmaps = 0;
+var stbar_bg = 0;
+var stbar_arms_bg = 0;
+var st_nums = 0;
+var st_ynums = 0;
+var st_percent = 0;
+var st_minus = 0;
+var st_patch_buf = 0;
 
 fn status_init_font() {
-    digit_bitmaps = alloc(80);
-    store64(digit_bitmaps, 0x7B6F);
-    store64(digit_bitmaps + 8, 0x2C97);
-    store64(digit_bitmaps + 16, 0x73E7);
-    store64(digit_bitmaps + 24, 0x73CF);
-    store64(digit_bitmaps + 32, 0x5F29);
-    store64(digit_bitmaps + 40, 0x79CF);
-    store64(digit_bitmaps + 48, 0x79EF);
-    store64(digit_bitmaps + 56, 0x7249);
-    store64(digit_bitmaps + 64, 0x7FEF);
-    store64(digit_bitmaps + 72, 0x7FCF);
+    st_patch_buf = alloc(16384);
+    st_nums = alloc(10 * 8);
+    st_ynums = alloc(10 * 8);
+
+    var stbar_lump = wad_find_lump("STBAR");
+    if (stbar_lump >= 0) {
+        var sz = wad_lump_size(stbar_lump);
+        stbar_bg = alloc(sz);
+        wad_read_lump_into(stbar_lump, stbar_bg, sz);
+    }
+
+    var arms_lump = wad_find_lump("STARMS");
+    if (arms_lump >= 0) {
+        var sz = wad_lump_size(arms_lump);
+        stbar_arms_bg = alloc(sz);
+        wad_read_lump_into(arms_lump, stbar_arms_bg, sz);
+    }
+
+    var numname = alloc(8);
+    for (var i = 0; i < 10; i = i + 1) {
+        memcpy(numname, "STTNUM", 6);
+        store8(numname + 6, 48 + i);
+        store8(numname + 7, 0);
+        store64(st_nums + i * 8, wad_find_lump(numname));
+    }
+
+    for (var i = 0; i < 10; i = i + 1) {
+        memcpy(numname, "STYSNUM", 7);
+        store8(numname + 7, 48 + i);
+        store64(st_ynums + i * 8, wad_find_lump(numname));
+    }
+
+    st_percent = wad_find_lump("STTPRCNT");
+    st_minus = wad_find_lump("STTMINUS");
     return 0;
 }
 
-# Draw a single 3x5 digit at (px, py) with given color, scaled 2x
-fn status_draw_digit(d, px, py, color) {
-    if (d < 0) { return 0; }
-    if (d > 9) { return 0; }
-
-    var bitmap = load64(digit_bitmaps + d * 8);
-
-    for (var row = 0; row < 5; row = row + 1) {
-        for (var col = 0; col < 3; col = col + 1) {
-            var bit = 14 - (row * 3 + col);
-            if ((bitmap >> bit) & 1 == 1) {
-                # Draw 2x2 pixel block
-                framebuf_pixel(px + col * 2, py + row * 2, color);
-                framebuf_pixel(px + col * 2 + 1, py + row * 2, color);
-                framebuf_pixel(px + col * 2, py + row * 2 + 1, color);
-                framebuf_pixel(px + col * 2 + 1, py + row * 2 + 1, color);
-            }
-        }
-    }
+fn st_draw_patch(lump, px, py) {
+    if (lump < 0) { return 0; }
+    var sz = wad_lump_size(lump);
+    if (sz > 16384) { return 0; }
+    wad_read_lump_into(lump, st_patch_buf, sz);
+    st_draw_patch_from_buf(st_patch_buf, px, py);
     return 0;
 }
 
-# Draw a number (up to 3 digits) at (px, py)
-fn status_draw_number(num, px, py, color) {
-    if (num < 0) { num = 0; }
-    if (num > 999) { num = 999; }
-
-    var hundreds = num / 100;
-    var tens = (num / 10) % 10;
-    var ones = num % 10;
-
-    if (hundreds > 0) {
-        status_draw_digit(hundreds, px, py, color);
-    }
-    if (hundreds > 0) {
-        status_draw_digit(tens, px + 8, py, color);
-    } else {
-        if (tens > 0) {
-            status_draw_digit(tens, px + 8, py, color);
-        }
-    }
-    status_draw_digit(ones, px + 16, py, color);
-    return 0;
-}
-
-# Draw a percentage (number + %)
-fn status_draw_percent(num, px, py, color) {
-    status_draw_number(num, px, py, color);
-    # Draw % sign as a small dot pattern
-    framebuf_pixel(px + 24, py, color);
-    framebuf_pixel(px + 26, py + 4, color);
-    framebuf_pixel(px + 25, py + 2, color);
-    framebuf_pixel(px + 26, py + 8, color);
-    framebuf_pixel(px + 24, py + 8, color);
-    return 0;
-}
-
-# ================================================================
-# Face state (simplified)
-# ================================================================
-# DOOM's face reacts to: health level, pain, looking left/right,
-# picking up items, god mode, etc. We simplify to health-based.
-
-fn status_face_color() {
-    if (player_health > 80) { return 112; }
-    if (player_health > 50) { return 176; }
-    if (player_health > 25) { return 48; }
-    return 40;
-}
-
-# Face sprite buffer
-var face_patch_buf = 0;
-
-fn status_draw_face(px, py) {
-    if (face_patch_buf == 0) { face_patch_buf = alloc(4096); }
-
-    # Select face based on health: STFST00 (healthy) to STFST40 (near death)
-    var face_name = alloc(8);
-    memcpy(face_name, "STFST", 5);
-    var health_level = 0;
-    if (player_health < 80) { health_level = 1; }
-    if (player_health < 60) { health_level = 2; }
-    if (player_health < 40) { health_level = 3; }
-    if (player_health < 20) { health_level = 4; }
-    if (player_health <= 0) {
-        memcpy(face_name, "STFDEAD", 7);
-        store8(face_name + 7, 48);
-    } else {
-        store8(face_name + 5, 48 + health_level);
-        store8(face_name + 6, 48);
-        store8(face_name + 7, 0);
-    }
-
-    var lump = wad_find_lump(face_name);
-    if (lump < 0) {
-        # Fallback: colored block
-        framebuf_fill_rect(px, py, 24, 24, status_face_color());
-        return 0;
-    }
-
-    var psz = wad_lump_size(lump);
-    if (psz > 4096) { return 0; }
-    wad_read_lump_into(lump, face_patch_buf, psz);
-
-    var pw = read_le16(face_patch_buf);
-    var ph = read_le16(face_patch_buf + 2);
-
-    # Draw patch columns
+fn st_draw_patch_from_buf(buf, px, py) {
+    var pw = read_le16(buf);
+    var ph = read_le16(buf + 2);
     for (var col = 0; col < pw; col = col + 1) {
         var scr_x = px + col;
+        if (scr_x < 0) { continue; }
         if (scr_x >= SCREEN_WIDTH) { continue; }
-
-        var col_off = read_le32(face_patch_buf + 8 + col * 4);
-        var post = face_patch_buf + col_off;
-
+        var col_off = read_le32(buf + 8 + col * 4);
+        var post = buf + col_off;
         var safety = 0;
         while (safety < 64) {
             var td = load8(post);
@@ -166,9 +83,9 @@ fn status_draw_face(px, py) {
             var pixels = post + 3;
             for (var row = 0; row < length; row = row + 1) {
                 var scr_y = py + td + row;
+                if (scr_y < 0) { continue; }
                 if (scr_y >= SCREEN_HEIGHT) { continue; }
-                var pal = load8(pixels + row);
-                if (pal != 0) { framebuf_pixel(scr_x, scr_y, pal); }
+                framebuf_pixel(scr_x, scr_y, load8(pixels + row));
             }
             post = post + 4 + length;
             safety = safety + 1;
@@ -177,74 +94,134 @@ fn status_draw_face(px, py) {
     return 0;
 }
 
-# ================================================================
-# Key indicators
-# ================================================================
-
-fn status_draw_keys(px, py) {
-    # Blue key = palette 200, yellow = 160, red = 176
-    # For now just show placeholder slots
-    framebuf_fill_rect(px, py, 8, 6, 200);
-    framebuf_fill_rect(px, py + 8, 8, 6, 160);
-    framebuf_fill_rect(px, py + 16, 8, 6, 176);
-    return 0;
-}
-
-# ================================================================
-# Weapon slot indicators (ARMS)
-# ================================================================
-
-fn status_draw_arms(px, py) {
-    # 7 weapon slots in a 2-row layout
-    for (var w = 1; w <= 7; w = w + 1) {
-        var wx = px + ((w - 1) % 4) * 8;
-        var wy = py + ((w - 1) / 4) * 12;
-        var color = 96;
-        if (w == player_weapon) { color = 176; }
-        status_draw_digit(w, wx, wy, color);
+fn st_draw_number(num, px, py) {
+    if (num < 0) { num = 0; }
+    if (num > 999) { num = 999; }
+    var hundreds = num / 100;
+    var tens = (num / 10) % 10;
+    var ones = num % 10;
+    if (hundreds > 0) { st_draw_patch(load64(st_nums + hundreds * 8), px, py); }
+    if (hundreds > 0) {
+        st_draw_patch(load64(st_nums + tens * 8), px + 14, py);
+    } else {
+        if (tens > 0) { st_draw_patch(load64(st_nums + tens * 8), px + 14, py); }
     }
+    st_draw_patch(load64(st_nums + ones * 8), px + 28, py);
     return 0;
 }
 
-# ================================================================
-# Render the full status bar
-# ================================================================
+fn st_draw_percent(num, px, py) {
+    st_draw_number(num, px, py);
+    if (st_percent >= 0) { st_draw_patch(st_percent, px + 42, py); }
+    return 0;
+}
+
+fn st_draw_small_num(digit, px, py) {
+    if (digit < 0) { return 0; }
+    if (digit > 9) { return 0; }
+    st_draw_patch(load64(st_ynums + digit * 8), px, py);
+    return 0;
+}
+
+fn st_draw_small_number(num, px, py) {
+    if (num < 0) { num = 0; }
+    if (num > 999) { num = 999; }
+    var hundreds = num / 100;
+    var tens = (num / 10) % 10;
+    var ones = num % 10;
+    if (hundreds > 0) { st_draw_small_num(hundreds, px, py); }
+    if (hundreds > 0) {
+        st_draw_small_num(tens, px + 4, py);
+    } else {
+        if (tens > 0) { st_draw_small_num(tens, px + 4, py); }
+    }
+    st_draw_small_num(ones, px + 8, py);
+    return 0;
+}
+
+var face_patch_buf = 0;
+
+fn status_face_color() {
+    if (player_health > 80) { return 0; }
+    if (player_health > 60) { return 1; }
+    if (player_health > 40) { return 2; }
+    if (player_health > 20) { return 3; }
+    return 4;
+}
+
+fn status_draw_face(px, py) {
+    if (face_patch_buf == 0) { face_patch_buf = alloc(4096); }
+    var face_name = alloc(8);
+    var hl = status_face_color();
+    if (player_health <= 0) {
+        memcpy(face_name, "STFDEAD0", 8);
+    } else {
+        memcpy(face_name, "STFST", 5);
+        store8(face_name + 5, 48 + hl);
+        store8(face_name + 6, 48);
+        store8(face_name + 7, 0);
+    }
+    var lump = wad_find_lump(face_name);
+    if (lump < 0) { return 0; }
+    var psz = wad_lump_size(lump);
+    if (psz > 4096) { return 0; }
+    wad_read_lump_into(lump, face_patch_buf, psz);
+    st_draw_patch_from_buf(face_patch_buf, px, py);
+    return 0;
+}
 
 fn status_render() {
-    # Background (dark grey)
-    framebuf_fill_rect(0, STBAR_Y, SCREEN_WIDTH, STBAR_HEIGHT, 104);
-    framebuf_hline(0, SCREEN_WIDTH - 1, STBAR_Y, 96);
+    # Layer 1: Black background for face cutout area
+    framebuf_fill_rect(143, STBAR_Y, 35, 32, 0);
 
-    # Layout matches original DOOM status bar (320px wide, 32px tall)
-    var sy = STBAR_Y + 3;
+    # Layer 2: STBAR textured background (drawn on top, has transparent cutout for face)
+    if (stbar_bg != 0) { st_draw_patch_from_buf(stbar_bg, 0, STBAR_Y); }
 
-    # AMMO (current weapon) — left side, large digits
+    # Layer 3: ARMS box overlay
+    if (stbar_arms_bg != 0) { st_draw_patch_from_buf(stbar_arms_bg, 104, STBAR_Y); }
+
+    # Layer 4: All overlays
+
+    # AMMO count — big red at x=2
     var ammo = player_ammo_bullets;
     if (player_weapon == 3) { ammo = player_ammo_shells; }
     if (player_weapon == 5) { ammo = player_ammo_rockets; }
     if (player_weapon == 6) { ammo = player_ammo_cells; }
-    status_draw_number(ammo, 14, sy + 6, 176);
+    st_draw_number(ammo, 0 - 1, STBAR_Y + 3);
 
-    # HEALTH — with % sign
-    status_draw_percent(player_health, 64, sy + 6, 176);
+    # HEALTH — big red + % at x=49
+    st_draw_percent(player_health, 49, STBAR_Y + 3);
 
-    # ARMS — weapon number grid
-    status_draw_arms(111, sy + 4);
+    # ARMS — yellow if owned, grey if not (2x3 grid, weapons 2-7)
+    # Row 1: weapons 2,3,4 at y+4.  Row 2: weapons 5,6,7 at y+4+10
+    for (var w = 2; w <= 7; w = w + 1) {
+        var ax = 111 + ((w - 2) % 3) * 12;
+        var row = (w - 2) / 3;
+        var ay = STBAR_Y + 4 + row * 10;
+        var has = (player_weapons >> w) & 1;
+        if (has == 1) {
+            st_draw_small_num(w, ax, ay);
+        } else {
+            var gname = alloc(8);
+            memcpy(gname, "STGNUM", 6);
+            store8(gname + 6, 48 + w);
+            store8(gname + 7, 0);
+            var gl = wad_find_lump(gname);
+            if (gl >= 0) { st_draw_patch(gl, ax, ay); }
+        }
+    }
 
-    # FACE — centered at x=143, 31px wide box
-    status_draw_face(146, sy + 1);
+    # FACE — on the black background
+    status_draw_face(148, STBAR_Y + 1);
 
-    # ARMOR — with % sign
-    status_draw_percent(player_armor, 197, sy + 6, 176);
+    # ARMOR — big red + % at x=180
+    st_draw_percent(player_armor, 180, STBAR_Y + 3);
 
-    # KEYS — 3 colored indicators
-    status_draw_keys(239, sy + 3);
-
-    # AMMO totals — right side, 4 rows
-    status_draw_number(player_ammo_bullets, 278, sy + 2, 96);
-    status_draw_number(player_ammo_shells, 278, sy + 9, 96);
-    status_draw_number(player_ammo_rockets, 278, sy + 16, 96);
-    status_draw_number(player_ammo_cells, 278, sy + 23, 96);
+    # AMMO totals — small yellow right side
+    st_draw_small_number(player_ammo_bullets, 288, STBAR_Y + 5);
+    st_draw_small_number(player_ammo_shells, 288, STBAR_Y + 11);
+    st_draw_small_number(player_ammo_rockets, 288, STBAR_Y + 17);
+    st_draw_small_number(player_ammo_cells, 288, STBAR_Y + 23);
 
     return 0;
 }

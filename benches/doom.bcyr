@@ -1,10 +1,10 @@
-# doom.bcyr -- cyrius-doom benchmarks
-# Run: cyrius bench benches/doom.bcyr
-#   or: cat benches/doom.bcyr | cc2 > build/bench && chmod +x build/bench && ./build/bench wad/DOOM1.WAD
+# doom.bcyr -- cyrius-doom benchmarks (batch mode)
+# Run: cat benches/doom.bcyr | cc3 > build/bench && chmod +x build/bench && ./build/bench wad/DOOM1.WAD
 
 include "lib/string.cyr"
 include "lib/alloc.cyr"
 include "lib/vec.cyr"
+include "lib/str.cyr"
 include "lib/fmt.cyr"
 include "lib/io.cyr"
 include "lib/args.cyr"
@@ -21,109 +21,8 @@ include "src/texture.cyr"
 include "src/render.cyr"
 include "src/sprite.cyr"
 
-# ================================================================
-# Fixed-point math benchmarks
-# ================================================================
-
-fn bench_fixed_mul() {
-    var a = fixed_from_int(42);
-    var b = fixed_from_int(17);
-    fixed_mul(a, b);
-    return 0;
-}
-
-fn bench_fixed_div() {
-    var a = fixed_from_int(1000);
-    var b = fixed_from_int(7);
-    fixed_div(a, b);
-    return 0;
-}
-
-fn bench_asr() {
-    asr(0 - 1000000, 16);
-    return 0;
-}
-
-fn bench_sin_lookup() {
-    fixed_sin(137);
-    return 0;
-}
-
-fn bench_atan2() {
-    fixed_atan2(fixed_from_int(100), fixed_from_int(200));
-    return 0;
-}
-
-# ================================================================
-# WAD benchmarks (require WAD file)
-# ================================================================
-
-fn bench_wad_find_lump() {
-    wad_find_lump("STARTAN3");
-    return 0;
-}
-
-fn bench_wad_read_lump() {
-    var idx = wad_find_lump("PLAYPAL");
-    wad_read_lump(idx);
-    return 0;
-}
-
-# ================================================================
-# Texture benchmarks
-# ================================================================
-
 var _b_startan = 0;
 var _b_texcol = 0;
-
-fn bench_texture_find() {
-    texture_find("STARTAN3");
-    return 0;
-}
-
-fn bench_texture_get_column() {
-    texture_get_column(_b_startan, 42, _b_texcol);
-    return 0;
-}
-
-fn bench_pcache_get() {
-    var idx = wad_find_lump("PLAYPAL");
-    pcache_get(idx);
-    return 0;
-}
-
-# ================================================================
-# Render benchmarks
-# ================================================================
-
-fn bench_render_frame() {
-    render_frame();
-    return 0;
-}
-
-fn bench_render_frame_sprites() {
-    render_frame();
-    sprite_render_all();
-    return 0;
-}
-
-fn bench_colormap_shade() {
-    render_shade(96, 16);
-    return 0;
-}
-
-# ================================================================
-# BSP benchmarks
-# ================================================================
-
-fn bench_point_on_side() {
-    map_point_on_side(player_start_x(), player_start_y(), 0);
-    return 0;
-}
-
-# ================================================================
-# Main
-# ================================================================
 
 fn main() {
     alloc_init();
@@ -154,68 +53,128 @@ fn main() {
     _b_texcol = alloc(256);
 
     var benches = vec_new();
+    var BATCH = 10000;
+    var ROUNDS = 10;
 
-    # Fixed-point math
+    # --- Fixed-point math (inline batch) ---
     var b1 = bench_new("fixed_mul");
-    bench_run(b1, &bench_fixed_mul, 100000);
+    for (var r = 0; r < ROUNDS; r = r + 1) {
+        var a = fixed_from_int(42);
+        var b = fixed_from_int(17);
+        bench_batch_start(b1);
+        for (var i = 0; i < BATCH; i = i + 1) { fixed_mul(a, b); }
+        bench_batch_stop(b1, BATCH);
+    }
     vec_push(benches, b1);
 
     var b2 = bench_new("fixed_div");
-    bench_run(b2, &bench_fixed_div, 100000);
+    for (var r = 0; r < ROUNDS; r = r + 1) {
+        var a = fixed_from_int(1000);
+        var b = fixed_from_int(7);
+        bench_batch_start(b2);
+        for (var i = 0; i < BATCH; i = i + 1) { fixed_div(a, b); }
+        bench_batch_stop(b2, BATCH);
+    }
     vec_push(benches, b2);
 
     var b3 = bench_new("asr");
-    bench_run(b3, &bench_asr, 100000);
+    for (var r = 0; r < ROUNDS; r = r + 1) {
+        bench_batch_start(b3);
+        for (var i = 0; i < BATCH; i = i + 1) { asr(0 - 1000000, 16); }
+        bench_batch_stop(b3, BATCH);
+    }
     vec_push(benches, b3);
 
     var b4 = bench_new("sin_lookup");
-    bench_run(b4, &bench_sin_lookup, 100000);
+    for (var r = 0; r < ROUNDS; r = r + 1) {
+        bench_batch_start(b4);
+        for (var i = 0; i < BATCH; i = i + 1) { fixed_sin(137); }
+        bench_batch_stop(b4, BATCH);
+    }
     vec_push(benches, b4);
 
     var b5 = bench_new("atan2");
-    bench_run(b5, &bench_atan2, 50000);
+    for (var r = 0; r < ROUNDS; r = r + 1) {
+        bench_batch_start(b5);
+        for (var i = 0; i < BATCH; i = i + 1) {
+            fixed_atan2(fixed_from_int(100), fixed_from_int(200));
+        }
+        bench_batch_stop(b5, BATCH);
+    }
     vec_push(benches, b5);
 
-    # WAD ops
+    # --- WAD ops ---
     var b6 = bench_new("wad_find_lump");
-    bench_run(b6, &bench_wad_find_lump, 10000);
+    for (var r = 0; r < ROUNDS; r = r + 1) {
+        bench_batch_start(b6);
+        for (var i = 0; i < 1000; i = i + 1) { wad_find_lump("STARTAN3"); }
+        bench_batch_stop(b6, 1000);
+    }
     vec_push(benches, b6);
 
-    var b7 = bench_new("wad_read_lump");
-    bench_run(b7, &bench_wad_read_lump, 1000);
+    # --- Textures ---
+    var b7 = bench_new("texture_find");
+    for (var r = 0; r < ROUNDS; r = r + 1) {
+        bench_batch_start(b7);
+        for (var i = 0; i < BATCH; i = i + 1) { texture_find("STARTAN3"); }
+        bench_batch_stop(b7, BATCH);
+    }
     vec_push(benches, b7);
 
-    # Textures
-    var b8 = bench_new("texture_find");
-    bench_run(b8, &bench_texture_find, 50000);
+    var b8 = bench_new("texture_get_column");
+    for (var r = 0; r < ROUNDS; r = r + 1) {
+        bench_batch_start(b8);
+        for (var i = 0; i < 1000; i = i + 1) { texture_get_column(_b_startan, 42, _b_texcol); }
+        bench_batch_stop(b8, 1000);
+    }
     vec_push(benches, b8);
 
-    var b9 = bench_new("texture_get_column");
-    bench_run(b9, &bench_texture_get_column, 10000);
+    var b9 = bench_new("pcache_get_hit");
+    var pal_lump = wad_find_lump("PLAYPAL");
+    for (var r = 0; r < ROUNDS; r = r + 1) {
+        bench_batch_start(b9);
+        for (var i = 0; i < BATCH; i = i + 1) { pcache_get(pal_lump); }
+        bench_batch_stop(b9, BATCH);
+    }
     vec_push(benches, b9);
 
-    var b10 = bench_new("pcache_get_hit");
-    bench_run(b10, &bench_pcache_get, 100000);
+    # --- Render ops ---
+    var b10 = bench_new("colormap_shade");
+    for (var r = 0; r < ROUNDS; r = r + 1) {
+        bench_batch_start(b10);
+        for (var i = 0; i < BATCH; i = i + 1) { render_shade(96, 16); }
+        bench_batch_stop(b10, BATCH);
+    }
     vec_push(benches, b10);
 
-    # Rendering
-    var b11 = bench_new("colormap_shade");
-    bench_run(b11, &bench_colormap_shade, 100000);
+    var b11 = bench_new("point_on_side");
+    for (var r = 0; r < ROUNDS; r = r + 1) {
+        bench_batch_start(b11);
+        for (var i = 0; i < BATCH; i = i + 1) {
+            map_point_on_side(player_start_x(), player_start_y(), 0);
+        }
+        bench_batch_stop(b11, BATCH);
+    }
     vec_push(benches, b11);
 
-    var b12 = bench_new("point_on_side");
-    bench_run(b12, &bench_point_on_side, 100000);
+    # --- Full frame (fewer iterations, each is expensive) ---
+    var b12 = bench_new("render_frame");
+    for (var r = 0; r < 10; r = r + 1) {
+        bench_batch_start(b12);
+        for (var i = 0; i < 10; i = i + 1) { render_frame(); }
+        bench_batch_stop(b12, 10);
+    }
     vec_push(benches, b12);
 
-    var b13 = bench_new("render_frame");
-    bench_run(b13, &bench_render_frame, 100);
+    var b13 = bench_new("render_frame+sprites");
+    for (var r = 0; r < 10; r = r + 1) {
+        bench_batch_start(b13);
+        for (var i = 0; i < 10; i = i + 1) { render_frame(); sprite_render_all(); }
+        bench_batch_stop(b13, 10);
+    }
     vec_push(benches, b13);
 
-    var b14 = bench_new("render_frame+sprites");
-    bench_run(b14, &bench_render_frame_sprites, 100);
-    vec_push(benches, b14);
-
-    syscall(1, 1, "\n=== DOOM Benchmarks ===\n", 24);
+    syscall(1, 1, "\n=== DOOM Benchmarks (batch) ===\n", 32);
     bench_report_all(benches);
 
     wad_close();

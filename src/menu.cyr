@@ -50,12 +50,12 @@ fn menu_draw_char(ch, px, py, color) {
         # Simple: draw letter as a colored rectangle
         framebuf_fill_rect(px, py, 5, 8, color);
         # Cut interior to make it look like a letter shape
-        framebuf_pixel(px + 1, py + 1, STBAR_BG_COLOR);
-        framebuf_pixel(px + 2, py + 1, STBAR_BG_COLOR);
-        framebuf_pixel(px + 3, py + 1, STBAR_BG_COLOR);
-        framebuf_pixel(px + 1, py + 5, STBAR_BG_COLOR);
-        framebuf_pixel(px + 2, py + 5, STBAR_BG_COLOR);
-        framebuf_pixel(px + 3, py + 5, STBAR_BG_COLOR);
+        framebuf_pixel(px + 1, py + 1, 0);
+        framebuf_pixel(px + 2, py + 1, 0);
+        framebuf_pixel(px + 3, py + 1, 0);
+        framebuf_pixel(px + 1, py + 5, 0);
+        framebuf_pixel(px + 2, py + 5, 0);
+        framebuf_pixel(px + 3, py + 5, 0);
         return 7;
     } }
 

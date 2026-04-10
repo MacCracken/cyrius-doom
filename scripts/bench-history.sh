@@ -14,7 +14,7 @@ if [ ! -f "$WAD" ]; then
 fi
 
 # Build benchmark
-cat benches/doom.bcyr | cc2 > "$BUILD" 2>/dev/null
+cat benches/doom.bcyr | cc3 > "$BUILD" 2>/dev/null
 chmod +x "$BUILD"
 
 # Run and capture output
