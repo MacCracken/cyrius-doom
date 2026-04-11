@@ -5,6 +5,18 @@ All notable changes to cyrius-doom will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.2] - 2026-04-10
+
+### Fixed
+
+- **Weapon sprite positioning** — pistol hand center-right at (sx=253+loff, sy=226+toff), matching original DOOM placement. Barrel centered, hand from lower-right.
+- Iterated through DOOM psprite coordinate system using Wolfenstein Black Book insights (weapon = sprite with clipping disabled)
+
+### Added
+
+- 4-frame 360° spin animated GIF rendered from player start position
+- `st_draw_patch_shaded()` for COLORMAP-shaded HUD elements
+
 ## [0.18.1] - 2026-04-10
 
 ### Fixed
