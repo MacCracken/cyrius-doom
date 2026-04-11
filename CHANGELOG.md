@@ -9,11 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Ammo totals: current/max pairs with proper spacing (cur_x=276, gap=14px, row_h=6px)
-- Ammo totals use yellow STYSNUM (matching original DOOM, not grey)
+- Ammo totals: current/max pairs with proper spacing (cur_x=276, gap=14px, row_h=6px, ammo_y=STBAR_Y+5)
+- Ammo totals use softened yellow STYSNUM (shade 2 via COLORMAP, matching original DOOM warmth)
+- Weapon numbers use same softened yellow treatment
+- Grey STGNUM for unowned weapons in ARMS box (correct contrast vs owned yellow)
 - cyrb.toml version synced to 0.18.1
-- CI updated: added format check, lint check, regression test suites, pinned to Cyrius 3.3.13
-- cc3 reference updated from cc2 in bench-history.sh
+
+### Added
+
+- `st_draw_patch_shaded()` — draw WAD patches with COLORMAP shade level
+- `st_draw_grey_num()` / `st_draw_grey_number()` — grey number rendering for unowned weapons
+- Regression test suites: `regression_stack_args.tcyr` (12 tests), `regression_asr.tcyr` (15 tests)
+- CI: format check (`cyrfmt`), lint check (`cyrlint`), all .tcyr test suites, pinned to Cyrius 3.3.13
+- Benchmarks switched to batch mode (`bench_batch_start/stop`) for accurate sub-10ns measurements
+
+### Changed
+
+- cc3 compiler reference (cc2 → cc3) in bench-history.sh and CI
+- Verified on Cyrius 3.3.13: 73/73 DOOM tests, 74/74 BSP tests, 100 total assertions
 
 ## [0.18.0] - 2026-04-10
 
