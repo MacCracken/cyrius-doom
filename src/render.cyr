@@ -87,17 +87,15 @@ fn render_draw_weapon(light_level) {
     if (loff >= 0x8000) { loff = loff - 0x10000; }
     if (toff >= 0x8000) { toff = toff - 0x10000; }
 
-    # Place weapon: origin at screen center, offset by sprite hotspot
-    # sx = screen center + signed offset positions the sprite correctly
-    # Weapon = sprite with clipping disabled
-    # loff = horizontal center of sprite (negative = left of center)
-    # toff = vertical anchor (negative = above status bar)
-    # sx: sprite left edge at center + offset
-    # sy: sprite top edge anchored above status bar
-    # DOOM psprite: 1:1 scale, positioned by offset from center
-    # Position: left edge from center+offset, bottom anchored at status bar
-    var sx = HALF_WIDTH + loff;
-    var sy = 168 - ph;
+    # DOOM psprite positioning:
+    # psp->sx = 128 (pistol ready), centered at 160
+    # screen_x = (psp_sx - leftoffset) = 128 - (-126) = 254 → right side
+    # screen_y = WEAPONTOP(32) - topoffset = 32 - (-106) = 138 → lower screen
+    # The sprite extends from (254, 138) to (311, 200)
+    # Pistol: center-right, hand visible from bottom-right
+    # Adjusted from DOOM psprite coords to match original appearance
+    var sx = 253 + loff;
+    var sy = 226 + toff;
 
     for (var col = 0; col < pw; col = col + 1) {
         var scr_x = sx + col;
