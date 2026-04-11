@@ -231,7 +231,7 @@ fn status_render() {
     if (player_weapon == 3) { ammo = player_ammo_shells; }
     if (player_weapon == 5) { ammo = player_ammo_rockets; }
     if (player_weapon == 6) { ammo = player_ammo_cells; }
-    st_draw_number(ammo, 0 - 1, STBAR_Y + 3);
+    st_draw_number(ammo, 2, STBAR_Y + 3);
 
     # HEALTH — big red + % at x=49
     st_draw_percent(player_health, 48, STBAR_Y + 3);
@@ -256,7 +256,7 @@ fn status_render() {
     }
 
     # FACE — on the black background
-    status_draw_face(148, STBAR_Y + 1);
+    status_draw_face(148, STBAR_Y + 2);
 
     # ARMOR — big red + % at x=180
     st_draw_percent(player_armor, 179, STBAR_Y + 3);

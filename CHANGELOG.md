@@ -5,6 +5,28 @@ All notable changes to cyrius-doom will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.1] - 2026-04-11
+
+### Added
+
+- **audio.cyr** — WAD sound effect loading and ALSA playback via stdlib `lib/audio.cyr`
+- shravan 2.0.0 pinned as git dependency for PCM codec support
+- 12 DOOM sound effects preloaded from WAD (pistol, shotgun, doors, items, pain, death)
+- GTK3 display bridge viewer (`scripts/x11view.py`) for desktops without /dev/fb0
+- PPM fallback output in `framebuf_flip()` when no framebuffer device available
+- Wolfenstein Black Book audit notes (raycasting, compiled scalers, deferred rendering)
+
+### Fixed
+
+- Health/armor numbers shifted 1px left for better alignment
+- Weapon hand shifted 2px down for final positioning (sx=253+loff, sy=228+toff)
+
+### Changed
+
+- Binary size: 137KB (audio module adds 5KB)
+- Minimum Cyrius version: 3.4.5 (audio stdlib required)
+- Roadmap consolidated: removed duplicate v1.0.0 sections, added v0.20.0-v0.21.0 milestones
+
 ## [0.18.2] - 2026-04-10
 
 ### Fixed
