@@ -123,6 +123,19 @@ fn st_draw_small_num(digit, px, py) {
     return 0;
 }
 
+# Grey (subdued) small number using STGNUM
+fn st_draw_grey_num(digit, px, py) {
+    if (digit < 0) { return 0; }
+    if (digit > 9) { return 0; }
+    var gname = alloc(8);
+    memcpy(gname, "STGNUM", 6);
+    store8(gname + 6, 48 + digit);
+    store8(gname + 7, 0);
+    var gl = wad_find_lump(gname);
+    if (gl >= 0) { st_draw_patch(gl, px, py); }
+    return 0;
+}
+
 fn st_draw_small_number(num, px, py) {
     if (num < 0) { num = 0; }
     if (num > 999) { num = 999; }
@@ -136,6 +149,23 @@ fn st_draw_small_number(num, px, py) {
         if (tens > 0) { st_draw_small_num(tens, px + 4, py); }
     }
     st_draw_small_num(ones, px + 8, py);
+    return 0;
+}
+
+# Grey version for ammo totals
+fn st_draw_grey_number(num, px, py) {
+    if (num < 0) { num = 0; }
+    if (num > 999) { num = 999; }
+    var hundreds = num / 100;
+    var tens = (num / 10) % 10;
+    var ones = num % 10;
+    if (hundreds > 0) { st_draw_grey_num(hundreds, px, py); }
+    if (hundreds > 0) {
+        st_draw_grey_num(tens, px + 4, py);
+    } else {
+        if (tens > 0) { st_draw_grey_num(tens, px + 4, py); }
+    }
+    st_draw_grey_num(ones, px + 8, py);
     return 0;
 }
 
@@ -217,11 +247,24 @@ fn status_render() {
     # ARMOR — big red + % at x=180
     st_draw_percent(player_armor, 180, STBAR_Y + 3);
 
-    # AMMO totals — small yellow right side
-    st_draw_small_number(player_ammo_bullets, 288, STBAR_Y + 5);
-    st_draw_small_number(player_ammo_shells, 288, STBAR_Y + 11);
-    st_draw_small_number(player_ammo_rockets, 288, STBAR_Y + 17);
-    st_draw_small_number(player_ammo_cells, 288, STBAR_Y + 23);
+    # AMMO totals — current / max in number boxes LEFT of BULL/SHEL/RCKT/CELL labels
+    # STBAR has slash separators baked in at ~x=283
+    var cur_x = 276;
+    var max_x = cur_x + 12 + 14;
+    var row_h = 6;
+    var ammo_y = STBAR_Y + 5;
+
+    st_draw_small_number(player_ammo_bullets, cur_x, ammo_y);
+    st_draw_small_number(200, max_x, ammo_y);
+
+    st_draw_small_number(player_ammo_shells, cur_x, ammo_y + row_h);
+    st_draw_small_number(50, max_x, ammo_y + row_h);
+
+    st_draw_small_number(player_ammo_rockets, cur_x, ammo_y + row_h * 2);
+    st_draw_small_number(50, max_x, ammo_y + row_h * 2);
+
+    st_draw_small_number(player_ammo_cells, cur_x, ammo_y + row_h * 3);
+    st_draw_small_number(300, max_x, ammo_y + row_h * 3);
 
     return 0;
 }
