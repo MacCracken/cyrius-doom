@@ -15,6 +15,7 @@ var rgb_buf = 0;
 var palette = 0;
 
 var fb_fd = 0 - 1;
+var pipe_fd = 0 - 1;
 
 fn framebuf_init() {
     screen_buf = alloc(64000);
@@ -102,6 +103,9 @@ fn framebuf_flip() {
     if (fb_fd >= 0) {
         syscall(8, fb_fd, 0, 0);
         file_write(fb_fd, rgb_buf, SCREEN_SIZE * 4);
+    } else {
+        # No framebuffer — write PPM for viewer bridge
+        framebuf_write_ppm("/tmp/doom_frame.ppm");
     }
     return 0;
 }
