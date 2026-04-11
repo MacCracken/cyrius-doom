@@ -5,6 +5,16 @@ All notable changes to cyrius-doom will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.1] - 2026-04-10
+
+### Fixed
+
+- Ammo totals: current/max pairs with proper spacing (cur_x=276, gap=14px, row_h=6px)
+- Ammo totals use yellow STYSNUM (matching original DOOM, not grey)
+- cyrb.toml version synced to 0.18.1
+- CI updated: added format check, lint check, regression test suites, pinned to Cyrius 3.3.13
+- cc3 reference updated from cc2 in bench-history.sh
+
 ## [0.18.0] - 2026-04-10
 
 ### Added

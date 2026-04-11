@@ -67,6 +67,12 @@ fn st_draw_patch(lump, px, py) {
 }
 
 fn st_draw_patch_from_buf(buf, px, py) {
+    st_draw_patch_shaded(buf, px, py, 0);
+    return 0;
+}
+
+# Draw patch with optional COLORMAP shading (shade=0 for full bright)
+fn st_draw_patch_shaded(buf, px, py, shade) {
     var pw = read_le16(buf);
     var ph = read_le16(buf + 2);
     for (var col = 0; col < pw; col = col + 1) {
@@ -85,7 +91,9 @@ fn st_draw_patch_from_buf(buf, px, py) {
                 var scr_y = py + td + row;
                 if (scr_y < 0) { continue; }
                 if (scr_y >= SCREEN_HEIGHT) { continue; }
-                framebuf_pixel(scr_x, scr_y, load8(pixels + row));
+                var pal = load8(pixels + row);
+                if (shade > 0) { pal = render_shade(pal, shade); }
+                framebuf_pixel(scr_x, scr_y, pal);
             }
             post = post + 4 + length;
             safety = safety + 1;
@@ -119,7 +127,13 @@ fn st_draw_percent(num, px, py) {
 fn st_draw_small_num(digit, px, py) {
     if (digit < 0) { return 0; }
     if (digit > 9) { return 0; }
-    st_draw_patch(load64(st_ynums + digit * 8), px, py);
+    var lump = load64(st_ynums + digit * 8);
+    if (lump < 0) { return 0; }
+    var sz = wad_lump_size(lump);
+    if (sz > 16384) { return 0; }
+    wad_read_lump_into(lump, st_patch_buf, sz);
+    # Softened yellow (shade 2 = one step down from full bright)
+    st_draw_patch_shaded(st_patch_buf, px, py, 2);
     return 0;
 }
 
