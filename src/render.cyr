@@ -95,7 +95,7 @@ fn render_draw_weapon(light_level) {
     # Pistol: center-right, hand visible from bottom-right
     # Adjusted from DOOM psprite coords to match original appearance
     var sx = 253 + loff;
-    var sy = 226 + toff;
+    var sy = 228 + toff;
 
     for (var col = 0; col < pw; col = col + 1) {
         var scr_x = sx + col;

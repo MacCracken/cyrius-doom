@@ -234,7 +234,7 @@ fn status_render() {
     st_draw_number(ammo, 0 - 1, STBAR_Y + 3);
 
     # HEALTH — big red + % at x=49
-    st_draw_percent(player_health, 49, STBAR_Y + 3);
+    st_draw_percent(player_health, 48, STBAR_Y + 3);
 
     # ARMS — yellow if owned, grey if not (2x3 grid, weapons 2-7)
     # Row 1: weapons 2,3,4 at y+4.  Row 2: weapons 5,6,7 at y+4+10
@@ -259,7 +259,7 @@ fn status_render() {
     status_draw_face(148, STBAR_Y + 1);
 
     # ARMOR — big red + % at x=180
-    st_draw_percent(player_armor, 180, STBAR_Y + 3);
+    st_draw_percent(player_armor, 179, STBAR_Y + 3);
 
     # AMMO totals — current / max in number boxes LEFT of BULL/SHEL/RCKT/CELL labels
     # STBAR has slash separators baked in at ~x=283

@@ -1,0 +1,117 @@
+# audio.cyr -- WAD sound effect loading and playback
+# Uses lib/audio.cyr (Cyrius 3.4.5+ stdlib) for ALSA output.
+# DOOM WAD DS* lumps: 8-byte header + raw 8-bit unsigned PCM @ 11025Hz
+
+enum SndConst {
+    SND_CACHE_MAX = 32;
+    SND_HEADER_SIZE = 8;
+    SND_MAX_SIZE = 65536;
+}
+
+var snd_cache_lumps = 0;
+var snd_cache_data = 0;
+var snd_cache_sizes = 0;
+var snd_cache_rates = 0;
+var snd_cache_count = 0;
+var audio_dev = 0;
+
+fn audio_init() {
+    snd_cache_lumps = alloc(SND_CACHE_MAX * 8);
+    snd_cache_data = alloc(SND_CACHE_MAX * 8);
+    snd_cache_sizes = alloc(SND_CACHE_MAX * 8);
+    snd_cache_rates = alloc(SND_CACHE_MAX * 8);
+    snd_cache_count = 0;
+
+    # Open ALSA playback device (card 0, device 0)
+    audio_dev = audio_open_playback(0, 0);
+    if (audio_dev != 0) {
+        # 8-bit mono at 11025Hz (matches DOOM sound format)
+        audio_set_params(audio_dev, 11025, 1, 8);
+        audio_prepare(audio_dev);
+        sakshi_info("audio: ALSA playback", 20);
+    } else {
+        sakshi_warn("audio: no device", 16);
+    }
+    return 0;
+}
+
+fn audio_shutdown() {
+    if (audio_dev != 0) {
+        audio_drain(audio_dev);
+        audio_close(audio_dev);
+        audio_dev = 0;
+    }
+    return 0;
+}
+
+# Load a sound from WAD into cache
+fn audio_load(lump_name) {
+    var lump = wad_find_lump(lump_name);
+    if (lump < 0) { return 0 - 1; }
+
+    for (var i = 0; i < snd_cache_count; i = i + 1) {
+        if (load64(snd_cache_lumps + i * 8) == lump) { return i; }
+    }
+
+    if (snd_cache_count >= SND_CACHE_MAX) { return 0 - 1; }
+
+    var sz = wad_lump_size(lump);
+    if (sz < SND_HEADER_SIZE) { return 0 - 1; }
+    if (sz > SND_MAX_SIZE) { sz = SND_MAX_SIZE; }
+
+    var raw = alloc(sz);
+    wad_read_lump_into(lump, raw, sz);
+
+    var rate = read_le16(raw + 2);
+    var nsamples = read_le32(raw + 4);
+    var data_size = sz - SND_HEADER_SIZE;
+    if (nsamples > data_size) { nsamples = data_size; }
+
+    var pcm = alloc(nsamples);
+    memcpy(pcm, raw + SND_HEADER_SIZE, nsamples);
+
+    var idx = snd_cache_count;
+    store64(snd_cache_lumps + idx * 8, lump);
+    store64(snd_cache_data + idx * 8, pcm);
+    store64(snd_cache_sizes + idx * 8, nsamples);
+    store64(snd_cache_rates + idx * 8, rate);
+    snd_cache_count = snd_cache_count + 1;
+    return idx;
+}
+
+# Preload common DOOM sounds
+fn audio_preload() {
+    audio_load("DSPISTOL");
+    audio_load("DSSHOTGN");
+    audio_load("DSDOROPN");
+    audio_load("DSDORCLS");
+    audio_load("DSITEMUP");
+    audio_load("DSPUNCH");
+    audio_load("DSPLPAIN");
+    audio_load("DSPLDETH");
+    audio_load("DSSWTCHN");
+    audio_load("DSOOF");
+    audio_load("DSNOWAY");
+    audio_load("DSTINK");
+    return 0;
+}
+
+# Play a cached sound effect
+fn audio_play(cache_idx) {
+    if (cache_idx < 0) { return 0; }
+    if (cache_idx >= snd_cache_count) { return 0; }
+    if (audio_dev == 0) { return 0; }
+
+    var pcm = load64(snd_cache_data + cache_idx * 8);
+    var nsamples = load64(snd_cache_sizes + cache_idx * 8);
+
+    audio_write_bytes(audio_dev, pcm, nsamples);
+    return 0;
+}
+
+# Play by WAD lump name (loads if not cached)
+fn audio_play_name(lump_name) {
+    var idx = audio_load(lump_name);
+    audio_play(idx);
+    return 0;
+}
