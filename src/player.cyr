@@ -45,6 +45,13 @@ var player_ammo_bullets = 50;
 var player_ammo_shells = 0;
 var player_ammo_rockets = 0;
 var player_ammo_cells = 0;
+var player_keys = 0;
+
+enum KeyBit {
+    KEY_CARD_BLUE = 1;
+    KEY_CARD_YELLOW = 2;
+    KEY_CARD_RED = 4;
+}
 
 # ================================================================
 # Player initialization
@@ -62,6 +69,7 @@ fn player_init() {
     player_weapon = 2;
     # Bitmask: bit N = has weapon N (bit 1=fist, bit 2=pistol)
     player_weapons = 6;
+    player_keys = 0;
     render_set_weapon(player_weapon);
 
     # Find the floor height at player start
@@ -250,6 +258,110 @@ fn player_check_linedef(nx, ny, radius, i) {
 }
 
 # ================================================================
+# Ammo consumption
+# ================================================================
+# Returns the player's ammo count for current weapon. -1 = no ammo needed.
+fn player_current_ammo() {
+    if (player_weapon == 1) { return 0 - 1; }
+    if (player_weapon == 6) { return 0 - 1; }
+    if (player_weapon == 2) { return player_ammo_bullets; }
+    if (player_weapon == 4) { return player_ammo_bullets; }
+    if (player_weapon == 3) { return player_ammo_shells; }
+    if (player_weapon == 5) { return player_ammo_rockets; }
+    if (player_weapon == 7) { return player_ammo_cells; }
+    return 0;
+}
+
+# Try to fire: check ammo, deduct if available. Returns 1 if ok, 0 if empty.
+fn player_try_fire() {
+    # Fist and chainsaw need no ammo
+    if (player_weapon == 1) { return 1; }
+    if (player_weapon == 6) { return 1; }
+
+    if (player_weapon == 2) {
+        if (player_ammo_bullets <= 0) { return 0; }
+        player_ammo_bullets = player_ammo_bullets - 1;
+        return 1;
+    }
+    if (player_weapon == 4) {
+        if (player_ammo_bullets <= 0) { return 0; }
+        player_ammo_bullets = player_ammo_bullets - 1;
+        return 1;
+    }
+    if (player_weapon == 3) {
+        if (player_ammo_shells <= 0) { return 0; }
+        player_ammo_shells = player_ammo_shells - 1;
+        return 1;
+    }
+    if (player_weapon == 5) {
+        if (player_ammo_rockets <= 0) { return 0; }
+        player_ammo_rockets = player_ammo_rockets - 1;
+        return 1;
+    }
+    if (player_weapon == 7) {
+        if (player_ammo_cells <= 0) { return 0; }
+        player_ammo_cells = player_ammo_cells - 1;
+        return 1;
+    }
+    return 0;
+}
+
+# ================================================================
+# Hitscan: trace ray from player, damage first monster hit
+# ================================================================
+
+fn player_hitscan() {
+    var range = 2048 << 16;
+    # Fist/chainsaw: melee range
+    if (player_weapon == 1) { range = 64 << 16; }
+    if (player_weapon == 6) { range = 64 << 16; }
+
+    var cos_a = fixed_cos(player_angle);
+    var sin_a = fixed_sin(player_angle);
+
+    var best_idx = 0 - 1;
+    var best_dist = range;
+
+    for (var i = 0; i < thing_count; i = i + 1) {
+        var flags = thing_flags(i);
+        if ((flags & TF_ACTIVE) == 0) { continue; }
+        if ((flags & TF_SHOOTABLE) == 0) { continue; }
+
+        var dx = thing_x(i) - player_x;
+        var dy = thing_y(i) - player_y;
+        var dist = fixed_approx_dist(dx, dy);
+        if (dist > range) { continue; }
+        if (dist >= best_dist) { continue; }
+
+        # Check if thing is roughly in front of player (within ~45 degrees)
+        var dot = fixed_mul(dx, cos_a) + fixed_mul(dy, sin_a);
+        if (dot <= 0) { continue; }
+
+        # Cross product for lateral distance (perpendicular to aim)
+        var cross = fixed_mul(dx, sin_a) - fixed_mul(dy, cos_a);
+        var lateral = fixed_abs(cross);
+        # Thing must be within its radius of the aim line
+        var radius = thing_radius(i);
+        if (radius <= 0) { radius = 20 << 16; }
+        if (lateral > radius) { continue; }
+
+        best_idx = i;
+        best_dist = dist;
+    }
+
+    if (best_idx >= 0) {
+        # Calculate damage based on weapon
+        var dmg = 5 + (tick_get_count() % 11);
+        if (player_weapon == 1) { dmg = 2 + (tick_get_count() % 19); }
+        if (player_weapon == 3) { dmg = dmg * 3; }
+        if (player_weapon == 5) { dmg = 20 + (tick_get_count() % 100); }
+        if (player_weapon == 6) { dmg = 2 + (tick_get_count() % 19); }
+        thing_damage(best_idx, dmg);
+    }
+    return 0;
+}
+
+# ================================================================
 # Player movement (called each tick)
 # ================================================================
 
@@ -352,8 +464,13 @@ fn player_tick() {
         }
     }
 
-    # Fire weapon
-    if (input_fire() == 1) { weapon_fire(); }
+    # Fire weapon (with ammo check)
+    if (input_fire() == 1) {
+        if (player_try_fire() == 1) {
+            weapon_fire();
+            player_hitscan();
+        }
+    }
 
     # Advance weapon animation
     weapon_tick();

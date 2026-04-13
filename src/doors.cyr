@@ -266,9 +266,9 @@ fn doors_use() {
         switch (special) {
             # Doors (open wait close)
             case 1: { door_open(door_sec); }
-            case 26: { door_open(door_sec); }
-            case 27: { door_open(door_sec); }
-            case 28: { door_open(door_sec); }
+            case 26: { if ((player_keys & KEY_CARD_BLUE) != 0) { door_open(door_sec); } }
+            case 27: { if ((player_keys & KEY_CARD_YELLOW) != 0) { door_open(door_sec); } }
+            case 28: { if ((player_keys & KEY_CARD_RED) != 0) { door_open(door_sec); } }
             case 29: { door_open(door_sec); }
             case 31: { door_open(door_sec); }
             case 63: { door_open(door_sec); }

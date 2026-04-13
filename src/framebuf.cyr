@@ -40,6 +40,14 @@ fn framebuf_clear(color) {
     return 0;
 }
 
+fn framebuf_get_pixel(x, y) {
+    if (x < 0) { return 0; }
+    if (y < 0) { return 0; }
+    if (x >= SCREEN_WIDTH) { return 0; }
+    if (y >= SCREEN_HEIGHT) { return 0; }
+    return load8(screen_buf + y * SCREEN_WIDTH + x);
+}
+
 fn framebuf_pixel(x, y, color) {
     if (x < 0) { return 0; }
     if (y < 0) { return 0; }

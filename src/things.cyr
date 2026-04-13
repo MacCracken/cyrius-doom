@@ -133,6 +133,7 @@ fn thing_state(idx) { return load64(things + idx * THING_SIZE + 40); }
 fn thing_health(idx) { return load64(things + idx * THING_SIZE + 48); }
 fn thing_category(idx) { return load64(things + idx * THING_SIZE + 56); }
 fn thing_tics(idx) { return load64(things + idx * THING_SIZE + 96); }
+fn thing_radius(idx) { return load64(things + idx * THING_SIZE + 80); }
 fn thing_flags(idx) { return load64(things + idx * THING_SIZE + 104); }
 
 fn thing_set_state(idx, st) { store64(things + idx * THING_SIZE + 40, st); return 0; }
@@ -563,6 +564,11 @@ fn things_check_pickups() {
         if (ttype == TTYPE_CHAINSAW) { player_weapons = player_weapons | 64; picked = 1; }
         if (ttype == TTYPE_PLASMA) { player_ammo_cells = player_ammo_cells + 40; player_weapons = player_weapons | 128; picked = 1; }
         if (ttype == TTYPE_BFG) { player_ammo_cells = player_ammo_cells + 40; player_weapons = player_weapons | 256; picked = 1; }
+
+        # Keys
+        if (ttype == TTYPE_KEY_BLUE) { player_keys = player_keys | KEY_CARD_BLUE; picked = 1; }
+        if (ttype == TTYPE_KEY_YELLOW) { player_keys = player_keys | KEY_CARD_YELLOW; picked = 1; }
+        if (ttype == TTYPE_KEY_RED) { player_keys = player_keys | KEY_CARD_RED; picked = 1; }
 
         # Clamp health
         if (player_health > 200) { player_health = 200; }

@@ -5,6 +5,24 @@ All notable changes to cyrius-doom will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.22.0] - 2026-04-13
+
+### Added
+
+- **Ammo consumption** — firing deducts ammo for current weapon. Pistol/chaingun use bullets (1), shotgun uses shells (1), rocket uses rockets (1), plasma uses cells (1). Fist and chainsaw are free. Empty weapon refuses to fire.
+- **Hitscan shooting** — fire key traces ray from player in facing direction. Finds nearest shootable thing within weapon range (2048 units, 64 for melee). Damage: pistol 5-15, shotgun 3x(5-15), rocket 20-120, fist/chainsaw 2-20. Calls `thing_damage()` on hit → pain/death states.
+- **Death and respawn** — when `player_health <= 0`: render scene with dark red tint (COLORMAP level 24), display HUD showing 0% health, wait for any key, then restart current map via `load_map()`.
+- **Key cards** — `player_keys` bitmask tracks blue/yellow/red key pickups. Door specials 26/27/28 check for matching key before opening. Keys displayed in HUD status bar (STKEYS0/1/2 patches at x=239). Key pickup tracked via `things_check_pickups()`.
+- **`framebuf_get_pixel()`** — read pixel from framebuffer for post-processing (death screen tint).
+- **`player_try_fire()`** — ammo check + deduction, returns 1 if fire allowed.
+- **`player_hitscan()`** — ray trace against all active shootable things with dot/cross product aiming.
+- **`thing_radius()` accessor** — reads thing radius from runtime struct for hitscan hit detection.
+
+### Changed
+
+- Binary size: 190KB (gameplay mechanics + hitscan + death screen)
+- Monster damage to player was already wired in v0.21.0; now has death consequence
+
 ## [0.21.0] - 2026-04-13
 
 ### Added

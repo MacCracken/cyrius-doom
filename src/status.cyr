@@ -261,6 +261,13 @@ fn status_render() {
     # ARMOR — big red + % at x=180
     st_draw_percent(player_armor, 179, STBAR_Y + 3);
 
+    # KEYS — right of face at x=239
+    var key_x = 239;
+    var key_y = STBAR_Y + 3;
+    if ((player_keys & KEY_CARD_BLUE) != 0) { st_draw_patch(wad_find_lump("STKEYS0"), key_x, key_y); }
+    if ((player_keys & KEY_CARD_YELLOW) != 0) { st_draw_patch(wad_find_lump("STKEYS1"), key_x, key_y + 10); }
+    if ((player_keys & KEY_CARD_RED) != 0) { st_draw_patch(wad_find_lump("STKEYS2"), key_x, key_y + 20); }
+
     # AMMO totals — current / max in number boxes LEFT of BULL/SHEL/RCKT/CELL labels
     # STBAR has slash separators baked in at ~x=283
     var cur_x = 276;

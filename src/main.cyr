@@ -54,7 +54,7 @@ fn load_map() {
 fn doom_main() {
     alloc_init();
     args_init();
-    sakshi_info("cyrius-doom v0.21.0", 19);
+    sakshi_info("cyrius-doom v0.22.0", 19);
 
     if (argc() < 2) {
         sakshi_error("usage: doom <wad> [map] [--ppm]", 31);
@@ -205,6 +205,43 @@ fn doom_main() {
         if ((input_flags & INP_TAB) != 0) { automap_toggle(); }
 
         player_tick();
+
+        # Death check: player_health <= 0
+        if (player_health <= 0) {
+            player_health = 0;
+            # Red flash: fill screen with palette 176 (red) tinted
+            framebuf_clear(176);
+            # Re-render the scene dimly behind the red
+            render_frame();
+            # Overlay red tint on every pixel
+            for (var ry = 0; ry < SCREEN_HEIGHT; ry = ry + 1) {
+                for (var rx = 0; rx < SCREEN_WIDTH; rx = rx + 1) {
+                    var p = framebuf_get_pixel(rx, ry);
+                    framebuf_pixel(rx, ry, render_shade(p, 24));
+                }
+            }
+            status_render();
+            framebuf_flip();
+
+            # Wait for any key to respawn
+            var dead_wait = 1;
+            while (dead_wait == 1) {
+                tick_begin();
+                input_poll();
+                if (input_flags != 0) { dead_wait = 0; }
+                if (input_quit == 1) { game_running = 0; dead_wait = 0; }
+                tick_wait();
+            }
+
+            if (game_running == 1) {
+                sakshi_info("respawn", 7);
+                if (load_map() != 0) {
+                    game_running = 0;
+                }
+            }
+            continue;
+        }
+
         if (input_use() == 1) { doors_use(); }
         doors_tick();
         things_tick();
