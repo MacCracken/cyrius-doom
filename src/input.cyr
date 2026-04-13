@@ -200,6 +200,12 @@ fn input_poll() {
     if (load64(key_state + KEY_TAB * 8) == 1) { input_flags = input_flags | INP_TAB; }
     if (load64(key_state + KEY_Q * 8) == 1) { input_quit = 1; }
 
+    # Weapon select: keys 1-7 (ASCII 49-55)
+    input_weapon = 0;
+    for (var wi = 1; wi <= 7; wi = wi + 1) {
+        if (load64(key_state + (48 + wi) * 8) == 1) { input_weapon = wi; }
+    }
+
     for (var i = 0; i < 256; i = i + 1) { store64(key_state + i * 8, 0); }
     return 0;
 }

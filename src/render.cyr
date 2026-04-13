@@ -58,17 +58,71 @@ fn render_load_sky() {
 # Weapon sprite: drawn as screen overlay after all 3D rendering
 var weapon_lump = 0 - 1;
 var weapon_patch_buf = 0;
+var weapon_prefix = 0;
+var weapon_fire_frame = 0;
+var weapon_fire_timer = 0;
+var weapon_fire_max = 0;
+
+enum WeaponConst {
+    WEAPON_BUF_SIZE = 16384;
+    FIRE_TICKS = 2;
+}
 
 fn render_set_weapon(weapon_id) {
-    if (weapon_patch_buf == 0) { weapon_patch_buf = alloc(16384); }
-    # Map weapon ID to sprite lump name
+    if (weapon_patch_buf == 0) { weapon_patch_buf = alloc(WEAPON_BUF_SIZE); }
+    if (weapon_prefix == 0) { weapon_prefix = alloc(8); }
+    store64(weapon_prefix, 0);
+
+    # Map weapon ID to sprite prefix and frame count
+    # 1=fist, 2=pistol, 3=shotgun, 4=chaingun, 5=rocket, 6=chainsaw
+    switch (weapon_id) {
+        case 1: { memcpy(weapon_prefix, "PUNG", 4); weapon_fire_max = 4; }
+        case 2: { memcpy(weapon_prefix, "PISG", 4); weapon_fire_max = 5; }
+        case 3: { memcpy(weapon_prefix, "SHTG", 4); weapon_fire_max = 4; }
+        case 4: { memcpy(weapon_prefix, "CHGG", 4); weapon_fire_max = 2; }
+        case 5: { memcpy(weapon_prefix, "MISG", 4); weapon_fire_max = 2; }
+        case 6: { memcpy(weapon_prefix, "SAWG", 4); weapon_fire_max = 4; }
+        default: { memcpy(weapon_prefix, "PISG", 4); weapon_fire_max = 5; }
+    }
+
+    weapon_fire_frame = 0;
+    weapon_fire_timer = 0;
+    render_update_weapon_lump();
+    return 0;
+}
+
+# Build lump name from prefix + frame letter + "0" and look it up
+fn render_update_weapon_lump() {
     var name = alloc(8);
-    store64(name, 0);
-    if (weapon_id == 1) { memcpy(name, "PISGA0", 6); }
-    if (weapon_id == 2) { memcpy(name, "SHTGA0", 6); }
-    if (weapon_id == 3) { memcpy(name, "CHGGA0", 6); }
-    if (weapon_id == 5) { memcpy(name, "SAWGA0", 6); }
+    memcpy(name, weapon_prefix, 4);
+    store8(name + 4, 65 + weapon_fire_frame);
+    store8(name + 5, 48);
+    store8(name + 6, 0);
     weapon_lump = wad_find_lump(name);
+    return 0;
+}
+
+# Start firing animation
+fn weapon_fire() {
+    if (weapon_fire_frame != 0) { return 0; }
+    weapon_fire_frame = 1;
+    weapon_fire_timer = FIRE_TICKS;
+    render_update_weapon_lump();
+    return 0;
+}
+
+# Advance firing animation (called each game tick)
+fn weapon_tick() {
+    if (weapon_fire_frame == 0) { return 0; }
+    weapon_fire_timer = weapon_fire_timer - 1;
+    if (weapon_fire_timer <= 0) {
+        weapon_fire_frame = weapon_fire_frame + 1;
+        if (weapon_fire_frame >= weapon_fire_max) {
+            weapon_fire_frame = 0;
+        }
+        weapon_fire_timer = FIRE_TICKS;
+        render_update_weapon_lump();
+    }
     return 0;
 }
 

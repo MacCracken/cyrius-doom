@@ -118,6 +118,12 @@ fn sprite_find_lump(thing_type) {
 # Find sprite lump with rotation based on viewer angle
 # rotation: 1-8, where 1=front, 5=back
 fn sprite_find_rotated(thing_type, rotation) {
+    return sprite_find_frame(thing_type, rotation, 0);
+}
+
+# Find sprite lump for a thing type with specific frame and rotation
+# frame: 0=A, 1=B, 2=C, ...
+fn sprite_find_frame(thing_type, rotation, frame) {
     if (_spr_prefix == 0) { _spr_prefix = alloc(8); }
     var prefix = _spr_prefix;
     store64(prefix, 0);
@@ -132,8 +138,10 @@ fn sprite_find_rotated(thing_type, rotation) {
     }
     if (found == 0) { return 0 - 1; }
 
+    var frame_char = 65 + frame;
+
     # Try rotation 0 (symmetric) first
-    store8(prefix + 4, 65);
+    store8(prefix + 4, frame_char);
     store8(prefix + 5, 48);
     store8(prefix + 6, 0);
     var lump = wad_find_lump(prefix);
@@ -144,7 +152,13 @@ fn sprite_find_rotated(thing_type, rotation) {
     lump = wad_find_lump(prefix);
     if (lump >= 0) { return lump; }
 
-    # Fallback to rotation 1
+    # Fallback to frame A rotation 0
+    store8(prefix + 4, 65);
+    store8(prefix + 5, 48);
+    lump = wad_find_lump(prefix);
+    if (lump >= 0) { return lump; }
+
+    # Fallback to frame A rotation 1
     store8(prefix + 5, 49);
     return wad_find_lump(prefix);
 }
@@ -167,18 +181,17 @@ fn sprite_calc_rotation(thing_x, thing_y, thing_angle) {
 fn sprite_render_all() {
     sprite_visible = 0;
 
-    # Collect visible things with distance
-    for (var i = 0; i < map_num_things; i = i + 1) {
+    # Collect visible things with distance (from runtime things array)
+    for (var i = 0; i < thing_count; i = i + 1) {
         if (sprite_visible >= 128) { break; }
 
-        var ttype = map_thing_type(i);
-        # Skip player starts
-        if (ttype >= 1) { if (ttype <= 4) { continue; } }
-        if (ttype == 11) { continue; }
-        if (ttype == 14) { continue; }
+        var tflags = thing_flags(i);
+        if ((tflags & TF_ACTIVE) == 0) { continue; }
 
-        var tx = map_thing_x(i);
-        var ty = map_thing_y(i);
+        var ttype = thing_type(i);
+
+        var tx = thing_x(i);
+        var ty = thing_y(i);
 
         # Transform to view space
         var dx = tx - view_x;
@@ -216,16 +229,17 @@ fn sprite_render_all() {
     for (var si = 0; si < sprite_visible; si = si + 1) {
         var thing_idx = load64(sprite_order + si * 8);
         var dist = load64(sprite_dist + si * 8);
-        var ttype = map_thing_type(thing_idx);
+        var ttype = thing_type(thing_idx);
 
-        # Get thing position
-        var tx = map_thing_x(thing_idx);
-        var ty = map_thing_y(thing_idx);
+        # Get thing position from runtime thing
+        var tx = thing_x(thing_idx);
+        var ty = thing_y(thing_idx);
 
         # Select rotation based on viewer-to-thing angle
-        var thing_ang = map_thing_angle(thing_idx);
-        var rot = sprite_calc_rotation(tx, ty, thing_ang * 1024 / 360);
-        var lump = sprite_find_rotated(ttype, rot);
+        var thing_ang = thing_angle(thing_idx);
+        var rot = sprite_calc_rotation(tx, ty, thing_ang);
+        var frame = thing_frame(thing_idx);
+        var lump = sprite_find_frame(ttype, rot, frame);
         if (lump < 0) { continue; }
 
         var psz = wad_lump_size(lump);

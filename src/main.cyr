@@ -46,7 +46,6 @@ fn load_map() {
     audio_preload();
     doors_init();
     automap_active = 0;
-    render_set_weapon(1);
     things_print_stats();
     return 0;
 }

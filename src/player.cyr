@@ -60,8 +60,9 @@ fn player_init() {
     player_armor = 0;
     player_ammo_bullets = 50;
     player_weapon = 2;
-    # Bitmask: bit N = has weapon N (bit 1=fists, bit 2=pistol)
+    # Bitmask: bit N = has weapon N (bit 1=fist, bit 2=pistol)
     player_weapons = 6;
+    render_set_weapon(player_weapon);
 
     # Find the floor height at player start
     var sector = player_find_sector();
@@ -337,6 +338,25 @@ fn player_tick() {
     # Check walk-over triggers
     if (player_x != old_px) { doors_walk_trigger(old_px, old_py, player_x, player_y); }
     if (player_y != old_py) { doors_walk_trigger(old_px, old_py, player_x, player_y); }
+
+    # Weapon switching (number keys 1-7)
+    if (input_weapon > 0) {
+        if (input_weapon <= 7) {
+            var wmask = 1 << input_weapon;
+            if ((player_weapons & wmask) != 0) {
+                if (input_weapon != player_weapon) {
+                    player_weapon = input_weapon;
+                    render_set_weapon(player_weapon);
+                }
+            }
+        }
+    }
+
+    # Fire weapon
+    if (input_fire() == 1) { weapon_fire(); }
+
+    # Advance weapon animation
+    weapon_tick();
 
     # Sync view state with player
     view_x = player_x;

@@ -91,7 +91,7 @@ enum ThingCat {
 # ================================================================
 # Runtime thing (mobj_t equivalent)
 # ================================================================
-# Layout per thing: 14 fields * 8 bytes = 112 bytes
+# Layout per thing: 15 fields * 8 bytes = 120 bytes
 #   0: x (fixed-point)
 #   8: y (fixed-point)
 #  16: z (fixed-point)
@@ -106,9 +106,10 @@ enum ThingCat {
 #  88: height (fixed-point)
 #  96: tics (countdown for state transitions)
 # 104: flags (active, solid, shootable, etc.)
+# 112: frame (sprite animation frame, 0=A, 1=B, ...)
 
 enum ThingLayout {
-    THING_SIZE = 112;
+    THING_SIZE = 120;
     THING_MAX = 512;
 }
 var things = 0;
@@ -138,6 +139,8 @@ fn thing_set_state(idx, st) { store64(things + idx * THING_SIZE + 40, st); retur
 fn thing_set_health(idx, h) { store64(things + idx * THING_SIZE + 48, h); return 0; }
 fn thing_set_tics(idx, t) { store64(things + idx * THING_SIZE + 96, t); return 0; }
 fn thing_set_flags(idx, f) { store64(things + idx * THING_SIZE + 104, f); return 0; }
+fn thing_frame(idx) { return load64(things + idx * THING_SIZE + 112); }
+fn thing_set_frame(idx, f) { store64(things + idx * THING_SIZE + 112, f); return 0; }
 fn thing_set_x(idx, v) { store64(things + idx * THING_SIZE, v); return 0; }
 fn thing_set_y(idx, v) { store64(things + idx * THING_SIZE + 8, v); return 0; }
 fn thing_set_angle(idx, v) { store64(things + idx * THING_SIZE + 24, v); return 0; }
@@ -289,6 +292,7 @@ fn things_spawn_from_map() {
         store64(base + 80, thing_default_radius(ttype));
         store64(base + 88, 56 << 16);
         store64(base + 96, 0);
+        store64(base + 112, 0);
 
         thing_count = thing_count + 1;
     }
@@ -351,6 +355,62 @@ enum MonsterConst {
     MONSTER_ATTACK_RANGE = 4194304;
     MONSTER_SIGHT_RANGE = 65536000;
     MONSTER_MELEE_RANGE = 4194304;
+}
+
+# Advance sprite frame based on current state
+# DOOM sprite frames: A=idle/walk1, B=walk2, C-D=attack, E-G=pain, H-K=die, L=dead
+# Frame cycling is driven by a 4-tick timer
+enum FrameConst {
+    FRAME_RATE = 4;
+}
+
+fn thing_animate(idx) {
+    var state = thing_state(idx);
+    var frame = thing_frame(idx);
+
+    # Each state defines a frame range
+    # SPAWN/ITEM: frame A (0) only
+    # SEE/CHASE: alternate A-B (walk cycle)
+    # ATTACK: C-D
+    # PAIN: E-F
+    # DIE: cycle H-K once (frames 7-10), then stop
+    # DEAD: L (frame 11)
+
+    switch (state) {
+        case 1: { thing_set_frame(idx, 0); }
+        case 8: { thing_set_frame(idx, 0); }
+        case 2: {
+            if (frame < 0) { frame = 0; }
+            if (frame > 1) { frame = 0; }
+            thing_set_frame(idx, 1 - frame);
+        }
+        case 3: {
+            if (frame > 1) { frame = 0; }
+            thing_set_frame(idx, 1 - frame);
+        }
+        case 4: {
+            if (frame < 2) { thing_set_frame(idx, 2); }
+            else {
+                if (frame >= 3) { thing_set_frame(idx, 2); }
+                else { thing_set_frame(idx, 3); }
+            }
+        }
+        case 5: {
+            if (frame < 4) { thing_set_frame(idx, 4); }
+            else {
+                if (frame >= 5) { thing_set_frame(idx, 4); }
+                else { thing_set_frame(idx, 5); }
+            }
+        }
+        case 6: {
+            if (frame < 7) { thing_set_frame(idx, 7); }
+            else {
+                if (frame < 10) { thing_set_frame(idx, frame + 1); }
+            }
+        }
+        case 7: { thing_set_frame(idx, 11); }
+    }
+    return 0;
 }
 
 fn thing_ai_tick(idx) {
@@ -495,12 +555,13 @@ fn things_check_pickups() {
         if (ttype == TTYPE_CELLPACK) { player_ammo_cells = player_ammo_cells + 100; picked = 1; }
 
         # Weapons (give weapon + some ammo)
-        if (ttype == TTYPE_SHOTGUN) { player_ammo_shells = player_ammo_shells + 8; player_weapons = player_weapons | 4; picked = 1; }
-        if (ttype == TTYPE_CHAINGUN) { player_ammo_bullets = player_ammo_bullets + 20; player_weapons = player_weapons | 8; picked = 1; }
-        if (ttype == TTYPE_LAUNCHER) { player_ammo_rockets = player_ammo_rockets + 2; player_weapons = player_weapons | 16; picked = 1; }
-        if (ttype == TTYPE_PLASMA) { player_ammo_cells = player_ammo_cells + 40; player_weapons = player_weapons | 32; picked = 1; }
-        if (ttype == TTYPE_BFG) { player_ammo_cells = player_ammo_cells + 40; player_weapons = player_weapons | 64; picked = 1; }
-        if (ttype == TTYPE_CHAINSAW) { player_weapons = player_weapons | 128; picked = 1; }
+        # Bitmask: 1<<N for weapon N. 1=fist, 2=pistol, 3=shotgun, 4=chaingun, 5=rocket, 6=chainsaw, 7=plasma
+        if (ttype == TTYPE_SHOTGUN) { player_ammo_shells = player_ammo_shells + 8; player_weapons = player_weapons | 8; picked = 1; }
+        if (ttype == TTYPE_CHAINGUN) { player_ammo_bullets = player_ammo_bullets + 20; player_weapons = player_weapons | 16; picked = 1; }
+        if (ttype == TTYPE_LAUNCHER) { player_ammo_rockets = player_ammo_rockets + 2; player_weapons = player_weapons | 32; picked = 1; }
+        if (ttype == TTYPE_CHAINSAW) { player_weapons = player_weapons | 64; picked = 1; }
+        if (ttype == TTYPE_PLASMA) { player_ammo_cells = player_ammo_cells + 40; player_weapons = player_weapons | 128; picked = 1; }
+        if (ttype == TTYPE_BFG) { player_ammo_cells = player_ammo_cells + 40; player_weapons = player_weapons | 256; picked = 1; }
 
         # Clamp health
         if (player_health > 200) { player_health = 200; }
@@ -542,6 +603,7 @@ fn thing_damage(idx, damage) {
 fn things_tick() {
     for (var i = 0; i < thing_count; i = i + 1) {
         thing_ai_tick(i);
+        thing_animate(i);
     }
     things_check_pickups();
     return 0;
