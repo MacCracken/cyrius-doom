@@ -154,63 +154,57 @@ fn doors_tick() {
         var w = door_wait(i);
         var orig = door_original(i);
 
-        if (state == DS_OPENING) {
-            h = h + DOOR_SPEED;
-            if (h >= target) {
-                h = target;
-                door_set_state(i, DS_OPEN);
-                door_set_wait(i, DOOR_WAIT);
+        # DS_OPENING=1, DS_OPEN=2, DS_CLOSING=3, DS_CLOSED=4
+        # DS_LIFT_DOWN=5, DS_LIFT_WAIT=6, DS_LIFT_UP=7
+        switch (state) {
+            case 1: {
+                h = h + DOOR_SPEED;
+                if (h >= target) {
+                    h = target;
+                    door_set_state(i, DS_OPEN);
+                    door_set_wait(i, DOOR_WAIT);
+                }
+                door_set_height(i, h);
+                store64(map_sectors + sec * MAP_SECTOR_SIZE + 8, h);
             }
-            door_set_height(i, h);
-            # Update sector ceiling
-            store64(map_sectors + sec * MAP_SECTOR_SIZE + 8, h);
-        }
-
-        if (state == DS_OPEN) {
-            w = w - 1;
-            door_set_wait(i, w);
-            if (w <= 0) {
-                door_set_state(i, DS_CLOSING);
+            case 2: {
+                w = w - 1;
+                door_set_wait(i, w);
+                if (w <= 0) { door_set_state(i, DS_CLOSING); }
             }
-        }
-
-        if (state == DS_CLOSING) {
-            h = h - DOOR_SPEED;
-            if (h <= orig) {
-                h = orig;
-                door_set_state(i, DS_CLOSED);
+            case 3: {
+                h = h - DOOR_SPEED;
+                if (h <= orig) {
+                    h = orig;
+                    door_set_state(i, DS_CLOSED);
+                }
+                door_set_height(i, h);
+                store64(map_sectors + sec * MAP_SECTOR_SIZE + 8, h);
             }
-            door_set_height(i, h);
-            store64(map_sectors + sec * MAP_SECTOR_SIZE + 8, h);
-        }
-
-        if (state == DS_LIFT_DOWN) {
-            h = h - LIFT_SPEED;
-            if (h <= target) {
-                h = target;
-                door_set_state(i, DS_LIFT_WAIT);
-                door_set_wait(i, LIFT_WAIT);
+            case 5: {
+                h = h - LIFT_SPEED;
+                if (h <= target) {
+                    h = target;
+                    door_set_state(i, DS_LIFT_WAIT);
+                    door_set_wait(i, LIFT_WAIT);
+                }
+                door_set_height(i, h);
+                store64(map_sectors + sec * MAP_SECTOR_SIZE, h);
             }
-            door_set_height(i, h);
-            store64(map_sectors + sec * MAP_SECTOR_SIZE, h);
-        }
-
-        if (state == DS_LIFT_WAIT) {
-            w = w - 1;
-            door_set_wait(i, w);
-            if (w <= 0) {
-                door_set_state(i, DS_LIFT_UP);
+            case 6: {
+                w = w - 1;
+                door_set_wait(i, w);
+                if (w <= 0) { door_set_state(i, DS_LIFT_UP); }
             }
-        }
-
-        if (state == DS_LIFT_UP) {
-            h = h + LIFT_SPEED;
-            if (h >= orig) {
-                h = orig;
-                door_set_state(i, DS_CLOSED);
+            case 7: {
+                h = h + LIFT_SPEED;
+                if (h >= orig) {
+                    h = orig;
+                    door_set_state(i, DS_CLOSED);
+                }
+                door_set_height(i, h);
+                store64(map_sectors + sec * MAP_SECTOR_SIZE, h);
             }
-            door_set_height(i, h);
-            store64(map_sectors + sec * MAP_SECTOR_SIZE, h);
         }
     }
     return 0;
@@ -267,43 +261,49 @@ fn doors_use() {
     var door_sec = 0 - 1;
     if (ls >= 0) { door_sec = map_sidedef_sector(ls); }
 
-    # Doors (open wait close)
-    if (special == 1) { if (door_sec >= 0) { door_open(door_sec); } }
-    if (special == 31) { if (door_sec >= 0) { door_open(door_sec); } }
-    if (special == 26) { if (door_sec >= 0) { door_open(door_sec); } }
-    if (special == 27) { if (door_sec >= 0) { door_open(door_sec); } }
-    if (special == 28) { if (door_sec >= 0) { door_open(door_sec); } }
-    if (special == 117) { if (door_sec >= 0) { door_open(door_sec); } }
-    if (special == 63) { if (door_sec >= 0) { door_open(door_sec); } }
-    if (special == 29) { if (door_sec >= 0) { door_open(door_sec); } }
-    if (special == 90) { if (door_sec >= 0) { door_open(door_sec); } }
-
-    # Lifts
-    if (special == 62) { if (door_sec >= 0) { lift_activate(door_sec); } }
-    if (special == 88) { if (door_sec >= 0) { lift_activate(door_sec); } }
-    if (special == 10) { if (door_sec >= 0) { lift_activate(door_sec); } }
-    if (special == 21) { if (door_sec >= 0) { lift_activate(door_sec); } }
-    if (special == 121) { if (door_sec >= 0) { lift_activate(door_sec); } }
-    if (special == 122) { if (door_sec >= 0) { lift_activate(door_sec); } }
+    # Direct use-activated specials (back-side sector)
+    if (door_sec >= 0) {
+        switch (special) {
+            # Doors (open wait close)
+            case 1: { door_open(door_sec); }
+            case 26: { door_open(door_sec); }
+            case 27: { door_open(door_sec); }
+            case 28: { door_open(door_sec); }
+            case 29: { door_open(door_sec); }
+            case 31: { door_open(door_sec); }
+            case 63: { door_open(door_sec); }
+            case 90: { door_open(door_sec); }
+            case 117: { door_open(door_sec); }
+            # Lifts
+            case 10: { lift_activate(door_sec); }
+            case 21: { lift_activate(door_sec); }
+            case 62: { lift_activate(door_sec); }
+            case 88: { lift_activate(door_sec); }
+            case 121: { lift_activate(door_sec); }
+            case 122: { lift_activate(door_sec); }
+        }
+    }
 
     # Exit switches
-    if (special == 11) { level_exit_normal(); return 0; }
-    if (special == 51) { level_exit_secret(); return 0; }
+    switch (special) {
+        case 11: { level_exit_normal(); return 0; }
+        case 51: { level_exit_secret(); return 0; }
+    }
 
-    # Switches that open doors/lifts on tagged sectors
-    # Type 103 = open door (tag), 23 = lower floor, etc.
+    # Tag-based specials: activate matching tagged sectors
     var tag = load64(map_linedefs + best_line * MAP_LINEDEF_SIZE + 32);
     if (tag > 0) {
-        # Find sectors with matching tag
         for (var si = 0; si < map_num_sectors; si = si + 1) {
             var stag = load64(map_sectors + si * MAP_SECTOR_SIZE + 48);
             if (stag == tag) {
-                if (special == 103) { door_open(si); }
-                if (special == 23) { lift_activate(si); }
-                if (special == 102) { lift_activate(si); }
-                if (special == 38) { lift_activate(si); }
-                if (special == 70) { lift_activate(si); }
-                if (special == 71) { lift_activate(si); }
+                switch (special) {
+                    case 23: { lift_activate(si); }
+                    case 38: { lift_activate(si); }
+                    case 70: { lift_activate(si); }
+                    case 71: { lift_activate(si); }
+                    case 102: { lift_activate(si); }
+                    case 103: { door_open(si); }
+                }
             }
         }
     }
@@ -318,14 +318,16 @@ fn doors_walk_trigger(old_x, old_y, new_x, new_y) {
         if (special == 0) { continue; }
 
         var is_walk = 0;
-        if (special == 2) { is_walk = 1; }
-        if (special == 4) { is_walk = 1; }
-        if (special == 88) { is_walk = 1; }
-        if (special == 10) { is_walk = 1; }
-        if (special == 38) { is_walk = 1; }
-        if (special == 70) { is_walk = 1; }
-        if (special == 52) { is_walk = 1; }
-        if (special == 124) { is_walk = 1; }
+        switch (special) {
+            case 2: { is_walk = 1; }
+            case 4: { is_walk = 1; }
+            case 10: { is_walk = 1; }
+            case 38: { is_walk = 1; }
+            case 52: { is_walk = 1; }
+            case 70: { is_walk = 1; }
+            case 88: { is_walk = 1; }
+            case 124: { is_walk = 1; }
+        }
         if (is_walk == 0) { continue; }
 
         var v1 = map_linedef_v1(i);
@@ -350,20 +352,24 @@ fn doors_walk_trigger(old_x, old_y, new_x, new_y) {
         if (crossed == 0) { continue; }
 
         # Exit lines
-        if (special == 52) { level_exit_normal(); return 0; }
-        if (special == 124) { level_exit_secret(); return 0; }
+        switch (special) {
+            case 52: { level_exit_normal(); return 0; }
+            case 124: { level_exit_secret(); return 0; }
+        }
 
         var tag = load64(map_linedefs + i * MAP_LINEDEF_SIZE + 32);
         if (tag > 0) {
             for (var si = 0; si < map_num_sectors; si = si + 1) {
                 var stag = load64(map_sectors + si * MAP_SECTOR_SIZE + 48);
                 if (stag == tag) {
-                    if (special == 2) { door_open(si); }
-                    if (special == 4) { door_open(si); }
-                    if (special == 88) { lift_activate(si); }
-                    if (special == 10) { lift_activate(si); }
-                    if (special == 38) { lift_activate(si); }
-                    if (special == 70) { lift_activate(si); }
+                    switch (special) {
+                        case 2: { door_open(si); }
+                        case 4: { door_open(si); }
+                        case 10: { lift_activate(si); }
+                        case 38: { lift_activate(si); }
+                        case 70: { lift_activate(si); }
+                        case 88: { lift_activate(si); }
+                    }
                 }
             }
         }

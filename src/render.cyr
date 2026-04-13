@@ -286,9 +286,8 @@ fn render_init_clip() {
 # Transform a vertex from world space to view space
 # ================================================================
 
-# Returns: tx (view-space X, left/right) in *out_tx
-#          ty (view-space Y, depth/distance) in *out_ty
-fn render_transform_vertex(wx, wy, out_tx, out_ty) {
+# Returns: (tx, ty) — view-space X (left/right) and Y (depth/distance)
+fn render_transform_vertex(wx, wy) {
     var dx = wx - view_x;
     var dy = wy - view_y;
 
@@ -298,9 +297,7 @@ fn render_transform_vertex(wx, wy, out_tx, out_ty) {
     var tx = fixed_mul(dx, view_cos) + fixed_mul(dy, view_sin);
     var ty = fixed_mul(dy, view_cos) - fixed_mul(dx, view_sin);
 
-    store64(out_tx, tx);
-    store64(out_ty, ty);
-    return 0;
+    return (tx, ty);
 }
 
 # ================================================================
@@ -321,12 +318,8 @@ fn render_seg(seg_idx) {
     var wy2 = map_vertex_y(v2_idx);
 
     # Transform to view space
-    var tx1 = 0;
-    var ty1 = 0;
-    var tx2 = 0;
-    var ty2 = 0;
-    render_transform_vertex(wx1, wy1, &tx1, &ty1);
-    render_transform_vertex(wx2, wy2, &tx2, &ty2);
+    var tx1, ty1 = render_transform_vertex(wx1, wy1);
+    var tx2, ty2 = render_transform_vertex(wx2, wy2);
 
     # Both behind the viewer? Skip.
     if (ty1 <= 0) { if (ty2 <= 0) { return 0; } }
