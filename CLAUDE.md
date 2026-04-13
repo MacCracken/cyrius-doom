@@ -6,10 +6,10 @@
 
 - **Type**: Standalone game binary / kernel demo
 - **License**: GPL-3.0-only (clean-room implementation)
-- **Language**: Cyrius (native, compiled via cc2)
+- **Language**: Cyrius (native, compiled via cc3 4.0.0)
 - **Version**: SemVer, version file at `VERSION`
 - **Binary size**: 191KB (20 modules), renders at 3.9ms/frame
-- **Status**: v0.23.0 — GAMEPLAY: shooting, ammo, death/respawn, key cards, armor absorption, weapon bob, sound triggers. DOOM-accurate lighting, masked midtextures, animated walls/flats/sprites, WAD-native HUD + menus + intermission, ALSA audio, doors/lifts, automap, level transitions (E1M1-E1M9)
+- **Status**: v0.23.2 — Full gameplay loop: shooting, ammo, death/respawn, key cards, armor absorption. DOOM-accurate lighting (scalelight/zlight tables), masked midtextures, animated walls/flats/sprites, WAD-native HUD + menus + intermission, ALSA audio, weapon switching + bob, doors/lifts, automap, level transitions (E1M1-E1M9). Modernized to Cyrius 4.0.0 (compound assignment, negative literals).
 - **Genesis repo**: [agnosticos](https://github.com/MacCracken/agnosticos)
 - **Philosophy**: [AGNOS Philosophy](https://github.com/MacCracken/agnosticos/blob/main/docs/philosophy.md)
 - **Standards**: [First-Party Standards](https://github.com/MacCracken/agnosticos/blob/main/docs/development/applications/first-party-standards.md)
@@ -109,19 +109,21 @@ src/
 ## Build & Test Commands
 
 ```sh
-# Build
+# Build (requires Cyrius 4.0.0+)
 cyrius build src/main.cyr build/doom
 
 # Run (requires DOOM1.WAD)
-./build/doom wad/DOOM1.WAD              # interactive (needs /dev/fb0)
-./build/doom wad/DOOM1.WAD --ppm        # screenshot mode (headless)
-./build/doom wad/DOOM1.WAD E1M2 --ppm   # specific map
+./build/doom wad/DOOM1.WAD              # interactive (needs /dev/fb0 or GTK viewer)
+./build/doom wad/DOOM1.WAD --ppm        # game screenshot mode (headless)
+./build/doom wad/DOOM1.WAD --ppm-menu   # menu screenshots (title/main/skill)
+./build/doom wad/DOOM1.WAD E1M3 --ppm   # specific map
 
 # Download shareware WAD
 sh scripts/get-wad.sh wad
 
-# Fuzz
-cyrius fuzz
+# Fuzz (build + run manually)
+cyrius build fuzz/fuzz_fixed.cyr build/fuzz_fixed && ./build/fuzz_fixed
+cyrius build fuzz/fuzz_wad.cyr build/fuzz_wad && ./build/fuzz_wad
 
 # One-shot run
 sh scripts/run.sh

@@ -1,9 +1,8 @@
 # cyrius-doom Development Roadmap
 
-> **v0.22.0** — 190KB, 20 modules, full gameplay loop: shooting, ammo, death/respawn,
-> key cards, DOOM-accurate lighting, masked midtextures, animated walls/flats/sprites,
-> WAD-native menus + HUD + intermission, ALSA audio, all 9 shareware maps.
-> Verified on Cyrius 3.10.1. Clean build, zero warnings, 51K fuzz iterations.
+> **v0.23.2** — 191KB, 20 modules, full gameplay loop, DOOM-accurate lighting,
+> modernized to Cyrius 4.0.0, P(-1) hardened.
+> Clean build, zero warnings, 51K fuzz iterations.
 
 ## Completed
 
@@ -30,17 +29,10 @@
 | v0.19.1 | Audio module, GTK3 display bridge, health/armor HUD fix |
 | v0.20.0 | Dep integration, WAD-native menus, weapon switching/firing, sprite animation, refactoring |
 | v0.21.0 | DOOM-accurate lighting, masked midtextures, animated walls, intermission screen |
-| v0.22.0 | Gameplay: ammo consumption, hitscan shooting, death/respawn, key cards + locked doors |
-
-## v0.23.0 — Polish & Correctness (current)
-
-| # | Item | Status | Detail |
-|---|------|--------|--------|
-| 1 | Weapon bob | Not started | Sine oscillation of psp->sx/sy during movement |
-| 2 | Sound effect triggers | Not started | Wire sound_pistol/shotgun/door/pickup to gameplay events |
-| 3 | HUD current ammo display | Not started | Show current weapon's ammo type in big number (not always bullets) |
-| 4 | Armor absorption | Not started | Damage split: green armor 1/3, blue armor 1/2 |
-| 5 | Health/armor pickup caps | Not started | Don't pick up medikit at 100%, etc. |
+| v0.22.0 | Gameplay: ammo, hitscan, death/respawn, key cards, locked doors |
+| v0.23.0 | Polish: weapon bob, sound triggers, HUD ammo display, armor absorption |
+| v0.23.1 | Cyrius 4.0.0 modernization (~300 changes: +=, negative literals) |
+| v0.23.2 | P(-1) hardening: termios iflag bitmask fix, full audit clean |
 
 ## v0.24.0 — DOOM Black Book Audit (2026-04-15)
 
