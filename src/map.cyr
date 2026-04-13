@@ -228,12 +228,15 @@ fn map_load(map_name) {
     for (var i = 0; i < map_num_segs; i = i + 1) {
         var src = data + i * 12;
         var base = map_segs + i * MAP_SEG_SIZE;
-        store64(base, read_le16(src));
-        store64(base + 8, read_le16(src + 2));
-        store64(base + 16, read_le16(src + 4));
-        store64(base + 24, read_le16(src + 6));
-        store64(base + 32, read_le16(src + 8));
-        store64(base + 40, read_le16(src + 10));
+        store64(base, read_le16(src));         # v1
+        store64(base + 8, read_le16(src + 2)); # v2
+        store64(base + 16, read_le16(src + 4)); # angle
+        store64(base + 24, read_le16(src + 6)); # linedef
+        store64(base + 32, read_le16(src + 8)); # side
+        # offset: signed 16-bit
+        var soff = read_le16(src + 10);
+        if (soff >= 0x8000) { soff = soff - 0x10000; }
+        store64(base + 40, soff);
     }
 
     # SSECTORS (marker + 6)
