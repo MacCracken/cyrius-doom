@@ -57,7 +57,7 @@ fn menu_draw_lump(name, px, py) {
 
 # Draw skull cursor at (px, py), alternating frames
 fn menu_draw_skull(px, py) {
-    menu_skull_timer = menu_skull_timer + 1;
+    menu_skull_timer += 1;
     if (menu_skull_timer >= MENU_SKULL_RATE) {
         menu_skull_timer = 0;
         menu_skull_frame = 1 - menu_skull_frame;
@@ -160,10 +160,10 @@ fn menu_handle_input() {
 
     # Navigate up/down
     if (input_forward() == 1) {
-        if (menu_cursor > 0) { menu_cursor = menu_cursor - 1; }
+        if (menu_cursor > 0) { menu_cursor -= 1; }
     }
     if (input_backward() == 1) {
-        if (menu_cursor < menu_item_count - 1) { menu_cursor = menu_cursor + 1; }
+        if (menu_cursor < menu_item_count - 1) { menu_cursor += 1; }
     }
 
     # Select (E key / use)
@@ -176,7 +176,7 @@ fn menu_handle_input() {
             }
             if (menu_cursor == 4) {
                 # Quit Game
-                menu_result = 0 - 1;
+                menu_result = -1;
             }
         }
         if (menu_screen == MENU_SKILL) {
@@ -230,8 +230,8 @@ fn menu_run() {
         input_poll();
 
         if (input_quit == 1) {
-            if (menu_screen == MENU_TITLE) { return 0 - 1; }
-            if (menu_screen == MENU_MAIN) { return 0 - 1; }
+            if (menu_screen == MENU_TITLE) { return -1; }
+            if (menu_screen == MENU_MAIN) { return -1; }
         }
 
         menu_tick();

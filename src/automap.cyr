@@ -41,13 +41,13 @@ fn am_screen_y(wy) {
 fn am_draw_line(x1, y1, x2, y2, color) {
     var dx = x2 - x1;
     var dy = y2 - y1;
-    if (dx < 0) { dx = 0 - dx; }
-    if (dy < 0) { dy = 0 - dy; }
+    if (dx < 0) { dx = -dx; }
+    if (dy < 0) { dy = -dy; }
 
     var sx = 1;
-    if (x1 > x2) { sx = 0 - 1; }
+    if (x1 > x2) { sx = -1; }
     var sy = 1;
-    if (y1 > y2) { sy = 0 - 1; }
+    if (y1 > y2) { sy = -1; }
 
     var err = dx - dy;
     var safety = 0;
@@ -57,15 +57,15 @@ fn am_draw_line(x1, y1, x2, y2, color) {
         if (x1 == x2) { if (y1 == y2) { break; } }
 
         var e2 = err * 2;
-        if (e2 > 0 - dy) {
-            err = err - dy;
-            x1 = x1 + sx;
+        if (e2 > -dy) {
+            err -= dy;
+            x1 += sx;
         }
         if (e2 < dx) {
-            err = err + dx;
-            y1 = y1 + sy;
+            err += dx;
+            y1 += sy;
         }
-        safety = safety + 1;
+        safety += 1;
     }
     return 0;
 }
@@ -112,7 +112,7 @@ fn automap_render() {
     framebuf_clear(0);
 
     # Draw all linedefs
-    for (var i = 0; i < map_num_linedefs; i = i + 1) {
+    for (var i = 0; i < map_num_linedefs; i += 1) {
         var v1 = map_linedef_v1(i);
         var v2 = map_linedef_v2(i);
         var flags = map_linedef_flags(i);
@@ -155,7 +155,7 @@ fn automap_render() {
     }
 
     # Draw things as dots
-    for (var i = 0; i < map_num_things; i = i + 1) {
+    for (var i = 0; i < map_num_things; i += 1) {
         var ttype = map_thing_type(i);
         if (ttype >= 1) { if (ttype <= 4) { continue; } }
         var tx = am_screen_x(map_thing_x(i));

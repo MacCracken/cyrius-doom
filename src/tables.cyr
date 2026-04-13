@@ -22,7 +22,7 @@ fn tables_init() {
 
     # Build sine table using Bhaskara I approximation
     # First quadrant: indices 0..256 (0..90 degrees)
-    for (var i = 0; i < 256; i = i + 1) {
+    for (var i = 0; i < 256; i += 1) {
         var x = i;
         var half = 512;
         var xmirror = half - x;
@@ -37,7 +37,7 @@ fn tables_init() {
     store64(sine_table + 256 * 8, 65536);
 
     # Second quadrant: mirror of first
-    for (var i = 1; i < 256; i = i + 1) {
+    for (var i = 1; i < 256; i += 1) {
         var val = load64(sine_table + (256 - i) * 8);
         store64(sine_table + (256 + i) * 8, val);
     }
@@ -46,9 +46,9 @@ fn tables_init() {
     store64(sine_table + 512 * 8, 0);
 
     # Third and fourth quadrants: negate first two
-    for (var i = 1; i < 512; i = i + 1) {
+    for (var i = 1; i < 512; i += 1) {
         var val = load64(sine_table + i * 8);
-        store64(sine_table + (512 + i) * 8, 0 - val);
+        store64(sine_table + (512 + i) * 8, -val);
     }
 
     return 0;

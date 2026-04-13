@@ -39,11 +39,11 @@ var flat_count = 0;
 # Simple 8-char name hash for fast lookup
 fn tex_name_hash(name_ptr) {
     var h = 0;
-    for (var i = 0; i < 8; i = i + 1) {
+    for (var i = 0; i < 8; i += 1) {
         var c = load8(name_ptr + i);
         if (c == 0) { break; }
         # Uppercase
-        if (c >= 97) { if (c <= 122) { c = c - 32; } }
+        if (c >= 97) { if (c <= 122) { c -= 32; } }
         h = h * 31 + c;
     }
     return h;
@@ -71,7 +71,7 @@ fn texture_init() {
     patch_count = read_le32(pn_data);
     if (patch_count > PATCH_MAX) { patch_count = PATCH_MAX; }
 
-    for (var i = 0; i < patch_count; i = i + 1) {
+    for (var i = 0; i < patch_count; i += 1) {
         var name = pn_data + 4 + i * 8;
         var lump = wad_find_lump(name);
         store64(patch_lumps + i * 8, lump);
@@ -88,7 +88,7 @@ fn texture_init() {
     var num_tex = read_le32(t1_data);
     if (num_tex > TEX_MAX) { num_tex = TEX_MAX; }
 
-    for (var i = 0; i < num_tex; i = i + 1) {
+    for (var i = 0; i < num_tex; i += 1) {
         var off = read_le32(t1_data + 4 + i * 4);
         var tex = t1_data + off;
 
@@ -111,7 +111,7 @@ fn texture_init() {
     if (f_start >= 0) {
         if (f_end >= 0) {
             var fi = 0;
-            for (var li = f_start + 1; li < f_end; li = li + 1) {
+            for (var li = f_start + 1; li < f_end; li += 1) {
                 if (fi >= FLAT_MAX) { break; }
                 var sz = wad_lump_size(li);
                 if (sz == FLAT_SIZE) {
@@ -120,7 +120,7 @@ fn texture_init() {
                     store64(flat_names + fi * 8, tex_name_hash(fname));
                     # Load flat data (64x64 raw palette indices)
                     wad_read_lump_into(li, flat_cache + fi * FLAT_SIZE, FLAT_SIZE);
-                    fi = fi + 1;
+                    fi += 1;
                 }
             }
             flat_count = fi;
@@ -146,15 +146,15 @@ var pcache_next = 0;
 fn pcache_init() {
     pcache = alloc(PCACHE_SLOTS * PCACHE_SLOT_SIZE);
     pcache_next = 0;
-    for (var i = 0; i < PCACHE_SLOTS; i = i + 1) {
-        store64(pcache + i * PCACHE_SLOT_SIZE, 0 - 1);
+    for (var i = 0; i < PCACHE_SLOTS; i += 1) {
+        store64(pcache + i * PCACHE_SLOT_SIZE, -1);
     }
     return 0;
 }
 
 fn pcache_get(lump_idx) {
     # Check if already cached
-    for (var i = 0; i < PCACHE_SLOTS; i = i + 1) {
+    for (var i = 0; i < PCACHE_SLOTS; i += 1) {
         if (load64(pcache + i * PCACHE_SLOT_SIZE) == lump_idx) {
             return pcache + i * PCACHE_SLOT_SIZE + 8;
         }
@@ -173,12 +173,12 @@ fn pcache_get(lump_idx) {
 # Find texture index by name (8-char, null-padded)
 fn texture_find(name) {
     var h = tex_name_hash(name);
-    for (var i = 0; i < tex_count; i = i + 1) {
+    for (var i = 0; i < tex_count; i += 1) {
         if (load64(tex_table + i * TEX_ENTRY_SIZE) == h) {
             return i;
         }
     }
-    return 0 - 1;
+    return -1;
 }
 
 fn texture_height(idx) { return load64(tex_table + idx * TEX_ENTRY_SIZE + 16); }
@@ -198,24 +198,24 @@ fn texture_get_column(tex_idx, col, dest) {
 
     if (tw == 0) { return 0; }
     col = col % tw;
-    if (col < 0) { col = col + tw; }
+    if (col < 0) { col += tw; }
 
     # Texture definition: patches start at offset 22
     # Each patch ref: originx(2) originy(2) patch_idx(2) stepdir(2) colormap(2) = 10 bytes
     var num_patches = read_le16(tex_def + 20);
 
     # Clear destination column
-    for (var y = 0; y < th; y = y + 1) {
+    for (var y = 0; y < th; y += 1) {
         store8(dest + y, 0);
     }
 
     # Composite patches into the column
-    for (var pi = 0; pi < num_patches; pi = pi + 1) {
+    for (var pi = 0; pi < num_patches; pi += 1) {
         var pref = tex_def + 22 + pi * 10;
         var ox = read_le16(pref);
-        if (ox >= 0x8000) { ox = ox - 0x10000; }
+        if (ox >= 0x8000) { ox -= 0x10000; }
         var oy = read_le16(pref + 2);
-        if (oy >= 0x8000) { oy = oy - 0x10000; }
+        if (oy >= 0x8000) { oy -= 0x10000; }
         var pidx = read_le16(pref + 4);
 
         if (pidx >= patch_count) { continue; }
@@ -248,7 +248,7 @@ fn texture_get_column(tex_idx, col, dest) {
             # Skip padding byte
             var pixels = post_ptr + 3;
 
-            for (var py = 0; py < length; py = py + 1) {
+            for (var py = 0; py < length; py += 1) {
                 var dy = oy + topdelta + py;
                 if (dy >= 0) {
                     if (dy < th) {
@@ -257,8 +257,8 @@ fn texture_get_column(tex_idx, col, dest) {
                 }
             }
 
-            post_ptr = post_ptr + 4 + length;
-            safety = safety + 1;
+            post_ptr += 4 + length;
+            safety += 1;
         }
     }
 
@@ -292,10 +292,10 @@ fn texture_init_anim() {
 # Find flat by exact name string (not hash of raw WAD bytes)
 fn flat_find_name(name) {
     var h = tex_name_hash(name);
-    for (var i = 0; i < flat_count; i = i + 1) {
+    for (var i = 0; i < flat_count; i += 1) {
         if (load64(flat_names + i * 8) == h) { return i; }
     }
-    return 0 - 1;
+    return -1;
 }
 
 # Rotate pixel data for a 3-frame animation group
@@ -356,7 +356,7 @@ fn anim_rotate_tex_3(group) {
 }
 
 fn texture_animate() {
-    anim_tick_counter = anim_tick_counter + 1;
+    anim_tick_counter += 1;
     if (anim_tick_counter < 8) { return 0; }
     anim_tick_counter = 0;
 
@@ -368,16 +368,16 @@ fn texture_animate() {
 # Find flat index by name hash
 fn flat_find(name) {
     var h = tex_name_hash(name);
-    for (var i = 0; i < flat_count; i = i + 1) {
+    for (var i = 0; i < flat_count; i += 1) {
         if (load64(flat_names + i * 8) == h) { return i; }
     }
-    return 0 - 1;
+    return -1;
 }
 
 # Get flat pixel at (x, y) — both wrapped to 0..63
 fn flat_get_pixel(flat_idx, x, y) {
     if (flat_idx < 0) { return 0; }
-    x = x & 63;
-    y = y & 63;
+    x &= 63;
+    y &= 63;
     return load8(flat_cache + flat_idx * FLAT_SIZE + y * 64 + x);
 }

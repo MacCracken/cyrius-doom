@@ -48,7 +48,7 @@ var clip_count = 0;
 var colormap = 0;
 
 # Sky texture: drawn when ceiling flat is F_SKY1
-var sky_tex_idx = 0 - 1;
+var sky_tex_idx = -1;
 
 fn render_load_sky() {
     sky_tex_idx = texture_find("SKY1");
@@ -56,7 +56,7 @@ fn render_load_sky() {
 }
 
 # Weapon sprite: drawn as screen overlay after all 3D rendering
-var weapon_lump = 0 - 1;
+var weapon_lump = -1;
 var weapon_patch_buf = 0;
 var weapon_prefix = 0;
 var weapon_fire_frame = 0;
@@ -118,9 +118,9 @@ fn weapon_fire() {
 # Advance firing animation (called each game tick)
 fn weapon_tick() {
     if (weapon_fire_frame == 0) { return 0; }
-    weapon_fire_timer = weapon_fire_timer - 1;
+    weapon_fire_timer -= 1;
     if (weapon_fire_timer <= 0) {
-        weapon_fire_frame = weapon_fire_frame + 1;
+        weapon_fire_frame += 1;
         if (weapon_fire_frame >= weapon_fire_max) {
             weapon_fire_frame = 0;
         }
@@ -133,16 +133,16 @@ fn weapon_tick() {
 # Update weapon bob based on player movement
 fn weapon_bob_tick(is_moving) {
     if (is_moving == 1) {
-        weapon_bob_time = weapon_bob_time + 1;
+        weapon_bob_time += 1;
         # Use sine table: 1024 entries, cycle through ~70 ticks per full bob
         var bob_ang = (weapon_bob_time * 15) & ANG_MASK;
         weapon_bob_x = fixed_to_int(fixed_mul(fixed_sin(bob_ang), BOB_RANGE << 16));
         weapon_bob_y = fixed_to_int(fixed_abs(fixed_mul(fixed_cos(bob_ang), BOB_RANGE << 16)));
     } else {
         # Settle back to center
-        if (weapon_bob_x > 0) { weapon_bob_x = weapon_bob_x - 1; }
-        if (weapon_bob_x < 0) { weapon_bob_x = weapon_bob_x + 1; }
-        if (weapon_bob_y > 0) { weapon_bob_y = weapon_bob_y - 1; }
+        if (weapon_bob_x > 0) { weapon_bob_x -= 1; }
+        if (weapon_bob_x < 0) { weapon_bob_x += 1; }
+        if (weapon_bob_y > 0) { weapon_bob_y -= 1; }
     }
     return 0;
 }
@@ -159,8 +159,8 @@ fn render_draw_weapon(light_level) {
     var ph = read_le16(weapon_patch_buf + 2);
     var loff = read_le16(weapon_patch_buf + 4);
     var toff = read_le16(weapon_patch_buf + 6);
-    if (loff >= 0x8000) { loff = loff - 0x10000; }
-    if (toff >= 0x8000) { toff = toff - 0x10000; }
+    if (loff >= 0x8000) { loff -= 0x10000; }
+    if (toff >= 0x8000) { toff -= 0x10000; }
 
     # DOOM psprite positioning:
     # psp->sx = 128 (pistol ready), centered at 160
@@ -172,7 +172,7 @@ fn render_draw_weapon(light_level) {
     var sx = 253 + loff + weapon_bob_x;
     var sy = 228 + toff + weapon_bob_y;
 
-    for (var col = 0; col < pw; col = col + 1) {
+    for (var col = 0; col < pw; col += 1) {
         var scr_x = sx + col;
         if (scr_x < 0) { continue; }
         if (scr_x >= SCREEN_WIDTH) { continue; }
@@ -187,7 +187,7 @@ fn render_draw_weapon(light_level) {
             var length = load8(post + 1);
             var pixels = post + 3;
 
-            for (var py = 0; py < length; py = py + 1) {
+            for (var py = 0; py < length; py += 1) {
                 var scr_y = sy + td + py;
                 if (scr_y < 0) { continue; }
                 if (scr_y >= SCREEN_HEIGHT) { continue; }
@@ -196,8 +196,8 @@ fn render_draw_weapon(light_level) {
                     framebuf_pixel(scr_x, scr_y, render_shade(pal, light_level));
                 }
             }
-            post = post + 4 + length;
-            safety = safety + 1;
+            post += 4 + length;
+            safety += 1;
         }
     }
     return 0;
@@ -248,11 +248,11 @@ fn render_init_light_tables() {
     # zlight: 16 * 128 = 2048 entries
     zlight = alloc(LIGHTLEVELS * MAXLIGHTZ * 8);
 
-    for (var i = 0; i < LIGHTLEVELS; i = i + 1) {
+    for (var i = 0; i < LIGHTLEVELS; i += 1) {
         var startmap = ((LIGHTLEVELS - 1 - i) * 2) * NUMCOLORMAPS / LIGHTLEVELS;
 
         # Wall lighting: inversely proportional to scale (closer = brighter)
-        for (var j = 0; j < MAXLIGHTSCALE; j = j + 1) {
+        for (var j = 0; j < MAXLIGHTSCALE; j += 1) {
             var level = startmap - j / DISTMAP;
             if (level < 0) { level = 0; }
             if (level >= NUMCOLORMAPS) { level = NUMCOLORMAPS - 1; }
@@ -260,7 +260,7 @@ fn render_init_light_tables() {
         }
 
         # Floor/ceiling lighting: proportional to distance
-        for (var j = 0; j < MAXLIGHTZ; j = j + 1) {
+        for (var j = 0; j < MAXLIGHTZ; j += 1) {
             # scale = (160 << 16) / ((j+1) << LIGHTZSHIFT)
             var scale = fixed_div(160 << 16, (j + 1) << LIGHTZSHIFT);
             var idx = asr(scale, LIGHTSCALESHIFT);
@@ -351,7 +351,7 @@ fn render_store_masked(sx1, sx2, mid_tex, lightnum_val, ty1_val, ty2_val,
     store64(base + 96, back_floor_h_val);
     store64(base + 104, back_ceil_h_val);
     store64(base + 112, dpb);
-    masked_count = masked_count + 1;
+    masked_count += 1;
     return 0;
 }
 
@@ -366,13 +366,13 @@ fn render_init_visplanes() {
         vp_floor_light = alloc(200 * 8);
         vp_ceil_light = alloc(200 * 8);
     }
-    for (var y = 0; y < SCREEN_HEIGHT; y = y + 1) {
+    for (var y = 0; y < SCREEN_HEIGHT; y += 1) {
         store64(vp_floor_x1 + y * 8, SCREEN_WIDTH);
         store64(vp_floor_x2 + y * 8, 0);
         store64(vp_ceil_x1 + y * 8, SCREEN_WIDTH);
         store64(vp_ceil_x2 + y * 8, 0);
-        store64(vp_floor_flat + y * 8, 0 - 1);
-        store64(vp_ceil_flat + y * 8, 0 - 1);
+        store64(vp_floor_flat + y * 8, -1);
+        store64(vp_ceil_flat + y * 8, -1);
         store64(vp_floor_light + y * 8, 16);
         store64(vp_ceil_light + y * 8, 16);
     }
@@ -398,7 +398,7 @@ fn render_flat_span(y, x1, x2, flat_idx, plane_h, light_level) {
     if (dist <= 0) { return 0; }
 
     # For each pixel in the span, compute world X,Y
-    for (var x = x1; x <= x2; x = x + 1) {
+    for (var x = x1; x <= x2; x += 1) {
         # Screen-relative X from center
         var sx = x - HALF_WIDTH;
 
@@ -439,14 +439,14 @@ fn render_draw_tex_column(x, y1, y2, tex_idx, tex_col, tex_y_start, tex_y_step, 
     if (th <= 0) { return 0; }
 
     var tex_y = tex_y_start;
-    for (var y = y1; y <= y2; y = y + 1) {
+    for (var y = y1; y <= y2; y += 1) {
         var ty = fixed_to_int(tex_y) % th;
-        if (ty < 0) { ty = ty + th; }
+        if (ty < 0) { ty += th; }
         var pal = load8(tex_col_buf + ty);
         if (pal != 0) {
             framebuf_pixel(x, y, render_shade(pal, light_level));
         }
-        tex_y = tex_y + tex_y_step;
+        tex_y += tex_y_step;
     }
     return 0;
 }
@@ -457,7 +457,7 @@ fn render_init_clip() {
         clip_bottom = alloc(2560);
         clip_solid = alloc(2560);
     }
-    for (var i = 0; i < SCREEN_WIDTH; i = i + 1) {
+    for (var i = 0; i < SCREEN_WIDTH; i += 1) {
         store64(clip_top + i * 8, 0);
         store64(clip_bottom + i * 8, SCREEN_HEIGHT - 1);
         store64(clip_solid + i * 8, 0);
@@ -581,8 +581,8 @@ fn render_seg(seg_idx) {
     # Fake contrast: horizontal walls (same Y) darker, vertical walls (same X) brighter
     var seg_dx = fixed_abs(map_vertex_x(v2_idx) - map_vertex_x(v1_idx));
     var seg_dy = fixed_abs(map_vertex_y(v2_idx) - map_vertex_y(v1_idx));
-    if (seg_dy < 256) { lightnum = lightnum - 1; }
-    if (seg_dx < 256) { lightnum = lightnum + 1; }
+    if (seg_dy < 256) { lightnum -= 1; }
+    if (seg_dx < 256) { lightnum += 1; }
     if (lightnum < 0) { lightnum = 0; }
     if (lightnum >= LIGHTLEVELS) { lightnum = LIGHTLEVELS - 1; }
 
@@ -655,7 +655,7 @@ fn render_seg(seg_idx) {
     }
 
     # Draw columns from sx1 to sx2
-    for (var col = sx1; col <= sx2; col = col + 1) {
+    for (var col = sx1; col <= sx2; col += 1) {
         # Skip fully occluded columns
         if (load64(clip_solid + col * 8) == 1) { continue; }
 
@@ -698,7 +698,7 @@ fn render_seg(seg_idx) {
                     if (sky_w > 0) {
                         if (sky_h > 0) {
                             var sky_col = (view_angle * sky_w / ANG360 + col) % sky_w;
-                            if (sky_col < 0) { sky_col = sky_col + sky_w; }
+                            if (sky_col < 0) { sky_col += sky_w; }
                             var sky_step = fixed_div(sky_h << 16, HALF_HEIGHT << 16);
                             render_draw_tex_column(col, ct, ceil_screen - 1, sky_tex_idx, sky_col, 0, sky_step, 0);
                         }
@@ -709,7 +709,7 @@ fn render_seg(seg_idx) {
                     framebuf_vline(col, ct, ceil_screen - 1, render_shade(ceil_base_pal, col_light));
                 }
             }
-            for (var cy = ct; cy < ceil_screen; cy = cy + 1) {
+            for (var cy = ct; cy < ceil_screen; cy += 1) {
                 var cx1 = load64(vp_ceil_x1 + cy * 8);
                 if (col < cx1) { store64(vp_ceil_x1 + cy * 8, col); }
                 var cx2 = load64(vp_ceil_x2 + cy * 8);
@@ -724,7 +724,7 @@ fn render_seg(seg_idx) {
             if (floor_flat < 0) {
                 framebuf_vline(col, floor_screen + 1, cb, render_shade(floor_base_pal, col_light));
             }
-            for (var fy = floor_screen + 1; fy <= cb; fy = fy + 1) {
+            for (var fy = floor_screen + 1; fy <= cb; fy += 1) {
                 var fx1 = load64(vp_floor_x1 + fy * 8);
                 if (col < fx1) { store64(vp_floor_x1 + fy * 8, col); }
                 var fx2 = load64(vp_floor_x2 + fy * 8);
@@ -756,7 +756,7 @@ fn render_seg(seg_idx) {
                         var upper_ystart = sd_yoff << 16;
                         if (dont_peg_top == 0) {
                             upper_ystart = (tex_h - (ceil_h - back_ceil_h)) << 16;
-                            upper_ystart = upper_ystart + (sd_yoff << 16);
+                            upper_ystart += (sd_yoff << 16);
                         }
                         render_draw_tex_column(col, ceil_screen, back_ceil_screen - 1,
                         upper_tex, tex_u, upper_ystart, ty_step, col_light);
@@ -805,7 +805,7 @@ fn render_seg(seg_idx) {
             }
 
             store64(clip_solid + col * 8, 1);
-            clip_count = clip_count + 1;
+            clip_count += 1;
         }
     }
 
@@ -820,7 +820,7 @@ fn render_subsector(ss_idx) {
     var count = map_ssector_count(ss_idx);
     var first = map_ssector_first(ss_idx);
 
-    for (var i = 0; i < count; i = i + 1) {
+    for (var i = 0; i < count; i += 1) {
         render_seg(first + i);
     }
     return 0;
@@ -874,7 +874,7 @@ fn render_flat_spans() {
     # For each row, we have x1..x2 bounds and the flat index + light
     # Per-row: compute distance once, then step world coords horizontally
 
-    for (var y = 0; y < SCREEN_HEIGHT; y = y + 1) {
+    for (var y = 0; y < SCREEN_HEIGHT; y += 1) {
         # Ceiling spans
         var cx1 = load64(vp_ceil_x1 + y * 8);
         var cx2 = load64(vp_ceil_x2 + y * 8);
@@ -894,13 +894,13 @@ fn render_flat_spans() {
 
                     # Step per pixel in X
                     var cstep_wx = fixed_mul(fixed_div(cdist, PROJ_DIST), view_sin);
-                    var cstep_wy = fixed_mul(fixed_div(cdist, PROJ_DIST), 0 - view_cos);
+                    var cstep_wy = fixed_mul(fixed_div(cdist, PROJ_DIST), -view_cos);
 
-                    for (var x = cx1; x <= cx2; x = x + 1) {
+                    for (var x = cx1; x <= cx2; x += 1) {
                         var cp = flat_get_pixel(cf, fixed_to_int(cwx) & 63, fixed_to_int(cwy) & 63);
                         framebuf_pixel(x, y, render_shade(cp, clv));
-                        cwx = cwx + cstep_wx;
-                        cwy = cwy + cstep_wy;
+                        cwx += cstep_wx;
+                        cwy += cstep_wy;
                     }
                 }
             }
@@ -923,13 +923,13 @@ fn render_flat_spans() {
                     var fwy = view_y + fixed_mul(fdist, view_sin) - fixed_mul(fixed_mul(fsx_left, fdist), view_cos);
 
                     var fstep_wx = fixed_mul(fixed_div(fdist, PROJ_DIST), view_sin);
-                    var fstep_wy = fixed_mul(fixed_div(fdist, PROJ_DIST), 0 - view_cos);
+                    var fstep_wy = fixed_mul(fixed_div(fdist, PROJ_DIST), -view_cos);
 
-                    for (var x = fx1; x <= fx2; x = x + 1) {
+                    for (var x = fx1; x <= fx2; x += 1) {
                         var fp = flat_get_pixel(ff, fixed_to_int(fwx) & 63, fixed_to_int(fwy) & 63);
                         framebuf_pixel(x, y, render_shade(fp, flv));
-                        fwx = fwx + fstep_wx;
-                        fwy = fwy + fstep_wy;
+                        fwx += fstep_wx;
+                        fwy += fstep_wy;
                     }
                 }
             }
@@ -949,7 +949,7 @@ fn render_masked_segs() {
     if (masked_segs == 0) { return 0; }
     if (tex_col_buf == 0) { tex_col_buf = alloc(256); }
 
-    for (var mi = 0; mi < masked_count; mi = mi + 1) {
+    for (var mi = 0; mi < masked_count; mi += 1) {
         var base = masked_segs + mi * MASKED_ENTRY_SIZE;
         var sx1 = load64(base);
         var sx2 = load64(base + 8);
@@ -976,7 +976,7 @@ fn render_masked_segs() {
         var tex_h = texture_height(mtex);
         if (tex_h <= 0) { continue; }
 
-        for (var col = sx1; col <= sx2; col = col + 1) {
+        for (var col = sx1; col <= sx2; col += 1) {
             # Interpolate depth
             var frac = 0;
             if (sx2 != sx1) {
@@ -1009,8 +1009,8 @@ fn render_masked_segs() {
             var ty_step = fixed_div(th << 16, wh << 16);
             var ty_pos = myoff << 16;
 
-            for (var row = open_top; row < open_bot; row = row + 1) {
-                if (row < 0) { ty_pos = ty_pos + ty_step; continue; }
+            for (var row = open_top; row < open_bot; row += 1) {
+                if (row < 0) { ty_pos += ty_step; continue; }
                 if (row >= SCREEN_HEIGHT) { break; }
                 var src_y = fixed_to_int(ty_pos);
                 if (src_y >= 0) {
@@ -1021,7 +1021,7 @@ fn render_masked_segs() {
                         }
                     }
                 }
-                ty_pos = ty_pos + ty_step;
+                ty_pos += ty_step;
             }
         }
     }

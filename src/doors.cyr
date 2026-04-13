@@ -52,7 +52,7 @@ fn door_set_wait(idx, v) { store64(door_thinkers + idx * DOOR_ENTRY_SIZE + 32, v
 # Find the highest ceiling of sectors neighboring a given sector
 fn find_highest_neighbor_ceil(sector_idx) {
     var best = map_sector_ceilh(sector_idx);
-    for (var i = 0; i < map_num_linedefs; i = i + 1) {
+    for (var i = 0; i < map_num_linedefs; i += 1) {
         var rs = map_linedef_side_right(i);
         var ls = map_linedef_side_left(i);
         if (rs < 0) { continue; }
@@ -74,7 +74,7 @@ fn find_highest_neighbor_ceil(sector_idx) {
 # Find the lowest floor of sectors neighboring a given sector
 fn find_lowest_neighbor_floor(sector_idx) {
     var best = map_sector_floorh(sector_idx);
-    for (var i = 0; i < map_num_linedefs; i = i + 1) {
+    for (var i = 0; i < map_num_linedefs; i += 1) {
         var rs = map_linedef_side_right(i);
         var ls = map_linedef_side_left(i);
         if (rs < 0) { continue; }
@@ -95,10 +95,10 @@ fn find_lowest_neighbor_floor(sector_idx) {
 
 # Check if sector already has an active thinker
 fn door_find_sector(sector_idx) {
-    for (var i = 0; i < door_count; i = i + 1) {
+    for (var i = 0; i < door_count; i += 1) {
         if (door_sector(i) == sector_idx) { return i; }
     }
-    return 0 - 1;
+    return -1;
 }
 
 # Open a door (raise ceiling)
@@ -119,7 +119,7 @@ fn door_open(sector_idx) {
     store64(base + 32, 0);
     store64(base + 40, ceil_h);
 
-    door_count = door_count + 1;
+    door_count += 1;
     sound_door_open();
     return 0;
 }
@@ -141,13 +141,13 @@ fn lift_activate(sector_idx) {
     store64(base + 32, 0);
     store64(base + 40, floor_h);
 
-    door_count = door_count + 1;
+    door_count += 1;
     return 0;
 }
 
 # Tick all active door/lift thinkers
 fn doors_tick() {
-    for (var i = 0; i < door_count; i = i + 1) {
+    for (var i = 0; i < door_count; i += 1) {
         var sec = door_sector(i);
         var state = door_state(i);
         var h = door_height(i);
@@ -159,7 +159,7 @@ fn doors_tick() {
         # DS_LIFT_DOWN=5, DS_LIFT_WAIT=6, DS_LIFT_UP=7
         switch (state) {
             case 1: {
-                h = h + DOOR_SPEED;
+                h += DOOR_SPEED;
                 if (h >= target) {
                     h = target;
                     door_set_state(i, DS_OPEN);
@@ -169,12 +169,12 @@ fn doors_tick() {
                 store64(map_sectors + sec * MAP_SECTOR_SIZE + 8, h);
             }
             case 2: {
-                w = w - 1;
+                w -= 1;
                 door_set_wait(i, w);
                 if (w <= 0) { door_set_state(i, DS_CLOSING); }
             }
             case 3: {
-                h = h - DOOR_SPEED;
+                h -= DOOR_SPEED;
                 if (h <= orig) {
                     h = orig;
                     door_set_state(i, DS_CLOSED);
@@ -183,7 +183,7 @@ fn doors_tick() {
                 store64(map_sectors + sec * MAP_SECTOR_SIZE + 8, h);
             }
             case 5: {
-                h = h - LIFT_SPEED;
+                h -= LIFT_SPEED;
                 if (h <= target) {
                     h = target;
                     door_set_state(i, DS_LIFT_WAIT);
@@ -193,12 +193,12 @@ fn doors_tick() {
                 store64(map_sectors + sec * MAP_SECTOR_SIZE, h);
             }
             case 6: {
-                w = w - 1;
+                w -= 1;
                 door_set_wait(i, w);
                 if (w <= 0) { door_set_state(i, DS_LIFT_UP); }
             }
             case 7: {
-                h = h + LIFT_SPEED;
+                h += LIFT_SPEED;
                 if (h >= orig) {
                     h = orig;
                     door_set_state(i, DS_CLOSED);
@@ -224,10 +224,10 @@ fn doors_use() {
     var ry = player_y + fixed_mul(fixed_sin(player_angle), use_dist);
 
     # Find nearest linedef that the use ray crosses
-    var best_line = 0 - 1;
+    var best_line = -1;
     var best_dist = use_dist;
 
-    for (var i = 0; i < map_num_linedefs; i = i + 1) {
+    for (var i = 0; i < map_num_linedefs; i += 1) {
         var v1 = map_linedef_v1(i);
         var v2 = map_linedef_v2(i);
         var lx1 = map_vertex_x(v1);
@@ -259,7 +259,7 @@ fn doors_use() {
     var ls = map_linedef_side_left(best_line);
 
     # Door: activate sector on the BACK side of the linedef
-    var door_sec = 0 - 1;
+    var door_sec = -1;
     if (ls >= 0) { door_sec = map_sidedef_sector(ls); }
 
     # Direct use-activated specials (back-side sector)
@@ -294,7 +294,7 @@ fn doors_use() {
     # Tag-based specials: activate matching tagged sectors
     var tag = load64(map_linedefs + best_line * MAP_LINEDEF_SIZE + 32);
     if (tag > 0) {
-        for (var si = 0; si < map_num_sectors; si = si + 1) {
+        for (var si = 0; si < map_num_sectors; si += 1) {
             var stag = load64(map_sectors + si * MAP_SECTOR_SIZE + 48);
             if (stag == tag) {
                 switch (special) {
@@ -314,7 +314,7 @@ fn doors_use() {
 
 # Walk-over triggers: check if player crossed a special linedef
 fn doors_walk_trigger(old_x, old_y, new_x, new_y) {
-    for (var i = 0; i < map_num_linedefs; i = i + 1) {
+    for (var i = 0; i < map_num_linedefs; i += 1) {
         var special = load64(map_linedefs + i * MAP_LINEDEF_SIZE + 24);
         if (special == 0) { continue; }
 
@@ -360,7 +360,7 @@ fn doors_walk_trigger(old_x, old_y, new_x, new_y) {
 
         var tag = load64(map_linedefs + i * MAP_LINEDEF_SIZE + 32);
         if (tag > 0) {
-            for (var si = 0; si < map_num_sectors; si = si + 1) {
+            for (var si = 0; si < map_num_sectors; si += 1) {
                 var stag = load64(map_sectors + si * MAP_SECTOR_SIZE + 48);
                 if (stag == tag) {
                     switch (special) {

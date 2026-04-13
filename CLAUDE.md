@@ -18,7 +18,7 @@
 
 AGNOS kernel (initrd demo), kiran (game engine reference), vidya (field notes / language research)
 
-**Composes**: bsp (spatial geometry, git dep tag 0.5.2), sakshi (tracing 0.7.0)
+**Composes**: bsp (spatial geometry, git dep tag 0.9.0), sakshi (tracing 0.9.0)
 
 ## References
 

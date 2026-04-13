@@ -22,8 +22,8 @@ enum Angle {
 # Arithmetic right shift (sign-preserving)
 fn asr(val, bits) {
     if (val >= 0) { return val >> bits; }
-    var pos = 0 - val;
-    return 0 - (pos >> bits);
+    var pos = -val;
+    return -(pos >> bits);
 }
 
 fn fixed_from_int(n) { return n << 16; }
@@ -40,7 +40,7 @@ fn fixed_div(a, b) {
 }
 
 fn fixed_abs(f) {
-    if (f < 0) { return 0 - f; }
+    if (f < 0) { return -f; }
     return f;
 }
 

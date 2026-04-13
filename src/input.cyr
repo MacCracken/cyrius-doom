@@ -98,13 +98,13 @@ fn input_enable_raw_mode() {
     # c_lflag &= ~(ICANON | ECHO | ISIG)
     # ICANON=2, ECHO=8, ISIG=1
     var lflag = load32(&raw + 12);
-    lflag = lflag & (0 - 12);
+    lflag &= -12;
     store32(&raw + 12, lflag);
 
     # Disable input processing
     # c_iflag &= ~(IXON | ICRNL | BRKINT | INPCK | ISTRIP)
     var iflag = load32(&raw);
-    iflag = iflag & (0 - 1043);
+    iflag &= -1043;
     store32(&raw, iflag);
 
     # Set VMIN=0 (non-blocking), VTIME=0 (no timeout)
@@ -131,7 +131,7 @@ fn input_disable_raw_mode() {
 
 fn input_init() {
     key_state = alloc(2048);
-    for (var i = 0; i < 256; i = i + 1) {
+    for (var i = 0; i < 256; i += 1) {
         store64(key_state + i * 8, 0);
     }
 
@@ -171,41 +171,41 @@ fn input_poll() {
                         if (seq2 == 66) { store64(key_state + KEY_DOWN * 8, 1); }
                         if (seq2 == 67) { store64(key_state + KEY_RIGHT * 8, 1); }
                         if (seq2 == 68) { store64(key_state + KEY_LEFT * 8, 1); }
-                        pos = pos + 3;
+                        pos += 3;
                         continue;
                     }
                 }
                 input_quit = 1;
-                pos = pos + 1;
+                pos += 1;
             } else {
                 if (ch < 256) { store64(key_state + ch * 8, 1); }
-                pos = pos + 1;
+                pos += 1;
             }
         }
     }
 
     # Map key state to bitmask
-    if (load64(key_state + KEY_W * 8) == 1) { input_flags = input_flags | INP_FORWARD; }
-    if (load64(key_state + KEY_UP * 8) == 1) { input_flags = input_flags | INP_FORWARD; }
-    if (load64(key_state + KEY_S * 8) == 1) { input_flags = input_flags | INP_BACKWARD; }
-    if (load64(key_state + KEY_DOWN * 8) == 1) { input_flags = input_flags | INP_BACKWARD; }
-    if (load64(key_state + KEY_LEFT * 8) == 1) { input_flags = input_flags | INP_TURN_LEFT; }
-    if (load64(key_state + KEY_RIGHT * 8) == 1) { input_flags = input_flags | INP_TURN_RIGHT; }
-    if (load64(key_state + KEY_A * 8) == 1) { input_flags = input_flags | INP_STRAFE_LEFT; }
-    if (load64(key_state + KEY_D * 8) == 1) { input_flags = input_flags | INP_STRAFE_RIGHT; }
-    if (load64(key_state + KEY_SPACE * 8) == 1) { input_flags = input_flags | INP_USE; }
-    if (load64(key_state + KEY_E * 8) == 1) { input_flags = input_flags | INP_USE; }
-    if (load64(key_state + 102 * 8) == 1) { input_flags = input_flags | INP_FIRE; }
-    if (load64(key_state + KEY_R * 8) == 1) { input_flags = input_flags | INP_RUN; }
-    if (load64(key_state + KEY_TAB * 8) == 1) { input_flags = input_flags | INP_TAB; }
+    if (load64(key_state + KEY_W * 8) == 1) { input_flags |= INP_FORWARD; }
+    if (load64(key_state + KEY_UP * 8) == 1) { input_flags |= INP_FORWARD; }
+    if (load64(key_state + KEY_S * 8) == 1) { input_flags |= INP_BACKWARD; }
+    if (load64(key_state + KEY_DOWN * 8) == 1) { input_flags |= INP_BACKWARD; }
+    if (load64(key_state + KEY_LEFT * 8) == 1) { input_flags |= INP_TURN_LEFT; }
+    if (load64(key_state + KEY_RIGHT * 8) == 1) { input_flags |= INP_TURN_RIGHT; }
+    if (load64(key_state + KEY_A * 8) == 1) { input_flags |= INP_STRAFE_LEFT; }
+    if (load64(key_state + KEY_D * 8) == 1) { input_flags |= INP_STRAFE_RIGHT; }
+    if (load64(key_state + KEY_SPACE * 8) == 1) { input_flags |= INP_USE; }
+    if (load64(key_state + KEY_E * 8) == 1) { input_flags |= INP_USE; }
+    if (load64(key_state + 102 * 8) == 1) { input_flags |= INP_FIRE; }
+    if (load64(key_state + KEY_R * 8) == 1) { input_flags |= INP_RUN; }
+    if (load64(key_state + KEY_TAB * 8) == 1) { input_flags |= INP_TAB; }
     if (load64(key_state + KEY_Q * 8) == 1) { input_quit = 1; }
 
     # Weapon select: keys 1-7 (ASCII 49-55)
     input_weapon = 0;
-    for (var wi = 1; wi <= 7; wi = wi + 1) {
+    for (var wi = 1; wi <= 7; wi += 1) {
         if (load64(key_state + (48 + wi) * 8) == 1) { input_weapon = wi; }
     }
 
-    for (var i = 0; i < 256; i = i + 1) { store64(key_state + i * 8, 0); }
+    for (var i = 0; i < 256; i += 1) { store64(key_state + i * 8, 0); }
     return 0;
 }

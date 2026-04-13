@@ -14,8 +14,8 @@ var screen_buf = 0;
 var rgb_buf = 0;
 var palette = 0;
 
-var fb_fd = 0 - 1;
-var pipe_fd = 0 - 1;
+var fb_fd = -1;
+var pipe_fd = -1;
 
 fn framebuf_init() {
     screen_buf = alloc(64000);
@@ -24,7 +24,7 @@ fn framebuf_init() {
 
     fb_fd = file_open("/dev/fb0", 2, 0);
     if (fb_fd < 0) {
-        fb_fd = 0 - 1;
+        fb_fd = -1;
     }
     return 0;
 }
@@ -65,9 +65,9 @@ fn framebuf_vline(x, y1, y2, color) {
     if (y1 > y2) { return 0; }
 
     var offset = y1 * SCREEN_WIDTH + x;
-    for (var y = y1; y <= y2; y = y + 1) {
+    for (var y = y1; y <= y2; y += 1) {
         store8(screen_buf + offset, color);
-        offset = offset + SCREEN_WIDTH;
+        offset += SCREEN_WIDTH;
     }
     return 0;
 }
@@ -80,22 +80,22 @@ fn framebuf_hline(x1, x2, y, color) {
     if (x1 > x2) { return 0; }
 
     var offset = y * SCREEN_WIDTH + x1;
-    for (var x = x1; x <= x2; x = x + 1) {
+    for (var x = x1; x <= x2; x += 1) {
         store8(screen_buf + offset, color);
-        offset = offset + 1;
+        offset += 1;
     }
     return 0;
 }
 
 fn framebuf_fill_rect(x, y, w, h, color) {
-    for (var row = y; row < y + h; row = row + 1) {
+    for (var row = y; row < y + h; row += 1) {
         framebuf_hline(x, x + w - 1, row, color);
     }
     return 0;
 }
 
 fn framebuf_flip() {
-    for (var i = 0; i < SCREEN_SIZE; i = i + 1) {
+    for (var i = 0; i < SCREEN_SIZE; i += 1) {
         var ci = load8(screen_buf + i);
         var pal_off = ci * 3;
         var r = load8(palette + pal_off);
@@ -120,13 +120,13 @@ fn framebuf_flip() {
 
 fn framebuf_write_ppm(path) {
     var fd = file_open(path, 65, 0x1A4);
-    if (fd < 0) { return 0 - 1; }
+    if (fd < 0) { return -1; }
 
     file_write(fd, "P6\n320 200\n255\n", 15);
 
     var row_buf = alloc(960);
-    for (var y = 0; y < SCREEN_HEIGHT; y = y + 1) {
-        for (var x = 0; x < SCREEN_WIDTH; x = x + 1) {
+    for (var y = 0; y < SCREEN_HEIGHT; y += 1) {
+        for (var x = 0; x < SCREEN_WIDTH; x += 1) {
             var ci = load8(screen_buf + y * SCREEN_WIDTH + x);
             var pal_off = ci * 3;
             store8(row_buf + x * 3, load8(palette + pal_off));
@@ -140,6 +140,6 @@ fn framebuf_write_ppm(path) {
 }
 
 fn framebuf_shutdown() {
-    if (fb_fd >= 0) { file_close(fb_fd); fb_fd = 0 - 1; }
+    if (fb_fd >= 0) { file_close(fb_fd); fb_fd = -1; }
     return 0;
 }

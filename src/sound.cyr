@@ -24,7 +24,7 @@ enum SoundConst {
     PIT_FREQ = 1193180;
 }
 
-var sound_fd = 0 - 1;
+var sound_fd = -1;
 var sound_enabled = 0;
 
 # Current sound state
@@ -49,7 +49,7 @@ fn sound_shutdown() {
         # Silence
         syscall(SYS_IOCTL, sound_fd, KIOCSOUND, 0);
         syscall(3, sound_fd);
-        sound_fd = 0 - 1;
+        sound_fd = -1;
         sound_enabled = 0;
     }
     return 0;
@@ -113,7 +113,7 @@ fn sound_tick() {
 
     # Count down current sound
     if (sound_playing == 1) {
-        sound_ticks_left = sound_ticks_left - 1;
+        sound_ticks_left -= 1;
         if (sound_ticks_left <= 0) {
             sound_set_freq(0);
             sound_playing = 0;

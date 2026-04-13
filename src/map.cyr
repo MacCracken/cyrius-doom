@@ -143,17 +143,17 @@ fn map_load(map_name) {
     var marker = wad_find_lump(map_name);
     if (marker < 0) {
         sakshi_error("map not found", 13);
-        return 0 - 1;
+        return -1;
     }
 
     # VERTEXES (marker + 4)
     var lump_idx = marker + 4;
     var lump_size = wad_lump_size(lump_idx);
     var data = wad_read_lump(lump_idx);
-    if (data == 0) { return 0 - 1; }
+    if (data == 0) { return -1; }
     map_num_vertexes = lump_size / 4;
     if (map_num_vertexes > MAP_MAX_VERTEXES) { map_num_vertexes = MAP_MAX_VERTEXES; }
-    for (var i = 0; i < map_num_vertexes; i = i + 1) {
+    for (var i = 0; i < map_num_vertexes; i += 1) {
         var src = data + i * 4;
         var dst = map_vertexes + i * MAP_VERTEX_SIZE;
         store64(dst, sign_extend_16(read_le16(src)) << 16);
@@ -164,10 +164,10 @@ fn map_load(map_name) {
     lump_idx = marker + 2;
     lump_size = wad_lump_size(lump_idx);
     data = wad_read_lump(lump_idx);
-    if (data == 0) { return 0 - 1; }
+    if (data == 0) { return -1; }
     map_num_linedefs = lump_size / 14;
     if (map_num_linedefs > MAP_MAX_LINEDEFS) { map_num_linedefs = MAP_MAX_LINEDEFS; }
-    for (var i = 0; i < map_num_linedefs; i = i + 1) {
+    for (var i = 0; i < map_num_linedefs; i += 1) {
         var src = data + i * 14;
         var base = map_linedefs + i * MAP_LINEDEF_SIZE;
         store64(base, read_le16(src));
@@ -177,7 +177,7 @@ fn map_load(map_name) {
         store64(base + 32, read_le16(src + 8));
         store64(base + 40, read_le16(src + 10));
         var left = read_le16(src + 12);
-        if (left == 65535) { left = 0 - 1; }
+        if (left == 65535) { left = -1; }
         store64(base + 48, left);
     }
 
@@ -185,10 +185,10 @@ fn map_load(map_name) {
     lump_idx = marker + 3;
     lump_size = wad_lump_size(lump_idx);
     data = wad_read_lump(lump_idx);
-    if (data == 0) { return 0 - 1; }
+    if (data == 0) { return -1; }
     map_num_sidedefs = lump_size / 30;
     if (map_num_sidedefs > MAP_MAX_SIDEDEFS) { map_num_sidedefs = MAP_MAX_SIDEDEFS; }
-    for (var i = 0; i < map_num_sidedefs; i = i + 1) {
+    for (var i = 0; i < map_num_sidedefs; i += 1) {
         var src = data + i * 30;
         var base = map_sidedefs + i * MAP_SIDEDEF_SIZE;
         store64(base, sign_extend_16(read_le16(src)));
@@ -203,10 +203,10 @@ fn map_load(map_name) {
     lump_idx = marker + 8;
     lump_size = wad_lump_size(lump_idx);
     data = wad_read_lump(lump_idx);
-    if (data == 0) { return 0 - 1; }
+    if (data == 0) { return -1; }
     map_num_sectors = lump_size / 26;
     if (map_num_sectors > MAP_MAX_SECTORS) { map_num_sectors = MAP_MAX_SECTORS; }
-    for (var i = 0; i < map_num_sectors; i = i + 1) {
+    for (var i = 0; i < map_num_sectors; i += 1) {
         var src = data + i * 26;
         var base = map_sectors + i * MAP_SECTOR_SIZE;
         store64(base, sign_extend_16(read_le16(src)));
@@ -222,10 +222,10 @@ fn map_load(map_name) {
     lump_idx = marker + 5;
     lump_size = wad_lump_size(lump_idx);
     data = wad_read_lump(lump_idx);
-    if (data == 0) { return 0 - 1; }
+    if (data == 0) { return -1; }
     map_num_segs = lump_size / 12;
     if (map_num_segs > MAP_MAX_SEGS) { map_num_segs = MAP_MAX_SEGS; }
-    for (var i = 0; i < map_num_segs; i = i + 1) {
+    for (var i = 0; i < map_num_segs; i += 1) {
         var src = data + i * 12;
         var base = map_segs + i * MAP_SEG_SIZE;
         store64(base, read_le16(src));         # v1
@@ -235,7 +235,7 @@ fn map_load(map_name) {
         store64(base + 32, read_le16(src + 8)); # side
         # offset: signed 16-bit
         var soff = read_le16(src + 10);
-        if (soff >= 0x8000) { soff = soff - 0x10000; }
+        if (soff >= 0x8000) { soff -= 0x10000; }
         store64(base + 40, soff);
     }
 
@@ -243,10 +243,10 @@ fn map_load(map_name) {
     lump_idx = marker + 6;
     lump_size = wad_lump_size(lump_idx);
     data = wad_read_lump(lump_idx);
-    if (data == 0) { return 0 - 1; }
+    if (data == 0) { return -1; }
     map_num_ssectors = lump_size / 4;
     if (map_num_ssectors > MAP_MAX_SSECTORS) { map_num_ssectors = MAP_MAX_SSECTORS; }
-    for (var i = 0; i < map_num_ssectors; i = i + 1) {
+    for (var i = 0; i < map_num_ssectors; i += 1) {
         var src = data + i * 4;
         var base = map_ssectors + i * MAP_SSECTOR_SIZE;
         store64(base, read_le16(src));
@@ -257,10 +257,10 @@ fn map_load(map_name) {
     lump_idx = marker + 7;
     lump_size = wad_lump_size(lump_idx);
     data = wad_read_lump(lump_idx);
-    if (data == 0) { return 0 - 1; }
+    if (data == 0) { return -1; }
     map_num_nodes = lump_size / 28;
     if (map_num_nodes > MAP_MAX_NODES) { map_num_nodes = MAP_MAX_NODES; }
-    for (var i = 0; i < map_num_nodes; i = i + 1) {
+    for (var i = 0; i < map_num_nodes; i += 1) {
         var src = data + i * 28;
         var base = map_nodes + i * MAP_NODE_SIZE;
         store64(base, sign_extend_16(read_le16(src)) << 16);
@@ -283,10 +283,10 @@ fn map_load(map_name) {
     lump_idx = marker + 1;
     lump_size = wad_lump_size(lump_idx);
     data = wad_read_lump(lump_idx);
-    if (data == 0) { return 0 - 1; }
+    if (data == 0) { return -1; }
     map_num_things = lump_size / 10;
     if (map_num_things > MAP_MAX_THINGS) { map_num_things = MAP_MAX_THINGS; }
-    for (var i = 0; i < map_num_things; i = i + 1) {
+    for (var i = 0; i < map_num_things; i += 1) {
         var src = data + i * 10;
         var base = map_things + i * MAP_THING_SIZE;
         var tx = sign_extend_16(read_le16(src));
@@ -319,7 +319,7 @@ var player_start = 0;
 
 fn map_find_player_start() {
     if (player_start == 0) { player_start = alloc(24); }
-    for (var i = 0; i < map_num_things; i = i + 1) {
+    for (var i = 0; i < map_num_things; i += 1) {
         if (map_thing_type(i) == THING_PLAYER1) {
             store64(player_start, map_thing_x(i));
             store64(player_start + 8, map_thing_y(i));
@@ -330,7 +330,7 @@ fn map_find_player_start() {
     store64(player_start, 0);
     store64(player_start + 8, 0);
     store64(player_start + 16, 0);
-    return 0 - 1;
+    return -1;
 }
 
 fn player_start_x() { return load64(player_start); }

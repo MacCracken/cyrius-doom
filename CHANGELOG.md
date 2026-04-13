@@ -5,6 +5,13 @@ All notable changes to cyrius-doom will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.23.1] - 2026-04-13
+
+### Changed
+
+- **Cyrius 4.0.0 modernization** — ~300 line changes across 19 source files. All `i = i + 1` → `i += 1` compound assignments (`+=`, `-=`, `|=`, `&=`). All `0 - N` → `-N` negative literals. All `0 - var` → `-var` unary minus. Minimum compiler: cc3 4.0.0.
+- Binary size: 191KB (slightly smaller — negative literals generate tighter code)
+
 ## [0.23.0] - 2026-04-13
 
 ### Added

@@ -37,7 +37,7 @@ var spr_lookup_count = 0;
 fn sprite_add_lookup(ttype, name) {
     store64(spr_lookup + spr_lookup_count * 16, ttype);
     store64(spr_lookup + spr_lookup_count * 16 + 8, name);
-    spr_lookup_count = spr_lookup_count + 1;
+    spr_lookup_count += 1;
     return 0;
 }
 
@@ -93,7 +93,7 @@ fn sprite_find_lump(thing_type) {
 
     # Search lookup table
     var found = 0;
-    for (var i = 0; i < spr_lookup_count; i = i + 1) {
+    for (var i = 0; i < spr_lookup_count; i += 1) {
         if (load64(spr_lookup + i * 16) == thing_type) {
             var name = load64(spr_lookup + i * 16 + 8);
             memcpy(prefix, name, 4);
@@ -101,7 +101,7 @@ fn sprite_find_lump(thing_type) {
             break;
         }
     }
-    if (found == 0) { return 0 - 1; }
+    if (found == 0) { return -1; }
 
     # Try rotation 0 first (symmetric sprite)
     store8(prefix + 4, 65);
@@ -129,14 +129,14 @@ fn sprite_find_frame(thing_type, rotation, frame) {
     store64(prefix, 0);
 
     var found = 0;
-    for (var i = 0; i < spr_lookup_count; i = i + 1) {
+    for (var i = 0; i < spr_lookup_count; i += 1) {
         if (load64(spr_lookup + i * 16) == thing_type) {
             memcpy(prefix, load64(spr_lookup + i * 16 + 8), 4);
             found = 1;
             break;
         }
     }
-    if (found == 0) { return 0 - 1; }
+    if (found == 0) { return -1; }
 
     var frame_char = 65 + frame;
 
@@ -172,7 +172,7 @@ fn sprite_calc_rotation(thing_x, thing_y, thing_angle) {
     # Each rotation covers 128 angle units (45 degrees)
     # Add half a rotation (64) for centering
     var rot = ((rel + 64) * 8 / ANG360) + 1;
-    if (rot > 8) { rot = rot - 8; }
+    if (rot > 8) { rot -= 8; }
     if (rot < 1) { rot = 1; }
     return rot;
 }
@@ -182,7 +182,7 @@ fn sprite_render_all() {
     sprite_visible = 0;
 
     # Collect visible things with distance (from runtime things array)
-    for (var i = 0; i < thing_count; i = i + 1) {
+    for (var i = 0; i < thing_count; i += 1) {
         if (sprite_visible >= 128) { break; }
 
         var tflags = thing_flags(i);
@@ -205,11 +205,11 @@ fn sprite_render_all() {
         # Store for sorting
         store64(sprite_order + sprite_visible * 8, i);
         store64(sprite_dist + sprite_visible * 8, vy);
-        sprite_visible = sprite_visible + 1;
+        sprite_visible += 1;
     }
 
     # Sort by distance (back to front) — simple insertion sort
-    for (var i = 1; i < sprite_visible; i = i + 1) {
+    for (var i = 1; i < sprite_visible; i += 1) {
         var key_order = load64(sprite_order + i * 8);
         var key_dist = load64(sprite_dist + i * 8);
         var j = i - 1;
@@ -217,7 +217,7 @@ fn sprite_render_all() {
             if (load64(sprite_dist + j * 8) >= key_dist) { break; }
             store64(sprite_order + (j + 1) * 8, load64(sprite_order + j * 8));
             store64(sprite_dist + (j + 1) * 8, load64(sprite_dist + j * 8));
-            j = j - 1;
+            j -= 1;
         }
         store64(sprite_order + (j + 1) * 8, key_order);
         store64(sprite_dist + (j + 1) * 8, key_dist);
@@ -226,7 +226,7 @@ fn sprite_render_all() {
     # Dedicated sprite patch buffer (so wad_read_lump doesn't clobber it)
     var spr_patch_buf = alloc(16384);
 
-    for (var si = 0; si < sprite_visible; si = si + 1) {
+    for (var si = 0; si < sprite_visible; si += 1) {
         var thing_idx = load64(sprite_order + si * 8);
         var dist = load64(sprite_dist + si * 8);
         var ttype = thing_type(thing_idx);
@@ -251,9 +251,9 @@ fn sprite_render_all() {
         var pw = read_le16(pdata);
         var ph = read_le16(pdata + 2);
         var left_off = read_le16(pdata + 4);
-        if (left_off >= 0x8000) { left_off = left_off - 0x10000; }
+        if (left_off >= 0x8000) { left_off -= 0x10000; }
         var top_off = read_le16(pdata + 6);
-        if (top_off >= 0x8000) { top_off = top_off - 0x10000; }
+        if (top_off >= 0x8000) { top_off -= 0x10000; }
         var dx = tx - view_x;
         var dy = ty - view_y;
         var vx = fixed_mul(dx, view_cos) + fixed_mul(dy, view_sin);
@@ -311,11 +311,11 @@ fn sprite_render_all() {
         if (spr_light < 0) { spr_light = 0; }
         var dist_dim = fixed_to_int(vy) / 96;
         if (dist_dim > 16) { dist_dim = 16; }
-        spr_light = spr_light + dist_dim;
+        spr_light += dist_dim;
         if (spr_light > 31) { spr_light = 31; }
 
         # Draw sprite columns
-        for (var c = 0; c < sprite_w; c = c + 1) {
+        for (var c = 0; c < sprite_w; c += 1) {
             var scr_x = sx1 + c;
             if (scr_x < 0) { continue; }
             if (scr_x >= SCREEN_WIDTH) { continue; }
@@ -340,7 +340,7 @@ fn sprite_render_all() {
                 var length = load8(post_ptr + 1);
                 var pixels = post_ptr + 3;
 
-                for (var py = 0; py < length; py = py + 1) {
+                for (var py = 0; py < length; py += 1) {
                     var src_y = topdelta + py;
                     var scr_y = sy1 + src_y * sprite_h / ph;
                     if (scr_y < 0) { continue; }
@@ -354,8 +354,8 @@ fn sprite_render_all() {
                     }
                 }
 
-                post_ptr = post_ptr + 4 + length;
-                safety = safety + 1;
+                post_ptr += 4 + length;
+                safety += 1;
             }
         }
     }

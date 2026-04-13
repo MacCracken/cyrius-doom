@@ -11,7 +11,7 @@ enum WadConst {
     WAD_LUMP_BUF_SIZE = 65536;
 }
 
-var wad_fd = 0 - 1;
+var wad_fd = -1;
 var wad_numlumps = 0;
 var wad_dir = 0;
 var wad_lump_buf = 0;
@@ -38,15 +38,15 @@ fn wad_open(path) {
     wad_fd = file_open(path, 0, 0);
     if (wad_fd < 0) {
         sakshi_error("cannot open WAD file", 20);
-        return 0 - 1;
+        return -1;
     }
 
     var hdr[12];
     var n = file_read(wad_fd, &hdr, 12);
     if (n != 12) {
         file_close(wad_fd);
-        wad_fd = 0 - 1;
-        return 0 - 1;
+        wad_fd = -1;
+        return -1;
     }
 
     # Check magic: "IWAD" or "PWAD"
@@ -62,8 +62,8 @@ fn wad_open(path) {
     if (valid == 0) {
         sakshi_error("not a WAD file", 14);
         file_close(wad_fd);
-        wad_fd = 0 - 1;
-        return 0 - 1;
+        wad_fd = -1;
+        return -1;
     }
 
     wad_numlumps = read_le32(&hdr + 4);
@@ -75,7 +75,7 @@ fn wad_open(path) {
 
     # Read directory entries (16 bytes each in WAD)
     var raw[16];
-    for (var i = 0; i < wad_numlumps; i = i + 1) {
+    for (var i = 0; i < wad_numlumps; i += 1) {
         n = file_read(wad_fd, &raw, 16);
         if (n != 16) { break; }
 
@@ -89,7 +89,7 @@ fn wad_open(path) {
 }
 
 fn wad_close() {
-    if (wad_fd >= 0) { file_close(wad_fd); wad_fd = 0 - 1; }
+    if (wad_fd >= 0) { file_close(wad_fd); wad_fd = -1; }
     return 0;
 }
 
@@ -97,11 +97,11 @@ fn wad_close() {
 fn wad_name_eq(lump_name_ptr, name) {
     var nlen = strlen(name);
     if (nlen > 8) { return 0; }
-    for (var i = 0; i < 8; i = i + 1) {
+    for (var i = 0; i < 8; i += 1) {
         var lc = load8(lump_name_ptr + i);
         if (i < nlen) {
             var nc = load8(name + i);
-            if (nc >= 97) { if (nc <= 122) { nc = nc - 32; } }
+            if (nc >= 97) { if (nc <= 122) { nc -= 32; } }
             if (lc != nc) { return 0; }
         } else {
             if (lc != 0) { return 0; }
@@ -111,17 +111,17 @@ fn wad_name_eq(lump_name_ptr, name) {
 }
 
 fn wad_find_lump(name) {
-    for (var i = 0; i < wad_numlumps; i = i + 1) {
+    for (var i = 0; i < wad_numlumps; i += 1) {
         if (wad_name_eq(wad_dir + i * WAD_DIR_ENTRY_SIZE + 16, name) == 1) { return i; }
     }
-    return 0 - 1;
+    return -1;
 }
 
 fn wad_find_lump_after(name, after) {
-    for (var i = after + 1; i < wad_numlumps; i = i + 1) {
+    for (var i = after + 1; i < wad_numlumps; i += 1) {
         if (wad_name_eq(wad_dir + i * WAD_DIR_ENTRY_SIZE + 16, name) == 1) { return i; }
     }
-    return 0 - 1;
+    return -1;
 }
 
 fn wad_lump_size(lump_index) {

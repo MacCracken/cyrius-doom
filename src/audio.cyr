@@ -47,16 +47,16 @@ fn audio_shutdown() {
 # Load a sound from WAD into cache
 fn audio_load(lump_name) {
     var lump = wad_find_lump(lump_name);
-    if (lump < 0) { return 0 - 1; }
+    if (lump < 0) { return -1; }
 
-    for (var i = 0; i < snd_cache_count; i = i + 1) {
+    for (var i = 0; i < snd_cache_count; i += 1) {
         if (load64(snd_cache_lumps + i * 8) == lump) { return i; }
     }
 
-    if (snd_cache_count >= SND_CACHE_MAX) { return 0 - 1; }
+    if (snd_cache_count >= SND_CACHE_MAX) { return -1; }
 
     var sz = wad_lump_size(lump);
-    if (sz < SND_HEADER_SIZE) { return 0 - 1; }
+    if (sz < SND_HEADER_SIZE) { return -1; }
     if (sz > SND_MAX_SIZE) { sz = SND_MAX_SIZE; }
 
     var raw = alloc(sz);
@@ -75,7 +75,7 @@ fn audio_load(lump_name) {
     store64(snd_cache_data + idx * 8, pcm);
     store64(snd_cache_sizes + idx * 8, nsamples);
     store64(snd_cache_rates + idx * 8, rate);
-    snd_cache_count = snd_cache_count + 1;
+    snd_cache_count += 1;
     return idx;
 }
 
