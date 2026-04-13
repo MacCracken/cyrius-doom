@@ -243,6 +243,7 @@ fn sprite_render_all() {
         if (lump < 0) { continue; }
 
         var psz = wad_lump_size(lump);
+        if (psz < 8) { continue; }
         if (psz > 16384) { continue; }
         wad_read_lump_into(lump, spr_patch_buf, psz);
         var pdata = spr_patch_buf;

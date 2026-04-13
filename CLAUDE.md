@@ -71,7 +71,15 @@ src/
 2. Read the Unofficial DOOM Specs for data format details
 3. Check `vidya/content/cyrius/field_notes.toml` for Cyrius-specific gotchas
 4. Check `vidya/content/cyrius/language.toml` for compiler constraints
-5. Document findings as comments in the source file header
+5. **Security research** — for the feature area being implemented:
+   a. Search for known CVEs (DOOM, PrBoom, Chocolate Doom, ZDoom, GZDoom)
+   b. Search for exploit classes (buffer overflow, integer overflow, DoS, ACE)
+   c. Search for malicious WAD/savegame/network/DEHACKED attack vectors
+   d. Check `docs/audit/` for prior findings that apply
+   e. Write findings to `docs/audit/{date}-{topic}.md`
+   f. Add fix items to roadmap as next-version security tasks
+   g. Fix before shipping — no new attack surface without validation
+6. Document findings as comments in the source file header
 
 ### Work Loop (continuous)
 

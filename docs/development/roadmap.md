@@ -34,7 +34,19 @@
 | v0.23.1 | Cyrius 4.0.0 modernization (~300 changes: +=, negative literals) |
 | v0.23.2 | P(-1) hardening: termios iflag bitmask fix, full audit clean |
 
-## v0.24.0 — DOOM Black Book Audit (2026-04-15)
+## v0.24.0 — Security Hardening (CVE Audit Fixes)
+
+| # | Item | Severity | Detail |
+|---|------|----------|--------|
+| 1 | Map index bounds validation | CRITICAL | Validate all seg/linedef/sidedef/node indices after map_load() |
+| 2 | Texture column bounds | CRITICAL | Validate patch col_off within lump, post_ptr within buffer |
+| 3 | BLOCKMAP offset validation | CRITICAL | Validate cell list offsets within blockmap lump size |
+| 4 | WAD lump read validation | HIGH | Check file_read return value, zero-fill on partial read |
+| 5 | Sprite minimum lump size | HIGH | Reject sprite lumps < 8 bytes (patch header minimum) |
+
+See: `docs/audit/2026-04-13-security-cve-audit.md`
+
+## v0.25.0 — DOOM Black Book Audit (2026-04-15)
 
 | # | Item | Status | Detail |
 |---|------|--------|--------|

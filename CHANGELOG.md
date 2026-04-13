@@ -5,6 +5,28 @@ All notable changes to cyrius-doom will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.0] - 2026-04-13
+
+### Security (CVE Audit Hardening)
+
+- **C1: Map index bounds validation** — added `map_validate()` that runs after `map_load()`. Checks all cross-references: seg v1/v2 < num_vertexes, seg linedef < num_linedefs, linedef v1/v2 < num_vertexes, sidedef sector < num_sectors, subsector firstseg+numsegs <= num_segs, node child indices in range (with subsector flag handling). Returns -1 on any invalid index.
+- **C2: Texture column bounds** — patch cache now stores per-slot lump size (`PCACHE_SLOT_SIZE` 8200→8208). `texture_get_column()` validates column header offset and column data offset within lump bounds. Post iteration loop checks `post_ptr < pdata_end` and `post_ptr + 4 + length <= pdata_end` before reading.
+- **C3: BLOCKMAP offset validation** — stores `map_bm_size` at load time. Collision code validates cell offset index and list offset within blockmap lump before dereferencing. `ptr + 2 <= bm_end` checked per linedef read.
+- **H1: WAD lump read zero-fill** — `wad_read_lump()` and `wad_read_lump_into()` now `memset(buf, 0, size)` before `file_read()`. Partial reads leave zeroed data instead of uninitialized memory. Warns on size mismatch.
+- **H2: Sprite minimum lump size** — `sprite_render_all()` rejects sprite lumps < 8 bytes (minimum patch header size) before reading dimensions.
+
+### Added
+
+- `map_validate()` — post-load cross-reference validator for all map data structures
+- `pcache_data_size()` — returns cached patch lump size for bounds checking
+- `map_bm_size` global — blockmap lump size for runtime bounds checking
+- `docs/audit/2026-04-13-security-cve-audit.md` — full CVE audit report with 15 findings
+
+### Changed
+
+- Binary size: 194KB (validation code adds ~3KB)
+- Audit status: 3 CRITICAL + 2 HIGH → all fixed. 5 MITIGATED unchanged. 5 N/A.
+
 ## [0.23.2] - 2026-04-13
 
 ### Fixed

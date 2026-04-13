@@ -137,7 +137,7 @@ fn texture_init() {
 enum PatchCache {
     PCACHE_SLOTS = 8;
     PCACHE_DATA_SIZE = 8192;
-    PCACHE_SLOT_SIZE = 8200;
+    PCACHE_SLOT_SIZE = 8208;
 }
 
 var pcache = 0;
@@ -148,6 +148,7 @@ fn pcache_init() {
     pcache_next = 0;
     for (var i = 0; i < PCACHE_SLOTS; i += 1) {
         store64(pcache + i * PCACHE_SLOT_SIZE, -1);
+        store64(pcache + i * PCACHE_SLOT_SIZE + 8, 0);
     }
     return 0;
 }
@@ -156,7 +157,7 @@ fn pcache_get(lump_idx) {
     # Check if already cached
     for (var i = 0; i < PCACHE_SLOTS; i += 1) {
         if (load64(pcache + i * PCACHE_SLOT_SIZE) == lump_idx) {
-            return pcache + i * PCACHE_SLOT_SIZE + 8;
+            return pcache + i * PCACHE_SLOT_SIZE + 16;
         }
     }
     # Cache miss: load into next slot (round-robin)
@@ -166,8 +167,14 @@ fn pcache_get(lump_idx) {
     store64(base, lump_idx);
     var sz = wad_lump_size(lump_idx);
     if (sz > PCACHE_DATA_SIZE) { sz = PCACHE_DATA_SIZE; }
-    wad_read_lump_into(lump_idx, base + 8, sz);
-    return base + 8;
+    store64(base + 8, sz);
+    wad_read_lump_into(lump_idx, base + 16, sz);
+    return base + 16;
+}
+
+# Get cached patch data size (call after pcache_get returns pdata)
+fn pcache_data_size(pdata) {
+    return load64(pdata - 8);
 }
 
 # Find texture index by name (8-char, null-padded)
@@ -225,6 +232,8 @@ fn texture_get_column(tex_idx, col, dest) {
         # Read patch from cache
         var pdata = pcache_get(plump);
         if (pdata == 0) { continue; }
+        var pdata_size = pcache_data_size(pdata);
+        if (pdata_size < 8) { continue; }
 
         var pw = read_le16(pdata);
         var ph = read_le16(pdata + 2);
@@ -234,17 +243,23 @@ fn texture_get_column(tex_idx, col, dest) {
         if (pcol < 0) { continue; }
         if (pcol >= pw) { continue; }
 
-        # Get column offset from patch header
-        var col_off = read_le32(pdata + 8 + pcol * 4);
+        # Get column offset from patch header (bounds check)
+        var hdr_off = 8 + pcol * 4;
+        if (hdr_off + 4 > pdata_size) { continue; }
+        var col_off = read_le32(pdata + hdr_off);
+        if (col_off >= pdata_size) { continue; }
         var post_ptr = pdata + col_off;
+        var pdata_end = pdata + pdata_size;
 
         # Read posts: topdelta(1) length(1) pad(1) pixels(length) pad(1)
         # Terminated by topdelta = 0xFF
         var safety = 0;
         while (safety < 256) {
+            if (post_ptr >= pdata_end) { break; }
             var topdelta = load8(post_ptr);
             if (topdelta == 255) { break; }
             var length = load8(post_ptr + 1);
+            if (post_ptr + 4 + length > pdata_end) { break; }
             # Skip padding byte
             var pixels = post_ptr + 3;
 

@@ -141,9 +141,12 @@ fn wad_read_lump(lump_index) {
     if (size > WAD_LUMP_BUF_SIZE) { size = WAD_LUMP_BUF_SIZE; }
     if (size == 0) { return wad_lump_buf; }
 
+    # Zero-fill before read to prevent uninitialized data on partial read
+    memset(wad_lump_buf, 0, size);
     syscall(8, wad_fd, offset, 0);
     var n = file_read(wad_fd, wad_lump_buf, size);
     if (n < 0) { return 0; }
+    if (n != size) { sakshi_warn("partial lump read", 18); }
     return wad_lump_buf;
 }
 
@@ -157,6 +160,8 @@ fn wad_read_lump_into(lump_index, buf, bufsize) {
     if (size > bufsize) { size = bufsize; }
     if (size == 0) { return 0; }
 
+    # Zero-fill before read to prevent uninitialized data on partial read
+    memset(buf, 0, size);
     syscall(8, wad_fd, offset, 0);
     return file_read(wad_fd, buf, size);
 }
