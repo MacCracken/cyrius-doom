@@ -17,7 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Multi-return** — `render_transform_vertex()` now uses native `return (tx, ty)` with destructuring at call sites, eliminating output pointer parameters (v3.7.2 feature)
 - **Switch/case blocks** — door state machine (`doors_tick`), linedef special dispatch (`doors_use`, `doors_walk_trigger`) refactored from if-chains to switch/case blocks (v3.7.4 feature). Note: case labels require literal integers, not enum identifiers.
 - Minimum Cyrius version: 3.10.1 (auto-include, undefined function diagnostic)
-- Binary size: 151KB (down from 152KB — switch/case + multi-return + enum savings)
+- Binary size: 150KB (down from 152KB — switch/case + multi-return + enum savings + compact menu)
+
+### Added
+
+- **WAD-native menu system** — title screen (TITLEPIC fullscreen), main menu (M_DOOM logo, M_NGAME/M_OPTION/M_LOADG/M_SAVEG/M_QUITG items), skill select (M_NEWG/M_SKILL headings, M_JKILL/M_ROUGH/M_HURT/M_ULTRA/M_NMARE items), animated M_SKULL1/M_SKULL2 cursor. Replaces procedural block-letter text rendering.
+- **Menu integration in game loop** — interactive mode shows title -> main menu -> skill select before game. Direct map argument (`E1M3`) skips menu. `--ppm-menu` flag renders title/menu/skill as PPM screenshots.
+- **`menu_draw_lump()`** — generic WAD patch drawer for menu graphics, supports up to 128KB patches (for TITLEPIC at 68KB)
 
 ### Fixed
 

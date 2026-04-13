@@ -84,28 +84,60 @@ fn doom_main() {
 
     # Parse args
     var ppm_mode = 0;
-    if (argc() >= 3) {
-        if (streq(argv(2), "--ppm") == 1) { ppm_mode = 1; }
-        else {
-            # Parse map name like "E1M3"
-            var mn = argv(2);
-            if (load8(mn) == 69) {
-                var ep = load8(mn + 1) - 48;
-                var mp = load8(mn + 3) - 48;
-                if (ep >= 1) { if (ep <= 3) { if (mp >= 1) { if (mp <= 9) {
-                                level_set(ep, mp);
-                            } } } }
-            }
+    var ppm_menu = 0;
+    var direct_map = 0;
+    for (var ai = 2; ai < argc(); ai = ai + 1) {
+        var arg = argv(ai);
+        if (streq(arg, "--ppm") == 1) { ppm_mode = 1; }
+        if (streq(arg, "--ppm-menu") == 1) { ppm_menu = 1; }
+        if (load8(arg) == 69) {
+            var ep = load8(arg + 1) - 48;
+            var mp = load8(arg + 3) - 48;
+            if (ep >= 1) { if (ep <= 3) { if (mp >= 1) { if (mp <= 9) {
+                            level_set(ep, mp);
+                            direct_map = 1;
+                        } } } }
         }
     }
-    if (argc() >= 4) {
-        if (streq(argv(3), "--ppm") == 1) { ppm_mode = 1; }
+
+    # Menu screenshot mode: render title + main menu as PPMs
+    if (ppm_menu == 1) {
+        menu_init();
+        framebuf_clear(0);
+        menu_draw_lump("TITLEPIC", 0, 0);
+        framebuf_write_ppm("/tmp/doom_title.ppm");
+        sakshi_info("wrote /tmp/doom_title.ppm", 25);
+
+        framebuf_clear(0);
+        menu_draw_lump("M_DOOM", 94, 2);
+        menu_draw_lump("M_NGAME", 97, 64);
+        menu_draw_lump("M_OPTION", 97, 80);
+        menu_draw_lump("M_LOADG", 97, 96);
+        menu_draw_lump("M_SAVEG", 97, 112);
+        menu_draw_lump("M_QUITG", 97, 128);
+        menu_draw_lump("M_SKULL1", 54, 61);
+        framebuf_write_ppm("/tmp/doom_menu.ppm");
+        sakshi_info("wrote /tmp/doom_menu.ppm", 24);
+
+        framebuf_clear(0);
+        menu_draw_lump("M_NEWG", 96, 14);
+        menu_draw_lump("M_SKILL", 38, 38);
+        menu_draw_lump("M_JKILL", 48, 63);
+        menu_draw_lump("M_ROUGH", 48, 79);
+        menu_draw_lump("M_HURT", 48, 95);
+        menu_draw_lump("M_ULTRA", 48, 111);
+        menu_draw_lump("M_NMARE", 48, 127);
+        menu_draw_lump("M_SKULL1", 6, 92);
+        framebuf_write_ppm("/tmp/doom_skill.ppm");
+        sakshi_info("wrote /tmp/doom_skill.ppm", 25);
+        wad_close();
+        syscall(60, 0);
     }
 
     # Load initial map
     if (load_map() != 0) { syscall(60, 1); }
 
-    # Screenshot mode
+    # Game screenshot mode
     if (ppm_mode == 1) {
         view_x = player_start_x();
         view_y = player_start_y();
@@ -127,9 +159,21 @@ fn doom_main() {
         syscall(60, 0);
     }
 
-    # Game loop
+    # Interactive mode: show menu unless map specified on CLI
     input_init();
     tick_init();
+
+    if (direct_map == 0) {
+        var mr = menu_run();
+        if (mr < 0) {
+            # User quit from menu
+            input_shutdown();
+            wad_close();
+            sakshi_info("quit from menu", 14);
+            syscall(60, 0);
+        }
+    }
+
     sakshi_info("WASD=move arrows=turn E=use TAB=map Q=quit", 43);
 
     game_running = 1;

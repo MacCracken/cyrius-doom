@@ -1,14 +1,14 @@
-# menu.cyr -- title screen and menu system
-# Usage: include "src/menu.cyr" (after framebuf.cyr, input.cyr)
+# menu.cyr -- WAD-native title screen and menu system
+# Usage: include "src/menu.cyr" (after framebuf.cyr, input.cyr, status.cyr)
 #
-# DOOM menu system:
-#   - Title screen (TITLEPIC lump from WAD)
-#   - Main menu: New Game, Options, Load, Save, Quit
-#   - Episode select (Knee Deep in the Dead, etc.)
-#   - Skill select (I'm too young to die, etc.)
-#
-# We render text menus procedurally since we don't have
-# the DOOM font patches loaded yet.
+# DOOM menu system using WAD graphic lumps:
+#   - TITLEPIC: fullscreen 320x200 title screen
+#   - M_DOOM: logo on main menu
+#   - M_SKULL1/M_SKULL2: animated selector cursor
+#   - M_NGAME, M_OPTION, M_LOADG, M_SAVEG, M_QUITG: main menu items
+#   - M_NEWG, M_SKILL: new game / skill headings
+#   - M_JKILL, M_ROUGH, M_HURT, M_ULTRA, M_NMARE: skill levels
+#   - M_EPI1, M_EPI2, M_EPI3, M_EPISOD: episode select
 
 # ================================================================
 # Menu state
@@ -18,8 +18,12 @@ enum MenuScreen {
     MENU_NONE = 0;
     MENU_TITLE = 1;
     MENU_MAIN = 2;
-    MENU_EPISODE = 3;
-    MENU_SKILL = 4;
+    MENU_SKILL = 3;
+}
+
+enum MenuConst {
+    MENU_PATCH_BUF_SIZE = 131072;
+    MENU_SKULL_RATE = 8;
 }
 
 var menu_active = 0;
@@ -27,172 +31,113 @@ var menu_screen = 0;
 var menu_cursor = 0;
 var menu_item_count = 0;
 var menu_result = 0;
+var menu_patch_buf = 0;
+var menu_skull_frame = 0;
+var menu_skull_timer = 0;
 
 # ================================================================
-# Text rendering (reuse digit font, extend to basic ASCII)
+# WAD patch drawing for menu
 # ================================================================
-# Simple 3x5 character bitmaps for A-Z, space, and punctuation.
-# We only need enough for menu text.
 
-# Draw a character at (px, py). Only supports 0-9, A-Z, space.
-# Returns character width (for advancing cursor).
-fn menu_draw_char(ch, px, py, color) {
-    # Digits
-    if (ch >= 48) { if (ch <= 57) {
-            st_draw_small_num(ch - 48, px, py);
-            return 8;
-        } }
-
-    # Space
-    if (ch == 32) { return 6; }
-
-    # Letters A-Z: draw as simple block approximation
-    # Each letter: draw a 5x8 filled block with cutouts
-    if (ch >= 65) { if (ch <= 90) {
-            # Simple: draw letter as a colored rectangle
-            framebuf_fill_rect(px, py, 5, 8, color);
-            # Cut interior to make it look like a letter shape
-            framebuf_pixel(px + 1, py + 1, 0);
-            framebuf_pixel(px + 2, py + 1, 0);
-            framebuf_pixel(px + 3, py + 1, 0);
-            framebuf_pixel(px + 1, py + 5, 0);
-            framebuf_pixel(px + 2, py + 5, 0);
-            framebuf_pixel(px + 3, py + 5, 0);
-            return 7;
-        } }
-
-    # Lowercase: treat as uppercase
-    if (ch >= 97) { if (ch <= 122) {
-            return menu_draw_char(ch - 32, px, py, color);
-        } }
-
-    # Punctuation
-    if (ch == 46) {
-        framebuf_pixel(px + 1, py + 8, color);
-        framebuf_pixel(px + 2, py + 8, color);
-        return 5;
-    }
-    if (ch == 33) {
-        framebuf_vline(px + 1, py, py + 5, color);
-        framebuf_pixel(px + 1, py + 8, color);
-        return 5;
-    }
-    if (ch == 45) {
-        framebuf_hline(px, px + 4, py + 4, color);
-        return 7;
-    }
-    if (ch == 39) {
-        framebuf_vline(px + 1, py, py + 2, color);
-        return 4;
-    }
-
-    return 6;
+fn menu_init() {
+    if (menu_patch_buf == 0) { menu_patch_buf = alloc(MENU_PATCH_BUF_SIZE); }
+    return 0;
 }
 
-# Draw a null-terminated string at (px, py)
-fn menu_draw_string(str, px, py, color) {
-    var x = px;
-    var i = 0;
-    while (load8(str + i) != 0) {
-        var ch = load8(str + i);
-        x = x + menu_draw_char(ch, x, py, color);
-        i = i + 1;
+# Draw a WAD patch by lump name at screen position (px, py)
+fn menu_draw_lump(name, px, py) {
+    var idx = wad_find_lump(name);
+    if (idx < 0) { return 0; }
+    var sz = wad_lump_size(idx);
+    if (sz > MENU_PATCH_BUF_SIZE) { return 0; }
+    wad_read_lump_into(idx, menu_patch_buf, sz);
+    st_draw_patch_from_buf(menu_patch_buf, px, py);
+    return 0;
+}
+
+# Draw skull cursor at (px, py), alternating frames
+fn menu_draw_skull(px, py) {
+    menu_skull_timer = menu_skull_timer + 1;
+    if (menu_skull_timer >= MENU_SKULL_RATE) {
+        menu_skull_timer = 0;
+        menu_skull_frame = 1 - menu_skull_frame;
+    }
+    if (menu_skull_frame == 0) {
+        menu_draw_lump("M_SKULL1", px, py);
+    } else {
+        menu_draw_lump("M_SKULL2", px, py);
     }
     return 0;
 }
 
-# Draw a string centered on screen at vertical position py
-fn menu_draw_centered(str, py, color) {
-    var len = strlen(str);
-    var width = len * 7;
-    var px = (SCREEN_WIDTH - width) / 2;
-    menu_draw_string(str, px, py, color);
-    return 0;
-}
-
 # ================================================================
-# Title screen
+# Title screen — TITLEPIC fullscreen
 # ================================================================
 
 fn menu_draw_title() {
     framebuf_clear(0);
-
-    # Title text
-    menu_draw_centered("CYRIUS DOOM", 40, 176);
-    menu_draw_centered("V0.1.0", 56, 96);
-
-    # Subtitle
-    menu_draw_centered("CLEAN ROOM IMPLEMENTATION", 80, 48);
-    menu_draw_centered("IN CYRIUS", 96, 48);
-
-    # Prompt
-    menu_draw_centered("PRESS ANY KEY", 140, 176);
-
+    menu_draw_lump("TITLEPIC", 0, 0);
     framebuf_flip();
     return 0;
 }
 
 # ================================================================
-# Main menu
+# Main menu — M_DOOM logo + menu item patches + skull cursor
 # ================================================================
+# Original DOOM main menu layout (from DOOM source):
+#   M_DOOM at (94, 2)
+#   Menu items start at x=97, y=64 with 16px spacing
+#   Skull at x=54, offset by item y
 
 fn menu_draw_main() {
     framebuf_clear(0);
 
-    menu_draw_centered("DOOM", 20, 176);
+    # DOOM logo
+    menu_draw_lump("M_DOOM", 94, 2);
 
-    var items_y = 60;
-    var spacing = 20;
+    # Menu items: New Game, Options, Load Game, Save Game, Quit Game
+    var ix = 97;
+    var iy = 64;
+    var sp = 16;
+    menu_draw_lump("M_NGAME", ix, iy);
+    menu_draw_lump("M_OPTION", ix, iy + sp);
+    menu_draw_lump("M_LOADG", ix, iy + sp * 2);
+    menu_draw_lump("M_SAVEG", ix, iy + sp * 3);
+    menu_draw_lump("M_QUITG", ix, iy + sp * 4);
 
-    var c0 = 96;
-    var c1 = 96;
-    var c2 = 96;
-    var c3 = 96;
+    # Skull cursor
+    menu_draw_skull(54, iy + menu_cursor * sp - 3);
 
-    if (menu_cursor == 0) { c0 = 176; }
-    if (menu_cursor == 1) { c1 = 176; }
-    if (menu_cursor == 2) { c2 = 176; }
-    if (menu_cursor == 3) { c3 = 176; }
-
-    menu_draw_centered("NEW GAME", items_y, c0);
-    menu_draw_centered("OPTIONS", items_y + spacing, c1);
-    menu_draw_centered("LOAD GAME", items_y + spacing * 2, c2);
-    menu_draw_centered("QUIT GAME", items_y + spacing * 3, c3);
-
-    # Cursor indicator
-    var cursor_y = items_y + menu_cursor * spacing;
-    menu_draw_string(">", 40, cursor_y, 176);
-
-    menu_item_count = 4;
+    menu_item_count = 5;
     framebuf_flip();
     return 0;
 }
 
 # ================================================================
-# Skill select menu
+# Skill select — M_NEWG heading + skill level patches + skull
 # ================================================================
+# Original layout:
+#   M_NEWG at (96, 14)
+#   M_SKILL at (38, 14) — or M_NEWG heading
+#   Skill items at x=48, y=63 with 16px spacing
+#   Skull at x=6
 
 fn menu_draw_skill() {
     framebuf_clear(0);
 
-    menu_draw_centered("CHOOSE YOUR SKILL", 30, 176);
+    menu_draw_lump("M_NEWG", 96, 14);
+    menu_draw_lump("M_SKILL", 38, 38);
 
-    var items_y = 60;
-    var spacing = 18;
+    var ix = 48;
+    var iy = 63;
+    var sp = 16;
+    menu_draw_lump("M_JKILL", ix, iy);
+    menu_draw_lump("M_ROUGH", ix, iy + sp);
+    menu_draw_lump("M_HURT", ix, iy + sp * 2);
+    menu_draw_lump("M_ULTRA", ix, iy + sp * 3);
+    menu_draw_lump("M_NMARE", ix, iy + sp * 4);
 
-    var colors[40];
-    for (var i = 0; i < 5; i = i + 1) {
-        store64(&colors + i * 8, 96);
-    }
-    store64(&colors + menu_cursor * 8, 176);
-
-    menu_draw_centered("I'M TOO YOUNG TO DIE", items_y, load64(&colors));
-    menu_draw_centered("HEY NOT TOO ROUGH", items_y + spacing, load64(&colors + 8));
-    menu_draw_centered("HURT ME PLENTY", items_y + spacing * 2, load64(&colors + 16));
-    menu_draw_centered("ULTRA VIOLENCE", items_y + spacing * 3, load64(&colors + 24));
-    menu_draw_centered("NIGHTMARE", items_y + spacing * 4, load64(&colors + 32));
-
-    menu_draw_string(">", 20, items_y + menu_cursor * spacing, 176);
+    menu_draw_skull(6, iy + menu_cursor * sp - 3);
 
     menu_item_count = 5;
     framebuf_flip();
@@ -206,9 +151,10 @@ fn menu_draw_skill() {
 fn menu_handle_input() {
     if (menu_screen == MENU_TITLE) {
         # Any key advances to main menu
-        if (input_forward() == 1) { menu_screen = MENU_MAIN; menu_cursor = 0; }
-        if (input_fire() == 1) { menu_screen = MENU_MAIN; menu_cursor = 0; }
-        if (input_use() == 1) { menu_screen = MENU_MAIN; menu_cursor = 0; }
+        if (input_flags != 0) {
+            menu_screen = MENU_MAIN;
+            menu_cursor = 0;
+        }
         return 0;
     }
 
@@ -220,7 +166,7 @@ fn menu_handle_input() {
         if (menu_cursor < menu_item_count - 1) { menu_cursor = menu_cursor + 1; }
     }
 
-    # Select
+    # Select (E key / use)
     if (input_use() == 1) {
         if (menu_screen == MENU_MAIN) {
             if (menu_cursor == 0) {
@@ -228,8 +174,8 @@ fn menu_handle_input() {
                 menu_screen = MENU_SKILL;
                 menu_cursor = 2;
             }
-            if (menu_cursor == 3) {
-                # Quit
+            if (menu_cursor == 4) {
+                # Quit Game
                 menu_result = 0 - 1;
             }
         }
@@ -240,7 +186,7 @@ fn menu_handle_input() {
         }
     }
 
-    # ESC goes back
+    # ESC / Q goes back
     if (input_quit == 1) {
         if (menu_screen == MENU_SKILL) {
             menu_screen = MENU_MAIN;
@@ -271,10 +217,13 @@ fn menu_tick() {
 # ================================================================
 
 fn menu_run() {
+    menu_init();
     menu_active = 1;
     menu_screen = MENU_TITLE;
     menu_cursor = 0;
     menu_result = 0;
+    menu_skull_frame = 0;
+    menu_skull_timer = 0;
 
     while (menu_active == 1) {
         tick_begin();

@@ -8,8 +8,8 @@
 - **License**: GPL-3.0-only (clean-room implementation)
 - **Language**: Cyrius (native, compiled via cc2)
 - **Version**: SemVer, version file at `VERSION`
-- **Binary size**: 152KB (20 modules), renders at 3.9ms/frame
-- **Status**: v0.20.0 — textured walls, floor flats, sprites, WAD-native HUD, ALSA audio, doors/lifts, automap, level transitions (E1M1-E1M9)
+- **Binary size**: 150KB (20 modules), renders at 3.9ms/frame
+- **Status**: v0.20.0 — textured walls, floor flats, sprites, WAD-native HUD, ALSA audio, doors/lifts, automap, level transitions (E1M1-E1M9), WAD-native menus (TITLEPIC, M_DOOM, M_SKULL)
 - **Genesis repo**: [agnosticos](https://github.com/MacCracken/agnosticos)
 - **Philosophy**: [AGNOS Philosophy](https://github.com/MacCracken/agnosticos/blob/main/docs/philosophy.md)
 - **Standards**: [First-Party Standards](https://github.com/MacCracken/agnosticos/blob/main/docs/development/applications/first-party-standards.md)
@@ -49,7 +49,7 @@ src/
   things.cyr      — monster AI state machine, item pickups, damage
   status.cyr      — HUD: bitmap font, health/ammo/armor/face/keys
   sound.cyr       — PC speaker tone queue via ioctl
-  menu.cyr        — title screen, main menu, skill select
+  menu.cyr        — WAD-native title screen (TITLEPIC), main menu, skill select, M_SKULL cursor
 ```
 
 ## Key Constraints
