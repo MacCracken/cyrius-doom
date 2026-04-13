@@ -226,11 +226,9 @@ fn status_render() {
 
     # Layer 4: All overlays
 
-    # AMMO count — big red at x=2
-    var ammo = player_ammo_bullets;
-    if (player_weapon == 3) { ammo = player_ammo_shells; }
-    if (player_weapon == 5) { ammo = player_ammo_rockets; }
-    if (player_weapon == 6) { ammo = player_ammo_cells; }
+    # AMMO count — big red, shows current weapon's ammo type
+    var ammo = player_current_ammo();
+    if (ammo < 0) { ammo = 0; }
     st_draw_number(ammo, 2, STBAR_Y + 3);
 
     # HEALTH — big red + % at x=49

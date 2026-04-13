@@ -8,8 +8,8 @@
 - **License**: GPL-3.0-only (clean-room implementation)
 - **Language**: Cyrius (native, compiled via cc2)
 - **Version**: SemVer, version file at `VERSION`
-- **Binary size**: 190KB (20 modules), renders at 3.9ms/frame
-- **Status**: v0.22.0 — GAMEPLAY: shooting, ammo, death/respawn, key cards. DOOM-accurate lighting, masked midtextures, animated walls/flats/sprites, WAD-native HUD + menus + intermission, ALSA audio, doors/lifts, automap, level transitions (E1M1-E1M9)
+- **Binary size**: 191KB (20 modules), renders at 3.9ms/frame
+- **Status**: v0.23.0 — GAMEPLAY: shooting, ammo, death/respawn, key cards, armor absorption, weapon bob, sound triggers. DOOM-accurate lighting, masked midtextures, animated walls/flats/sprites, WAD-native HUD + menus + intermission, ALSA audio, doors/lifts, automap, level transitions (E1M1-E1M9)
 - **Genesis repo**: [agnosticos](https://github.com/MacCracken/agnosticos)
 - **Philosophy**: [AGNOS Philosophy](https://github.com/MacCracken/agnosticos/blob/main/docs/philosophy.md)
 - **Standards**: [First-Party Standards](https://github.com/MacCracken/agnosticos/blob/main/docs/development/applications/first-party-standards.md)

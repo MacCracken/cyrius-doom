@@ -120,6 +120,7 @@ fn door_open(sector_idx) {
     store64(base + 40, ceil_h);
 
     door_count = door_count + 1;
+    sound_door_open();
     return 0;
 }
 

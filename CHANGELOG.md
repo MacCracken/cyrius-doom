@@ -5,6 +5,20 @@ All notable changes to cyrius-doom will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.23.0] - 2026-04-13
+
+### Added
+
+- **Weapon bob** — sine-based weapon oscillation during player movement. X sways left-right, Y bounces vertically. 15-unit angular step per tick through 1024-entry sine table. Settles to center when stationary. BOB_RANGE = 4 pixels.
+- **Sound effect triggers** — all PC speaker sounds now wired to gameplay: pistol/shotgun/chaingun fire, door open, item pickup, player pain, monster pain/death, rocket explosion. Sound plays through existing tone queue system.
+- **Armor damage absorption** — `player_take_damage()` splits damage between armor and health. Green armor (≤100) absorbs 1/3, blue armor (>100) absorbs 1/2. Armor depletes before health takes full damage.
+- **HUD current weapon ammo** — big AMMO number now shows current weapon's ammo type via `player_current_ammo()`. Fist/chainsaw display 0. Shotgun shows shells, rocket shows rockets, etc.
+
+### Changed
+
+- Binary size: 191KB (weapon bob + sound wiring + armor system)
+- Monster damage now routes through `player_take_damage()` instead of directly modifying `player_health`
+
 ## [0.22.0] - 2026-04-13
 
 ### Added

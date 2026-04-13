@@ -1,9 +1,9 @@
 # cyrius-doom Development Roadmap
 
-> **v0.21.0** — 185KB, 20 modules, DOOM-accurate lighting, masked midtextures,
-> animated walls/flats/sprites, WAD-native menus + HUD + intermission, ALSA audio,
-> weapon switching + firing, all 9 shareware maps.
-> Verified on Cyrius 3.10.1. Benchmarks: 6ns fixed_mul, 3.9ms render_frame.
+> **v0.22.0** — 190KB, 20 modules, full gameplay loop: shooting, ammo, death/respawn,
+> key cards, DOOM-accurate lighting, masked midtextures, animated walls/flats/sprites,
+> WAD-native menus + HUD + intermission, ALSA audio, all 9 shareware maps.
+> Verified on Cyrius 3.10.1. Clean build, zero warnings, 51K fuzz iterations.
 
 ## Completed
 
@@ -30,26 +30,27 @@
 | v0.19.1 | Audio module, GTK3 display bridge, health/armor HUD fix |
 | v0.20.0 | Dep integration, WAD-native menus, weapon switching/firing, sprite animation, refactoring |
 | v0.21.0 | DOOM-accurate lighting, masked midtextures, animated walls, intermission screen |
+| v0.22.0 | Gameplay: ammo consumption, hitscan shooting, death/respawn, key cards + locked doors |
 
-## v0.22.0 — Gameplay
-
-| # | Item | Status | Detail |
-|---|------|--------|--------|
-| 1 | Ammo consumption | Not started | Fire uses ammo, empty weapon no-fire |
-| 2 | Shooting (hitscan) | Not started | Fire key, trace ray, damage monsters |
-| 3 | Monster damage to player | Not started | AI attack → health reduction (already partially in) |
-| 4 | Death/respawn | Not started | Health ≤ 0, death screen, restart map |
-| 5 | Key cards + locked doors | Not started | Blue/yellow/red key pickup + door type check |
-
-## v0.23.0 — Polish & Correctness
+## v0.23.0 — Polish & Correctness (current)
 
 | # | Item | Status | Detail |
 |---|------|--------|--------|
-| 1 | Weapon bob (sine oscillation) | Not started | psp->sx/sy bob during movement |
-| 2 | Episode complete screen | Not started | E1M8 boss kill → bunny scroll |
-| 3 | Sound effect triggers | Not started | Wire sound_pistol/shotgun/door to gameplay events |
-| 4 | Brightness tuning | Not started | Compare vs original DOOM screenshots |
-| 5 | R_DrawPSprite audit | Not started | Verify weapon coords match DOOM source exactly |
+| 1 | Weapon bob | Not started | Sine oscillation of psp->sx/sy during movement |
+| 2 | Sound effect triggers | Not started | Wire sound_pistol/shotgun/door/pickup to gameplay events |
+| 3 | HUD current ammo display | Not started | Show current weapon's ammo type in big number (not always bullets) |
+| 4 | Armor absorption | Not started | Damage split: green armor 1/3, blue armor 1/2 |
+| 5 | Health/armor pickup caps | Not started | Don't pick up medikit at 100%, etc. |
+
+## v0.24.0 — DOOM Black Book Audit (2026-04-15)
+
+| # | Item | Status | Detail |
+|---|------|--------|--------|
+| 1 | Chapter-by-chapter verification | Not started | Walk through book with code side-by-side |
+| 2 | R_DrawPSprite psprite coords | Not started | Verify weapon positioning matches source exactly |
+| 3 | Brightness tuning | Not started | Compare screenshots vs original DOOM |
+| 4 | Episode complete screen | Not started | E1M8 boss kill → text screen / bunny scroll |
+| 5 | Visplane correctness | Not started | Verify span generation matches R_DrawPlanes |
 
 ## v1.0.0 — Ship
 

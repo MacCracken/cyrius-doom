@@ -487,7 +487,7 @@ fn thing_ai_tick(idx) {
             if (dist < MONSTER_MELEE_RANGE) {
                 # Melee: 3-24 damage (approx with fixed range)
                 var dmg = 3 + (tick_get_count() % 22);
-                player_health = player_health - dmg;
+                player_take_damage(dmg);
             }
             # Return to chase
             thing_set_state(idx, STATE_CHASE);
@@ -579,6 +579,7 @@ fn things_check_pickups() {
             thing_set_flags(i, 0);
             thing_set_state(i, STATE_PICKUP);
             level_add_item();
+            sound_item_pickup();
         }
     }
 
@@ -597,9 +598,11 @@ fn thing_damage(idx, damage) {
     if (hp <= 0) {
         thing_set_state(idx, STATE_DIE);
         thing_set_tics(idx, 10);
+        sound_monster_die();
     } else {
         thing_set_state(idx, STATE_PAIN);
         thing_set_tics(idx, 5);
+        sound_monster_pain();
     }
     return 0;
 }

@@ -62,10 +62,14 @@ var weapon_prefix = 0;
 var weapon_fire_frame = 0;
 var weapon_fire_timer = 0;
 var weapon_fire_max = 0;
+var weapon_bob_x = 0;
+var weapon_bob_y = 0;
+var weapon_bob_time = 0;
 
 enum WeaponConst {
     WEAPON_BUF_SIZE = 16384;
     FIRE_TICKS = 2;
+    BOB_RANGE = 4;
 }
 
 fn render_set_weapon(weapon_id) {
@@ -126,6 +130,23 @@ fn weapon_tick() {
     return 0;
 }
 
+# Update weapon bob based on player movement
+fn weapon_bob_tick(is_moving) {
+    if (is_moving == 1) {
+        weapon_bob_time = weapon_bob_time + 1;
+        # Use sine table: 1024 entries, cycle through ~70 ticks per full bob
+        var bob_ang = (weapon_bob_time * 15) & ANG_MASK;
+        weapon_bob_x = fixed_to_int(fixed_mul(fixed_sin(bob_ang), BOB_RANGE << 16));
+        weapon_bob_y = fixed_to_int(fixed_abs(fixed_mul(fixed_cos(bob_ang), BOB_RANGE << 16)));
+    } else {
+        # Settle back to center
+        if (weapon_bob_x > 0) { weapon_bob_x = weapon_bob_x - 1; }
+        if (weapon_bob_x < 0) { weapon_bob_x = weapon_bob_x + 1; }
+        if (weapon_bob_y > 0) { weapon_bob_y = weapon_bob_y - 1; }
+    }
+    return 0;
+}
+
 fn render_draw_weapon(light_level) {
     if (weapon_lump < 0) { return 0; }
     if (weapon_patch_buf == 0) { weapon_patch_buf = alloc(16384); }
@@ -148,8 +169,8 @@ fn render_draw_weapon(light_level) {
     # The sprite extends from (254, 138) to (311, 200)
     # Pistol: center-right, hand visible from bottom-right
     # Adjusted from DOOM psprite coords to match original appearance
-    var sx = 253 + loff;
-    var sy = 228 + toff;
+    var sx = 253 + loff + weapon_bob_x;
+    var sy = 228 + toff + weapon_bob_y;
 
     for (var col = 0; col < pw; col = col + 1) {
         var scr_x = sx + col;
