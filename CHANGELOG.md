@@ -5,6 +5,16 @@ All notable changes to cyrius-doom will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.23.2] - 2026-04-13
+
+### Fixed
+
+- **Terminal iflag bitmask** — `input_enable_raw_mode()` used wrong mask (-1043) to clear termios c_iflag bits. Corrected to -1331 which properly clears IXON(0x400), ICRNL(0x100), BRKINT(0x002), INPCK(0x010), ISTRIP(0x020). Pre-existing bug since v0.5.0, found during P(-1) hardening audit.
+
+### Changed
+
+- P(-1) hardening audit: all 20 source files verified clean. No malformed compound assignments, no broken unary minus, no buffer overflows, no unguarded divisions. One pre-existing termios bug found and fixed.
+
 ## [0.23.1] - 2026-04-13
 
 ### Changed

@@ -103,8 +103,9 @@ fn input_enable_raw_mode() {
 
     # Disable input processing
     # c_iflag &= ~(IXON | ICRNL | BRKINT | INPCK | ISTRIP)
+    # IXON=0x400, ICRNL=0x100, BRKINT=0x002, INPCK=0x010, ISTRIP=0x020 = 1330
     var iflag = load32(&raw);
-    iflag &= -1043;
+    iflag &= -1331;
     store32(&raw, iflag);
 
     # Set VMIN=0 (non-blocking), VTIME=0 (no timeout)
