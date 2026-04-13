@@ -1,7 +1,8 @@
 # cyrius-doom Development Roadmap
 
-> **v0.20.0** — 154KB, 20 modules, WAD-native menus + HUD, weapon switching + firing,
-> sprite animation, animated flats, ALSA audio, all 9 shareware maps.
+> **v0.21.0** — 185KB, 20 modules, DOOM-accurate lighting, masked midtextures,
+> animated walls/flats/sprites, WAD-native menus + HUD + intermission, ALSA audio,
+> weapon switching + firing, all 9 shareware maps.
 > Verified on Cyrius 3.10.1. Benchmarks: 6ns fixed_mul, 3.9ms render_frame.
 
 ## Completed
@@ -28,47 +29,33 @@
 | v0.19.0 | ALSA audio via stdlib, shravan 2.0.0, 12 WAD sounds cached |
 | v0.19.1 | Audio module, GTK3 display bridge, health/armor HUD fix |
 | v0.20.0 | Dep integration, WAD-native menus, weapon switching/firing, sprite animation, refactoring |
-
-## v0.20.0 — Dep Integration, Menus & Animation (current)
-
-| # | Item | Status | Detail |
-|---|------|--------|--------|
-| 1 | cyrius.toml [deps] auto-resolve | Done | stdlib + sakshi auto-included, 24 unused libs removed |
-| 2 | sakshi 0.5→0.9 upgrade | Done | Enums for constants, expanded error handling |
-| 3 | var→enum migration (60+ constants) | Done | Saves ~60 gvar_toks slots |
-| 4 | Multi-return, switch/case refactoring | Done | v3.7.2/v3.7.4 language features |
-| 5 | WAD-native menus | Done | TITLEPIC, M_DOOM, M_SKULL, skill select |
-| 6 | Weapon switching (1-7 keys) | Done | All 7 weapons, ownership bitmask |
-| 7 | Firing animation | Done | Per-weapon frame cycle, 2-tick rate |
-| 8 | Sprite frame animation | Done | Walk/attack/pain/die/dead frame cycles |
-| 9 | Runtime thing rendering | Done | Sprite renderer uses things[] not raw map data |
-| 10 | Animated flats (NUKAGE) | Done | 3-frame rotation every 8 ticks |
-
-## v0.21.0 — DOOM Black Book Audit
-
-| # | Item | Status | Detail |
-|---|------|--------|--------|
-| 1 | Chapter-by-chapter verification | Not started | Rendering pipeline vs Black Book |
-| 2 | R_DrawPSprite psprite coords | Not started | Fix weapon positioning from source |
-| 3 | Masked midtextures | Not started | Transparent middle textures |
-| 4 | Brightness tuning | Not started | cc3 scenes darker than cc2 |
-| 5 | Intermission screen | Not started | Kill %, item %, time after exit |
+| v0.21.0 | DOOM-accurate lighting, masked midtextures, animated walls, intermission screen |
 
 ## v0.22.0 — Gameplay
 
 | # | Item | Status | Detail |
 |---|------|--------|--------|
 | 1 | Ammo consumption | Not started | Fire uses ammo, empty weapon no-fire |
-| 2 | Shooting (hitscan) | Not started | Fire key, damage monsters |
-| 3 | Monster damage to player | Not started | AI attack → health reduction |
-| 4 | Death/respawn | Not started | Health ≤ 0, restart map |
-| 5 | Key cards + locked doors | Not started | Blue/yellow/red key pickup + door check |
+| 2 | Shooting (hitscan) | Not started | Fire key, trace ray, damage monsters |
+| 3 | Monster damage to player | Not started | AI attack → health reduction (already partially in) |
+| 4 | Death/respawn | Not started | Health ≤ 0, death screen, restart map |
+| 5 | Key cards + locked doors | Not started | Blue/yellow/red key pickup + door type check |
+
+## v0.23.0 — Polish & Correctness
+
+| # | Item | Status | Detail |
+|---|------|--------|--------|
+| 1 | Weapon bob (sine oscillation) | Not started | psp->sx/sy bob during movement |
+| 2 | Episode complete screen | Not started | E1M8 boss kill → bunny scroll |
+| 3 | Sound effect triggers | Not started | Wire sound_pistol/shotgun/door to gameplay events |
+| 4 | Brightness tuning | Not started | Compare vs original DOOM screenshots |
+| 5 | R_DrawPSprite audit | Not started | Verify weapon coords match DOOM source exactly |
 
 ## v1.0.0 — Ship
 
 | # | Item | Status | Detail |
 |---|------|--------|--------|
-| 1 | Plays E1M1-E1M9 (shareware) | Not started | Full episode 1 playable |
+| 1 | Plays E1M1-E1M9 (shareware) | Not started | Full episode 1 playable start to finish |
 | 2 | X11 display backend (native) | Not started | Direct X11 protocol, no Python bridge |
 | 3 | Wayland display backend | Not started | For AGNOS desktop |
 | 4 | Runs on AGNOS kernel | Not started | Kernel framebuffer + PS/2 |
