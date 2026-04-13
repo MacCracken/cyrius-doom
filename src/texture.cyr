@@ -267,27 +267,63 @@ fn texture_get_column(tex_idx, col, dest) {
 
 # ================================================================
 # Animated flats: cycle between frames at ~8 tics per frame
-# DOOM animated flats: NUKAGE1/2/3, FWATER1/2/3/4, BLOOD1/2/3, etc.
-# We swap flat indices in the cache every N game ticks.
+# DOOM animated flats: NUKAGE1/2/3 (shareware).
+# Every 8 ticks, rotate pixel data: 1→2→3→1.
 # ================================================================
 
 var anim_tick_counter = 0;
+var anim_flat_buf = 0;
+
+# Animated flat groups: store flat indices for each group
+# Group 0: NUKAGE1/2/3 (3 frames)
+var anim_nukage = 0;
+
+fn texture_init_anim() {
+    anim_flat_buf = alloc(FLAT_SIZE);
+
+    # Find NUKAGE flats by name hash
+    anim_nukage = alloc(24);
+    store64(anim_nukage, flat_find_name("NUKAGE1"));
+    store64(anim_nukage + 8, flat_find_name("NUKAGE2"));
+    store64(anim_nukage + 16, flat_find_name("NUKAGE3"));
+    return 0;
+}
+
+# Find flat by exact name string (not hash of raw WAD bytes)
+fn flat_find_name(name) {
+    var h = tex_name_hash(name);
+    for (var i = 0; i < flat_count; i = i + 1) {
+        if (load64(flat_names + i * 8) == h) { return i; }
+    }
+    return 0 - 1;
+}
+
+# Rotate pixel data for a 3-frame animation group
+fn anim_rotate_3(group) {
+    var i0 = load64(group);
+    var i1 = load64(group + 8);
+    var i2 = load64(group + 16);
+    if (i0 < 0) { return 0; }
+    if (i1 < 0) { return 0; }
+    if (i2 < 0) { return 0; }
+
+    # Save frame 0, shift 1→0, 2→1, saved→2
+    var p0 = flat_cache + i0 * FLAT_SIZE;
+    var p1 = flat_cache + i1 * FLAT_SIZE;
+    var p2 = flat_cache + i2 * FLAT_SIZE;
+    memcpy(anim_flat_buf, p0, FLAT_SIZE);
+    memcpy(p0, p1, FLAT_SIZE);
+    memcpy(p1, p2, FLAT_SIZE);
+    memcpy(p2, anim_flat_buf, FLAT_SIZE);
+    return 0;
+}
 
 fn texture_animate() {
     anim_tick_counter = anim_tick_counter + 1;
     if (anim_tick_counter < 8) { return 0; }
     anim_tick_counter = 0;
 
-    # Cycle animated flat sets by rotating their cache data
-    # Find NUKAGE1 and swap with NUKAGE2/3
-    for (var i = 0; i < flat_count; i = i + 1) {
-        var h = load64(flat_names + i * 8);
-        # Check for NUKAGE1 hash — swap data with next flat
-        # Simple approach: rotate pixel data between consecutive animated flats
-        # This works because DOOM WADs store animated flats in sequence
-    }
-    # For now, animation is a stub — full implementation needs
-    # the ANIMATED lump or hardcoded animation sequences
+    anim_rotate_3(anim_nukage);
     return 0;
 }
 

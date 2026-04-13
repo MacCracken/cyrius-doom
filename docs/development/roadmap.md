@@ -1,7 +1,7 @@
 # cyrius-doom Development Roadmap
 
-> **v0.20.0** — 153KB, 20 modules, WAD-native menus + HUD, weapon switching + firing,
-> sprite animation, ALSA audio, all 9 shareware maps.
+> **v0.20.0** — 154KB, 20 modules, WAD-native menus + HUD, weapon switching + firing,
+> sprite animation, animated flats, ALSA audio, all 9 shareware maps.
 > Verified on Cyrius 3.10.1. Benchmarks: 6ns fixed_mul, 3.9ms render_frame.
 
 ## Completed
@@ -42,7 +42,7 @@
 | 7 | Firing animation | Done | Per-weapon frame cycle, 2-tick rate |
 | 8 | Sprite frame animation | Done | Walk/attack/pain/die/dead frame cycles |
 | 9 | Runtime thing rendering | Done | Sprite renderer uses things[] not raw map data |
-| 10 | Animated textures/flats | Not started | Nukage, lava, light panels cycling |
+| 10 | Animated flats (NUKAGE) | Done | 3-frame rotation every 8 ticks |
 
 ## v0.21.0 — DOOM Black Book Audit
 

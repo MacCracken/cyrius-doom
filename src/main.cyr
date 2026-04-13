@@ -74,6 +74,7 @@ fn doom_main() {
     framebuf_init();
     render_load_colormap();
     texture_init();
+    texture_init_anim();
     render_load_sky();
     sprite_init();
     level_init();
@@ -187,6 +188,7 @@ fn doom_main() {
         doors_tick();
         things_tick();
         sound_tick();
+        texture_animate();
 
         # Check for level transition
         if (next_level_flag == 1) {

@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Multi-return** — `render_transform_vertex()` now uses native `return (tx, ty)` with destructuring at call sites, eliminating output pointer parameters (v3.7.2 feature)
 - **Switch/case blocks** — door state machine (`doors_tick`), linedef special dispatch (`doors_use`, `doors_walk_trigger`) refactored from if-chains to switch/case blocks (v3.7.4 feature). Note: case labels require literal integers, not enum identifiers.
 - Minimum Cyrius version: 3.10.1 (auto-include, undefined function diagnostic)
-- Binary size: 153KB (weapon/sprite animation adds 3KB, menu saves 1KB net)
+- Binary size: 154KB (weapon/sprite animation + animated flats)
 
 ### Added
 
@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Firing animation** — fire key (F) cycles weapon through sprite frames (B0, C0, D0... back to A0). 2-tick frame rate. Each weapon has correct frame count (pistol=5, shotgun=4, chaingun=2, etc.).
 - **Sprite frame animation** — things cycle sprite frames based on AI state. Walk cycle (A-B), attack (C-D), pain (E-F), death (H-K), corpse (L). Sprite renderer reads frame from runtime thing struct. `sprite_find_frame()` resolves type+rotation+frame to WAD lump.
 - **Runtime thing rendering** — sprite renderer now iterates runtime `things[]` array instead of raw map data, enabling animated frames and proper active/inactive state tracking.
+- **Animated flats** — NUKAGE1/2/3 flat textures cycle every 8 game ticks (rotating pixel data in cache). Extensible to FWATER/BLOOD/LAVA when full WAD is available.
 
 ### Fixed
 
