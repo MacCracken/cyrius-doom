@@ -1,7 +1,7 @@
 # cyrius-doom Development Roadmap
 
-> **v0.23.2** — 191KB, 20 modules, full gameplay loop, DOOM-accurate lighting,
-> modernized to Cyrius 4.0.0, P(-1) hardened.
+> **v0.24.0** — 194KB, 20 modules, full gameplay loop, DOOM-accurate lighting,
+> security hardened (CVE audit: 5/5 fixed), Cyrius 4.0.0.
 > Clean build, zero warnings, 51K fuzz iterations.
 
 ## Completed
@@ -33,6 +33,7 @@
 | v0.23.0 | Polish: weapon bob, sound triggers, HUD ammo display, armor absorption |
 | v0.23.1 | Cyrius 4.0.0 modernization (~300 changes: +=, negative literals) |
 | v0.23.2 | P(-1) hardening: termios iflag bitmask fix, full audit clean |
+| v0.24.0 | Security: CVE audit, map/texture/blockmap bounds validation, WAD read zero-fill |
 
 ## v0.24.0 — Security Hardening (CVE Audit Fixes)
 
