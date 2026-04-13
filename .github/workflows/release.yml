@@ -2,21 +2,18 @@ name: Release
 
 on:
   push:
-    tags: ['*']
+    tags: ['[0-9]*']
 
 permissions:
   contents: write
-
-env:
-  CYRIUS_VERSION: "3.2.5"
 
 jobs:
   ci:
     name: CI Gate
     uses: ./.github/workflows/ci.yml
 
-  build:
-    name: Build Release
+  release:
+    name: Build & Release
     needs: [ci]
     runs-on: ubuntu-latest
     steps:
@@ -25,11 +22,13 @@ jobs:
       - name: Verify version
         run: |
           FILE_VERSION=$(cat VERSION | tr -d '[:space:]')
-          TAG="${GITHUB_REF_NAME}"
-          [ "$FILE_VERSION" = "$TAG" ] || { echo "VERSION ($FILE_VERSION) != tag ($TAG)"; exit 1; }
+          TAG_VERSION="${GITHUB_REF_NAME}"
+          test "$FILE_VERSION" = "$TAG_VERSION" || { echo "VERSION ($FILE_VERSION) != tag ($TAG_VERSION)"; exit 1; }
 
       - name: Install Cyrius toolchain
         run: |
+          CYRIUS_VERSION="${CYRIUS_VERSION:-$(cat .cyrius-toolchain | tr -d '[:space:]')}"
+          echo "Installing Cyrius $CYRIUS_VERSION"
           curl -sLO "https://github.com/MacCracken/cyrius/releases/download/$CYRIUS_VERSION/cyrius-$CYRIUS_VERSION-x86_64-linux.tar.gz"
           tar xzf "cyrius-$CYRIUS_VERSION-x86_64-linux.tar.gz"
           CYRIUS_DIR="cyrius-$CYRIUS_VERSION-x86_64-linux"
@@ -38,47 +37,17 @@ jobs:
           cp -r "$CYRIUS_DIR/lib/"* "$HOME/.cyrius/lib/" 2>/dev/null || true
           chmod +x "$HOME/.cyrius/bin/"* 2>/dev/null || true
           echo "$HOME/.cyrius/bin" >> $GITHUB_PATH
+          echo "CYRIUS_HOME=$HOME/.cyrius" >> $GITHUB_ENV
 
       - name: Build
         run: |
+          cyrius deps
           mkdir -p build
-          cat src/main.cyr | cc3 > build/doom
-          chmod +x build/doom
+          cyrius build src/main.cyr build/doom
           echo "doom: $(wc -c < build/doom) bytes"
 
-      - name: Clean toolchain artifacts
-        run: rm -f cyrius-*.tar.gz
-
-      - name: Archive
-        run: |
-          TAG="${GITHUB_REF_NAME}"
-          tar czf "cyrius-doom-${TAG}-x86_64-linux.tar.gz" build/doom
-          git archive --format=tar.gz --prefix="cyrius-doom-${TAG}/" -o "cyrius-doom-${TAG}-src.tar.gz" HEAD
-          sha256sum cyrius-doom-*.tar.gz > SHA256SUMS
-
-      - uses: actions/upload-artifact@v4
+      - name: Create release
+        uses: softprops/action-gh-release@v2
         with:
-          name: release-artifacts
-          path: |
-            *.tar.gz
-            SHA256SUMS
-
-  release:
-    name: Create GitHub Release
-    needs: [build]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          name: release-artifacts
-      - name: Changelog
-        run: awk "/^## \\[${GITHUB_REF_NAME}\\]/{found=1; next} /^## \\[/{if(found) exit} found{print}" CHANGELOG.md > /tmp/body.md
-      - uses: softprops/action-gh-release@v2
-        with:
-          name: "cyrius-doom ${{ github.ref_name }}"
-          body_path: /tmp/body.md
-          prerelease: ${{ startsWith(github.ref_name, '0.') }}
-          files: |
-            cyrius-doom-*.tar.gz
-            SHA256SUMS
+          generate_release_notes: true
+          files: build/doom

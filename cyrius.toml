@@ -13,4 +13,4 @@ output = "build/doom"
 # Order matters — single-pass compiler, deps are prepended as includes.
 # string/alloc must come before anything that uses strlen/alloc/memcpy.
 # io before audio (audio uses syscall wrappers). sakshi standalone.
-stdlib = ["string", "alloc", "fmt", "io", "args", "sakshi", "audio"]
+stdlib = ["string", "alloc", "fmt", "vec", "str", "io", "args", "syscalls", "sakshi", "audio"]

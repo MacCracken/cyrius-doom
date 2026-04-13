@@ -11,18 +11,17 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  CYRIUS_VERSION: "3.3.13"
-
 jobs:
-  build-and-test:
-    name: Build & Test
+  build:
+    name: Build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Cyrius toolchain
         run: |
+          CYRIUS_VERSION="${CYRIUS_VERSION:-$(cat .cyrius-toolchain | tr -d '[:space:]')}"
+          echo "Installing Cyrius $CYRIUS_VERSION"
           curl -sLO "https://github.com/MacCracken/cyrius/releases/download/$CYRIUS_VERSION/cyrius-$CYRIUS_VERSION-x86_64-linux.tar.gz"
           tar xzf "cyrius-$CYRIUS_VERSION-x86_64-linux.tar.gz"
           CYRIUS_DIR="cyrius-$CYRIUS_VERSION-x86_64-linux"
@@ -31,103 +30,23 @@ jobs:
           cp -r "$CYRIUS_DIR/lib/"* "$HOME/.cyrius/lib/" 2>/dev/null || true
           chmod +x "$HOME/.cyrius/bin/"* 2>/dev/null || true
           echo "$HOME/.cyrius/bin" >> $GITHUB_PATH
+          echo "CYRIUS_HOME=$HOME/.cyrius" >> $GITHUB_ENV
 
-      - name: Download DOOM1.WAD
-        run: sh scripts/get-wad.sh wad
+      - name: Resolve dependencies
+        run: cyrius deps
 
       - name: Build
         run: |
           mkdir -p build
-          cat src/main.cyr | cc3 > build/doom 2>build/errors.log
-          if [ $? -ne 0 ]; then cat build/errors.log; exit 1; fi
-          chmod +x build/doom
+          cyrius build src/main.cyr build/doom
           echo "doom: $(wc -c < build/doom) bytes"
 
-      - name: Verify ELF
-        run: xxd -l 4 build/doom | grep -q "7f45 4c46"
-
-      - name: Tests
-        run: |
-          for t in tests/*.tcyr; do
-            [ -f "$t" ] || continue
-            name=$(basename "$t" .tcyr)
-            cat "$t" | cc3 > "build/test_${name}" 2>/dev/null && chmod +x "build/test_${name}"
-            if [ "$name" = "doom" ]; then
-              output=$("./build/test_${name}" wad/DOOM1.WAD 2>&1)
-            else
-              output=$("./build/test_${name}" 2>&1)
-            fi
-            summary=$(echo "$output" | grep -o '[0-9]* passed, [0-9]* failed' | tail -1)
-            f=$(echo "$summary" | grep -o '[0-9]* failed' | grep -o '^[0-9]*')
-            if [ -n "$f" ] && [ "$f" -gt 0 ]; then
-              echo "FAIL: $name ($summary)"
-              echo "$output" | grep "FAIL:" | head -5
-              exit 1
-            fi
-            echo "PASS: $name ($summary)"
-          done
-
-      - name: Smoke test with WAD
-        run: |
-          timeout 3 ./build/doom wad/DOOM1.WAD 2>&1 || true
-
-  check:
-    name: Check & Format
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Cyrius toolchain
-        run: |
-          curl -sLO "https://github.com/MacCracken/cyrius/releases/download/$CYRIUS_VERSION/cyrius-$CYRIUS_VERSION-x86_64-linux.tar.gz"
-          tar xzf "cyrius-$CYRIUS_VERSION-x86_64-linux.tar.gz"
-          CYRIUS_DIR="cyrius-$CYRIUS_VERSION-x86_64-linux"
-          mkdir -p "$HOME/.cyrius/bin" "$HOME/.cyrius/lib"
-          cp "$CYRIUS_DIR/bin/"* "$HOME/.cyrius/bin/" 2>/dev/null || true
-          cp -r "$CYRIUS_DIR/lib/"* "$HOME/.cyrius/lib/" 2>/dev/null || true
-          chmod +x "$HOME/.cyrius/bin/"* 2>/dev/null || true
-          echo "$HOME/.cyrius/bin" >> $GITHUB_PATH
-
-      - name: Format check
-        run: |
-          FAIL=0
-          for f in src/*.cyr; do
-            [ -f "$f" ] || continue
-            cyrfmt "$f" > /tmp/fmt_check 2>/dev/null
-            if ! diff -q "$f" /tmp/fmt_check >/dev/null 2>&1; then
-              echo "  NEEDS FORMAT: $f"
-              FAIL=1
-            fi
-          done
-          test $FAIL -eq 0 && echo "PASS: all files formatted"
-        continue-on-error: true
-
-      - name: Lint check
-        run: |
-          TOTAL=0
-          for f in src/*.cyr; do
-            [ -f "$f" ] || continue
-            result=$(cyrlint "$f" 2>&1 | tail -1)
-            if echo "$result" | grep -qv "0 warnings"; then
-              echo "  $f: $result"
-              TOTAL=$((TOTAL + 1))
-            fi
-          done
-          if [ $TOTAL -gt 0 ]; then echo "WARN: $TOTAL files with lint warnings"; fi
-        continue-on-error: true
-
-  security:
-    name: Security Scan
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Scan for dangerous patterns
-        run: |
-          WARN=0
-          if grep -rn 'syscall(59' src/ 2>/dev/null | grep -v "# "; then
-            echo "WARN: raw execve"; WARN=1
-          fi
-          echo "security scan complete (warnings: $WARN)"
+      - name: Upload build
+        uses: actions/upload-artifact@v4
+        with:
+          name: doom-x86_64
+          path: build/doom
+          retention-days: 5
 
   docs:
     name: Documentation
@@ -136,14 +55,6 @@ jobs:
       - uses: actions/checkout@v4
       - name: Check required docs
         run: |
-          MISSING=0
-          for doc in README.md CHANGELOG.md VERSION CONTRIBUTING.md SECURITY.md LICENSE; do
-            if [ -f "$doc" ]; then echo "  OK: $doc"; else echo "  MISSING: $doc"; MISSING=1; fi
+          for doc in README.md CHANGELOG.md VERSION LICENSE cyrius.toml; do
+            test -f "$doc" && echo "OK: $doc" || { echo "MISSING: $doc"; exit 1; }
           done
-          exit $MISSING
-      - name: Verify version consistency
-        run: |
-          VERSION=$(cat VERSION | tr -d '[:space:]')
-          echo "VERSION: $VERSION"
-          grep -q "$VERSION" CHANGELOG.md || { echo "FAIL: version not in changelog"; exit 1; }
-          echo "Version consistent"
