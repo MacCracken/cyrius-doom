@@ -23,82 +23,70 @@
 # Thing type definitions (DoomEd numbers from WAD THINGS lump)
 # ================================================================
 
-# Player starts
-var TTYPE_PLAYER1 = 1;
-var TTYPE_PLAYER2 = 2;
-var TTYPE_PLAYER3 = 3;
-var TTYPE_PLAYER4 = 4;
+enum ThingType {
+    TTYPE_PLAYER1 = 1;
+    TTYPE_PLAYER2 = 2;
+    TTYPE_PLAYER3 = 3;
+    TTYPE_PLAYER4 = 4;
+    TTYPE_KEY_BLUE = 5;
+    TTYPE_KEY_YELLOW = 6;
+    TTYPE_SPIDER = 7;
+    TTYPE_SHOTGUY = 9;
+    TTYPE_KEY_RED = 13;
+    TTYPE_CYBERDEMON = 16;
+    TTYPE_CELLPACK = 17;
+    TTYPE_SPECTRE = 58;
+    TTYPE_SHOTGUN = 2001;
+    TTYPE_CHAINGUN = 2002;
+    TTYPE_LAUNCHER = 2003;
+    TTYPE_PLASMA = 2004;
+    TTYPE_CHAINSAW = 2005;
+    TTYPE_BFG = 2006;
+    TTYPE_CLIP = 2007;
+    TTYPE_SHELLS = 2008;
+    TTYPE_ROCKET = 2010;
+    TTYPE_STIMPACK = 2011;
+    TTYPE_MEDIKIT = 2012;
+    TTYPE_SOULSPHERE = 2013;
+    TTYPE_HEALTH_POTION = 2014;
+    TTYPE_ARMOR_BONUS = 2015;
+    TTYPE_ARMOR_GREEN = 2018;
+    TTYPE_ARMOR_BLUE = 2019;
+    TTYPE_BARREL = 2035;
+    TTYPE_ROCKETBOX = 2046;
+    TTYPE_CELL = 2047;
+    TTYPE_CLIPBOX = 2048;
+    TTYPE_SHELLBOX = 2049;
+    TTYPE_IMP = 3001;
+    TTYPE_DEMON = 3002;
+    TTYPE_BARON = 3003;
+    TTYPE_ZOMBIEMAN = 3004;
+    TTYPE_CACODEMON = 3005;
+    TTYPE_LOSTSOUL = 3006;
+}
 
-# Monsters
-var TTYPE_ZOMBIEMAN = 3004;
-var TTYPE_SHOTGUY = 9;
-var TTYPE_IMP = 3001;
-var TTYPE_DEMON = 3002;
-var TTYPE_SPECTRE = 58;
-var TTYPE_CACODEMON = 3005;
-var TTYPE_BARON = 3003;
-var TTYPE_CYBERDEMON = 16;
-var TTYPE_SPIDER = 7;
-var TTYPE_LOSTSOUL = 3006;
+enum ThingState {
+    STATE_NONE = 0;
+    STATE_SPAWN = 1;
+    STATE_SEE = 2;
+    STATE_CHASE = 3;
+    STATE_ATTACK = 4;
+    STATE_PAIN = 5;
+    STATE_DIE = 6;
+    STATE_DEAD = 7;
+    STATE_ITEM = 8;
+    STATE_PICKUP = 9;
+}
 
-# Items - health
-var TTYPE_HEALTH_POTION = 2014;
-var TTYPE_STIMPACK = 2011;
-var TTYPE_MEDIKIT = 2012;
-var TTYPE_SOULSPHERE = 2013;
-
-# Items - armor
-var TTYPE_ARMOR_GREEN = 2018;
-var TTYPE_ARMOR_BLUE = 2019;
-var TTYPE_ARMOR_BONUS = 2015;
-
-# Items - ammo
-var TTYPE_CLIP = 2007;
-var TTYPE_CLIPBOX = 2048;
-var TTYPE_SHELLS = 2008;
-var TTYPE_SHELLBOX = 2049;
-var TTYPE_ROCKET = 2010;
-var TTYPE_ROCKETBOX = 2046;
-var TTYPE_CELL = 2047;
-var TTYPE_CELLPACK = 17;
-
-# Items - weapons
-var TTYPE_SHOTGUN = 2001;
-var TTYPE_CHAINGUN = 2002;
-var TTYPE_LAUNCHER = 2003;
-var TTYPE_PLASMA = 2004;
-var TTYPE_CHAINSAW = 2005;
-var TTYPE_BFG = 2006;
-
-# Items - keys
-var TTYPE_KEY_BLUE = 5;
-var TTYPE_KEY_YELLOW = 6;
-var TTYPE_KEY_RED = 13;
-
-# Decorations
-var TTYPE_BARREL = 2035;
-
-# ================================================================
-# AI states
-# ================================================================
-var STATE_NONE = 0;
-var STATE_SPAWN = 1;
-var STATE_SEE = 2;
-var STATE_CHASE = 3;
-var STATE_ATTACK = 4;
-var STATE_PAIN = 5;
-var STATE_DIE = 6;
-var STATE_DEAD = 7;
-var STATE_ITEM = 8;
-var STATE_PICKUP = 9;
-
-var CAT_NONE = 0;
-var CAT_MONSTER = 1;
-var CAT_ITEM = 2;
-var CAT_WEAPON = 3;
-var CAT_KEY = 4;
-var CAT_DECOR = 5;
-var CAT_PROJECTILE = 6;
+enum ThingCat {
+    CAT_NONE = 0;
+    CAT_MONSTER = 1;
+    CAT_ITEM = 2;
+    CAT_WEAPON = 3;
+    CAT_KEY = 4;
+    CAT_DECOR = 5;
+    CAT_PROJECTILE = 6;
+}
 
 # ================================================================
 # Runtime thing (mobj_t equivalent)
@@ -119,18 +107,21 @@ var CAT_PROJECTILE = 6;
 #  96: tics (countdown for state transitions)
 # 104: flags (active, solid, shootable, etc.)
 
-var THING_SIZE = 112;
-var THING_MAX = 512;
+enum ThingLayout {
+    THING_SIZE = 112;
+    THING_MAX = 512;
+}
 var things = 0;
 var thing_count = 0;
 
-# Thing flags
-var TF_ACTIVE = 1;
-var TF_SOLID = 2;
-var TF_SHOOTABLE = 4;
-var TF_PICKUP = 8;
-var TF_MISSILE = 16;
-var TF_CORPSE = 32;
+enum ThingFlags {
+    TF_ACTIVE = 1;
+    TF_SOLID = 2;
+    TF_SHOOTABLE = 4;
+    TF_PICKUP = 8;
+    TF_MISSILE = 16;
+    TF_CORPSE = 32;
+}
 
 # Field accessors
 fn thing_x(idx) { return load64(things + idx * THING_SIZE); }
@@ -331,11 +322,11 @@ fn thing_check_sight(mx, my, tx, ty) {
         var ldx = lx2 - lx1;
         var ldy = ly2 - ly1;
 
-        var denom = fixed_mul(dx >> 8, ldy >> 8) - fixed_mul(dy >> 8, ldx >> 8);
+        var denom = fixed_mul(asr(dx, 8), asr(ldy, 8)) - fixed_mul(asr(dy, 8), asr(ldx, 8));
         if (denom == 0) { continue; }
 
-        var t1_num = fixed_mul((lx1 - mx) >> 8, ldy >> 8) - fixed_mul((ly1 - my) >> 8, ldx >> 8);
-        var t2_num = fixed_mul((lx1 - mx) >> 8, dy >> 8) - fixed_mul((ly1 - my) >> 8, dx >> 8);
+        var t1_num = fixed_mul(asr(lx1 - mx, 8), asr(ldy, 8)) - fixed_mul(asr(ly1 - my, 8), asr(ldx, 8));
+        var t2_num = fixed_mul(asr(lx1 - mx, 8), asr(dy, 8)) - fixed_mul(asr(ly1 - my, 8), asr(dx, 8));
 
         var t1 = fixed_div(t1_num, denom);
         var t2 = fixed_div(t2_num, denom);
@@ -355,10 +346,12 @@ fn thing_check_sight(mx, my, tx, ty) {
 # Monster AI tick
 # ================================================================
 
-var MONSTER_CHASE_SPEED = 65536;
-var MONSTER_ATTACK_RANGE = 4194304;
-var MONSTER_SIGHT_RANGE = 65536000;
-var MONSTER_MELEE_RANGE = 4194304;
+enum MonsterConst {
+    MONSTER_CHASE_SPEED = 65536;
+    MONSTER_ATTACK_RANGE = 4194304;
+    MONSTER_SIGHT_RANGE = 65536000;
+    MONSTER_MELEE_RANGE = 4194304;
+}
 
 fn thing_ai_tick(idx) {
     var flags = thing_flags(idx);

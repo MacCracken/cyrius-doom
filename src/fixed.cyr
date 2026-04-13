@@ -19,12 +19,6 @@ enum Angle {
     ANG_MASK = 1023;
 }
 
-var FIXED_NEG_ONE = 0 - 65536;
-var FIXED_MIN = 0 - 2147483648;
-var FIXED_PI = 205887;
-var FIXED_2PI = 411775;
-var FIXED_PI_HALF = 102944;
-
 # Arithmetic right shift (sign-preserving)
 fn asr(val, bits) {
     if (val >= 0) { return val >> bits; }

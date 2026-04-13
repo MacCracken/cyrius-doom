@@ -2,13 +2,7 @@
 # Build: cyrius build src/main.cyr build/doom
 # Run:   ./build/doom <wadfile> [mapname] [--ppm]
 
-include "lib/string.cyr"
-include "lib/alloc.cyr"
-include "lib/fmt.cyr"
-include "lib/io.cyr"
-include "lib/args.cyr"
-include "lib/sakshi.cyr"
-include "lib/audio.cyr"
+# stdlib deps resolved via cyrius.toml [deps] — auto-included by build tool
 
 include "src/fixed.cyr"
 include "src/tables.cyr"
@@ -60,7 +54,7 @@ fn load_map() {
 fn doom_main() {
     alloc_init();
     args_init();
-    sakshi_info("cyrius-doom v0.19.1", 19);
+    sakshi_info("cyrius-doom v0.20.0", 19);
 
     if (argc() < 2) {
         sakshi_error("usage: doom <wad> [map] [--ppm]", 31);

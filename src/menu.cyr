@@ -14,11 +14,13 @@
 # Menu state
 # ================================================================
 
-var MENU_NONE = 0;
-var MENU_TITLE = 1;
-var MENU_MAIN = 2;
-var MENU_EPISODE = 3;
-var MENU_SKILL = 4;
+enum MenuScreen {
+    MENU_NONE = 0;
+    MENU_TITLE = 1;
+    MENU_MAIN = 2;
+    MENU_EPISODE = 3;
+    MENU_SKILL = 4;
+}
 
 var menu_active = 0;
 var menu_screen = 0;
@@ -37,7 +39,7 @@ var menu_result = 0;
 fn menu_draw_char(ch, px, py, color) {
     # Digits
     if (ch >= 48) { if (ch <= 57) {
-            status_draw_digit(ch - 48, px, py, color);
+            st_draw_small_num(ch - 48, px, py);
             return 8;
         } }
 

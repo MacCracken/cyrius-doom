@@ -18,9 +18,11 @@
 # ioctl(fd, KIOCSOUND, freq) on /dev/console
 # freq = 1193180 / desired_hz (PIT divisor), 0 = silence
 
-var SYS_IOCTL = 16;
-var KIOCSOUND = 0x4B2F;
-var PIT_FREQ = 1193180;
+enum SoundConst {
+    SYS_IOCTL = 16;
+    KIOCSOUND = 0x4B2F;
+    PIT_FREQ = 1193180;
+}
 
 var sound_fd = 0 - 1;
 var sound_enabled = 0;
