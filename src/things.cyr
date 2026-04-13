@@ -509,6 +509,7 @@ fn thing_ai_tick(idx) {
         } else {
             thing_set_state(idx, STATE_DEAD);
             thing_set_flags(idx, TF_CORPSE);
+            level_add_kill();
         }
     }
 
@@ -571,6 +572,7 @@ fn things_check_pickups() {
             # Remove item
             thing_set_flags(i, 0);
             thing_set_state(i, STATE_PICKUP);
+            level_add_item();
         }
     }
 

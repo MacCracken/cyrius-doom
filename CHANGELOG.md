@@ -5,6 +5,22 @@ All notable changes to cyrius-doom will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.0] - 2026-04-13
+
+### Added
+
+- **DOOM-accurate lighting** — replaced linear distance dimming with proper `scalelight[16][48]` wall lighting table and `zlight[16][128]` floor/ceiling lighting table, matching R_InitLightTables() from the DOOM source. Non-linear brightness curve based on inverse distance (scale). Fake contrast verified correct (horizontal walls lightnum--, vertical lightnum++).
+- **Animated wall textures** — SLADRIP1/2/3 wall texture sequence cycles every 8 ticks (same mechanism as flat animation). Extensible to full registered/commercial texture sequences.
+- **Masked midtextures** — transparent middle textures on two-sided linedefs rendered as deferred drawsegs after walls/flats, before sprites. Clipped to opening between front and back sector heights. Palette index 0 treated as transparent.
+- **Intermission screen** — shown after level exit with kill%, item%, secret%, time. Uses WAD patches: WIMAP0 episode background, WINUM0-9 digits, WIPCNT percent sign, WICOLON, WITIME, WIOSTK/WIOSTI/WIOSTS labels, WIF "Finished", WIENTER "Entering". Stats tracked during gameplay via `level_add_kill/item/secret/tick_time`.
+- **Level stat tracking** — `level_kills`, `level_items`, `level_secrets`, `level_time` counters. Max counts derived from thing categories and sector type 9 (secret sectors).
+
+### Changed
+
+- Stdlib deps expanded: vec, str, syscalls added to cyrius.toml [deps]
+- Binary size: 185KB (lighting tables + masked seg system + intermission)
+- Seg offset sign-extended at load time (map.cyr) for correct texture mapping
+
 ## [0.20.0] - 2026-04-13
 
 ### Changed

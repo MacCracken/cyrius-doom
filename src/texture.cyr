@@ -318,12 +318,50 @@ fn anim_rotate_3(group) {
     return 0;
 }
 
+# Animated wall texture groups: store texture indices
+# SLADRIP1/2/3 (shareware only animated wall sequence)
+var anim_sladrip = 0;
+var anim_tex_buf = 0;
+
+fn texture_init_wall_anim() {
+    anim_tex_buf = alloc(TEX_ENTRY_SIZE);
+    anim_sladrip = alloc(24);
+    store64(anim_sladrip, texture_find_name("SLADRIP1"));
+    store64(anim_sladrip + 8, texture_find_name("SLADRIP2"));
+    store64(anim_sladrip + 16, texture_find_name("SLADRIP3"));
+    return 0;
+}
+
+fn texture_find_name(name) {
+    return texture_find(name);
+}
+
+# Rotate wall texture table entries for a 3-frame group
+fn anim_rotate_tex_3(group) {
+    var i0 = load64(group);
+    var i1 = load64(group + 8);
+    var i2 = load64(group + 16);
+    if (i0 < 0) { return 0; }
+    if (i1 < 0) { return 0; }
+    if (i2 < 0) { return 0; }
+    var e0 = tex_table + i0 * TEX_ENTRY_SIZE;
+    var e1 = tex_table + i1 * TEX_ENTRY_SIZE;
+    var e2 = tex_table + i2 * TEX_ENTRY_SIZE;
+    # Save entry 0, shift 1→0, 2→1, saved→2
+    memcpy(anim_tex_buf, e0, TEX_ENTRY_SIZE);
+    memcpy(e0, e1, TEX_ENTRY_SIZE);
+    memcpy(e1, e2, TEX_ENTRY_SIZE);
+    memcpy(e2, anim_tex_buf, TEX_ENTRY_SIZE);
+    return 0;
+}
+
 fn texture_animate() {
     anim_tick_counter = anim_tick_counter + 1;
     if (anim_tick_counter < 8) { return 0; }
     anim_tick_counter = 0;
 
     anim_rotate_3(anim_nukage);
+    anim_rotate_tex_3(anim_sladrip);
     return 0;
 }
 

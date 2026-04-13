@@ -46,6 +46,7 @@ fn load_map() {
     audio_preload();
     doors_init();
     automap_active = 0;
+    level_reset_stats();
     things_print_stats();
     return 0;
 }
@@ -53,7 +54,7 @@ fn load_map() {
 fn doom_main() {
     alloc_init();
     args_init();
-    sakshi_info("cyrius-doom v0.20.0", 19);
+    sakshi_info("cyrius-doom v0.21.0", 19);
 
     if (argc() < 2) {
         sakshi_error("usage: doom <wad> [map] [--ppm]", 31);
@@ -73,8 +74,10 @@ fn doom_main() {
 
     framebuf_init();
     render_load_colormap();
+    render_init_light_tables();
     texture_init();
     texture_init_anim();
+    texture_init_wall_anim();
     render_load_sky();
     sprite_init();
     level_init();
@@ -137,7 +140,7 @@ fn doom_main() {
     # Load initial map
     if (load_map() != 0) { syscall(60, 1); }
 
-    # Game screenshot mode
+    # Game screenshot mode (also renders intermission)
     if (ppm_mode == 1) {
         view_x = player_start_x();
         view_y = player_start_y();
@@ -155,6 +158,24 @@ fn doom_main() {
         status_render();
         framebuf_write_ppm("/tmp/doom_automap.ppm");
         sakshi_info("wrote /tmp/doom_automap.ppm", 27);
+        # Render intermission screenshot
+        level_kills = 20; level_items = 45; level_secrets = 2;
+        level_time = 35 * 127;
+        framebuf_clear(0);
+        menu_init();
+        menu_draw_lump("WIMAP0", 0, 0);
+        menu_draw_lump("WIF", 64, 10);
+        menu_draw_lump("WIOSTK", 50, 50);
+        wi_draw_percent(level_kills, level_max_kills, 200, 50);
+        menu_draw_lump("WIOSTI", 50, 74);
+        wi_draw_percent(level_items, level_max_items, 200, 74);
+        menu_draw_lump("WIOSTS", 50, 98);
+        wi_draw_percent(level_secrets, level_max_secrets, 200, 98);
+        menu_draw_lump("WITIME", 50, 122);
+        wi_draw_time(level_time, 200, 122);
+        menu_draw_lump("WIENTER", 64, 156);
+        framebuf_write_ppm("/tmp/doom_inter.ppm");
+        sakshi_info("wrote /tmp/doom_inter.ppm", 25);
         wad_close();
         syscall(60, 0);
     }
@@ -189,9 +210,11 @@ fn doom_main() {
         things_tick();
         sound_tick();
         texture_animate();
+        level_tick_time();
 
         # Check for level transition
         if (next_level_flag == 1) {
+            level_intermission();
             level_advance();
             sakshi_info("level transition", 16);
             if (load_map() != 0) {

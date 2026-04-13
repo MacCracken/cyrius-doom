@@ -200,6 +200,81 @@ fn render_shade(pal_idx, light_level) {
     return load8(colormap + light_level * 256 + pal_idx);
 }
 
+# ================================================================
+# DOOM-accurate lighting tables
+# ================================================================
+# scalelight[16][48]: wall column lighting indexed by (lightnum, scale_index)
+# zlight[16][128]: floor/ceiling lighting indexed by (lightnum, distance_index)
+# Values are COLORMAP levels (0=bright, 31=dark).
+# Matches R_InitLightTables() from r_main.c.
+
+enum LightConst {
+    LIGHTLEVELS = 16;
+    MAXLIGHTSCALE = 48;
+    LIGHTSCALESHIFT = 12;
+    MAXLIGHTZ = 128;
+    LIGHTZSHIFT = 20;
+    NUMCOLORMAPS = 32;
+    DISTMAP = 2;
+}
+
+var scalelight = 0;
+var zlight = 0;
+
+fn render_init_light_tables() {
+    # scalelight: 16 * 48 = 768 entries
+    scalelight = alloc(LIGHTLEVELS * MAXLIGHTSCALE * 8);
+    # zlight: 16 * 128 = 2048 entries
+    zlight = alloc(LIGHTLEVELS * MAXLIGHTZ * 8);
+
+    for (var i = 0; i < LIGHTLEVELS; i = i + 1) {
+        var startmap = ((LIGHTLEVELS - 1 - i) * 2) * NUMCOLORMAPS / LIGHTLEVELS;
+
+        # Wall lighting: inversely proportional to scale (closer = brighter)
+        for (var j = 0; j < MAXLIGHTSCALE; j = j + 1) {
+            var level = startmap - j / DISTMAP;
+            if (level < 0) { level = 0; }
+            if (level >= NUMCOLORMAPS) { level = NUMCOLORMAPS - 1; }
+            store64(scalelight + (i * MAXLIGHTSCALE + j) * 8, level);
+        }
+
+        # Floor/ceiling lighting: proportional to distance
+        for (var j = 0; j < MAXLIGHTZ; j = j + 1) {
+            # scale = (160 << 16) / ((j+1) << LIGHTZSHIFT)
+            var scale = fixed_div(160 << 16, (j + 1) << LIGHTZSHIFT);
+            var idx = asr(scale, LIGHTSCALESHIFT);
+            if (idx < 0) { idx = 0; }
+            var level = startmap - idx / DISTMAP;
+            if (level < 0) { level = 0; }
+            if (level >= NUMCOLORMAPS) { level = NUMCOLORMAPS - 1; }
+            store64(zlight + (i * MAXLIGHTZ + j) * 8, level);
+        }
+    }
+    return 0;
+}
+
+# Get wall column COLORMAP level from sector lightnum and column scale
+fn render_wall_light(lightnum, scale) {
+    if (scalelight == 0) { return 0; }
+    if (lightnum < 0) { lightnum = 0; }
+    if (lightnum >= LIGHTLEVELS) { lightnum = LIGHTLEVELS - 1; }
+    var idx = asr(scale, LIGHTSCALESHIFT);
+    if (idx < 0) { idx = 0; }
+    if (idx >= MAXLIGHTSCALE) { idx = MAXLIGHTSCALE - 1; }
+    return load64(scalelight + (lightnum * MAXLIGHTSCALE + idx) * 8);
+}
+
+# Get floor/ceiling COLORMAP level from sector lightnum and distance
+fn render_flat_light(lightnum, dist) {
+    if (zlight == 0) { return 0; }
+    if (lightnum < 0) { lightnum = 0; }
+    if (lightnum >= LIGHTLEVELS) { lightnum = LIGHTLEVELS - 1; }
+    var idx = asr(dist, LIGHTZSHIFT);
+    if (idx < 0) { idx = 0; }
+    if (idx >= MAXLIGHTZ) { idx = MAXLIGHTZ - 1; }
+    return load64(zlight + (lightnum * MAXLIGHTZ + idx) * 8);
+}
+
 # Column buffer for texture lookups (max 256 pixels tall)
 var tex_col_buf = 0;
 
@@ -216,6 +291,48 @@ var vp_floor_flat = 0;
 var vp_ceil_flat = 0;
 var vp_floor_light = 0;
 var vp_ceil_light = 0;
+
+# ================================================================
+# Masked midtexture drawsegs: deferred two-sided middle textures
+# Stored during BSP wall pass, rendered after walls before sprites
+# Each entry: 13 fields * 8 = 104 bytes
+#   0: sx1   8: sx2   16: mid_tex  24: lightnum
+#  32: ty1  40: ty2   48: seg_len  56: seg_offset
+#  64: sd_xoff  72: sd_yoff  80: floor_h  88: ceil_h
+#  96: back_floor_h  104: back_ceil_h  112: dont_peg_bottom
+# ================================================================
+enum MaskedConst {
+    MASKED_MAX = 64;
+    MASKED_ENTRY_SIZE = 120;
+}
+
+var masked_segs = 0;
+var masked_count = 0;
+
+fn render_store_masked(sx1, sx2, mid_tex, lightnum_val, ty1_val, ty2_val,
+    seg_len_val, seg_offset_val, sd_xoff_val, sd_yoff_val,
+    floor_h_val, ceil_h_val, back_floor_h_val, back_ceil_h_val, dpb) {
+    if (masked_segs == 0) { masked_segs = alloc(MASKED_MAX * MASKED_ENTRY_SIZE); }
+    if (masked_count >= MASKED_MAX) { return 0; }
+    var base = masked_segs + masked_count * MASKED_ENTRY_SIZE;
+    store64(base, sx1);
+    store64(base + 8, sx2);
+    store64(base + 16, mid_tex);
+    store64(base + 24, lightnum_val);
+    store64(base + 32, ty1_val);
+    store64(base + 40, ty2_val);
+    store64(base + 48, seg_len_val);
+    store64(base + 56, seg_offset_val);
+    store64(base + 64, sd_xoff_val);
+    store64(base + 72, sd_yoff_val);
+    store64(base + 80, floor_h_val);
+    store64(base + 88, ceil_h_val);
+    store64(base + 96, back_floor_h_val);
+    store64(base + 104, back_ceil_h_val);
+    store64(base + 112, dpb);
+    masked_count = masked_count + 1;
+    return 0;
+}
 
 fn render_init_visplanes() {
     if (vp_floor_x1 == 0) {
@@ -435,20 +552,18 @@ fn render_seg(seg_idx) {
     var ceil_h = map_sector_ceilh(sector_idx);
     var light = map_sector_light(sector_idx);
 
-    # Base COLORMAP level from sector light (16 distinct levels, matching original DOOM)
-    # light 0-255, >> 4 gives 0-15, then *2 for even-numbered colormaps (DOOM quirk)
-    var base_light = (15 - (light >> 4)) * 2;
-    if (base_light < 0) { base_light = 0; }
-    if (base_light > 31) { base_light = 31; }
+    # DOOM lighting: sector light → lightnum (0-15)
+    var lightnum = light >> 4;
+    if (lightnum < 0) { lightnum = 0; }
+    if (lightnum >= LIGHTLEVELS) { lightnum = LIGHTLEVELS - 1; }
 
-    # Fake contrast: original DOOM dims E-W walls (same Y), brightens N-S walls (same X)
-    # Exact axis: if v1.y == v2.y → lightnum--, if v1.x == v2.x → lightnum++
-    # Approximate: seg_dy == 0 means E-W, seg_dx == 0 means N-S
+    # Fake contrast: horizontal walls (same Y) darker, vertical walls (same X) brighter
     var seg_dx = fixed_abs(map_vertex_x(v2_idx) - map_vertex_x(v1_idx));
     var seg_dy = fixed_abs(map_vertex_y(v2_idx) - map_vertex_y(v1_idx));
-    var orient_dim = 0;
-    if (seg_dy < 256) { orient_dim = 1; }
-    if (seg_dx < 256) { orient_dim = 0 - 1; }
+    if (seg_dy < 256) { lightnum = lightnum - 1; }
+    if (seg_dx < 256) { lightnum = lightnum + 1; }
+    if (lightnum < 0) { lightnum = 0; }
+    if (lightnum >= LIGHTLEVELS) { lightnum = LIGHTLEVELS - 1; }
 
     # Look up sidedef textures
     var sd_base = map_sidedefs + sidedef_idx * MAP_SIDEDEF_SIZE;
@@ -509,6 +624,15 @@ fn render_seg(seg_idx) {
         }
     }
 
+    # Store masked midtexture for deferred rendering (two-sided with mid texture)
+    if (is_twosided != 0) {
+        if (mid_tex >= 0) {
+            render_store_masked(sx1, sx2, mid_tex, lightnum, ty1, ty2,
+                seg_len, seg_offset, sd_xoff, sd_yoff,
+                floor_h, ceil_h, back_floor_h, back_ceil_h, dont_peg_bottom);
+        }
+    }
+
     # Draw columns from sx1 to sx2
     for (var col = sx1; col <= sx2; col = col + 1) {
         # Skip fully occluded columns
@@ -539,15 +663,9 @@ fn render_seg(seg_idx) {
         if (ceil_screen < ct) { ceil_screen = ct; }
         if (floor_screen > cb) { floor_screen = cb; }
 
-        # Distance-based COLORMAP level: further = darker
-        # DOOM: each 128 map units adds ~1 COLORMAP level
-        var dist_dim = fixed_to_int(depth) / 96;
-        if (dist_dim < 0) { dist_dim = 0; }
-        if (dist_dim > 16) { dist_dim = 16; }
-
-        var col_light = base_light + dist_dim + orient_dim;
-        if (col_light > 31) { col_light = 31; }
-        if (col_light < 0) { col_light = 0; }
+        # DOOM-accurate wall lighting: scale = PROJ_DIST / depth
+        var col_scale = fixed_div(PROJ_DIST, depth);
+        var col_light = render_wall_light(lightnum, col_scale);
 
         # Draw ceiling
         if (ceil_screen > ct) {
@@ -576,7 +694,7 @@ fn render_seg(seg_idx) {
                 var cx2 = load64(vp_ceil_x2 + cy * 8);
                 if (col > cx2) { store64(vp_ceil_x2 + cy * 8, col); }
                 store64(vp_ceil_flat + cy * 8, ceil_flat);
-                store64(vp_ceil_light + cy * 8, base_light);
+                store64(vp_ceil_light + cy * 8, lightnum);
             }
         }
 
@@ -591,7 +709,7 @@ fn render_seg(seg_idx) {
                 var fx2 = load64(vp_floor_x2 + fy * 8);
                 if (col > fx2) { store64(vp_floor_x2 + fy * 8, col); }
                 store64(vp_floor_flat + fy * 8, floor_flat);
-                store64(vp_floor_light + fy * 8, base_light);
+                store64(vp_floor_light + fy * 8, lightnum);
             }
         }
 
@@ -746,10 +864,7 @@ fn render_flat_spans() {
                 if (cdy > 0) {
                     var cdist = fixed_div(VIEW_HEIGHT, cdy << 16);
                     var cl = load64(vp_ceil_light + y * 8);
-                    var cd_dim = fixed_to_int(cdist) / 96;
-                    if (cd_dim > 16) { cd_dim = 16; }
-                    var clv = cl + cd_dim;
-                    if (clv > 31) { clv = 31; }
+                    var clv = render_flat_light(cl, cdist);
 
                     # World coords at left edge of span
                     var csx_left = fixed_div((cx1 - HALF_WIDTH) << 16, PROJ_DIST);
@@ -780,10 +895,7 @@ fn render_flat_spans() {
                 if (fdy > 0) {
                     var fdist = fixed_div(VIEW_HEIGHT, fdy << 16);
                     var fl = load64(vp_floor_light + y * 8);
-                    var fd_dim = fixed_to_int(fdist) / 96;
-                    if (fd_dim > 16) { fd_dim = 16; }
-                    var flv = fl + fd_dim;
-                    if (flv > 31) { flv = 31; }
+                    var flv = render_flat_light(fl, fdist);
 
                     var fsx_left = fixed_div((fx1 - HALF_WIDTH) << 16, PROJ_DIST);
                     var fwx = view_x + fixed_mul(fdist, view_cos) + fixed_mul(fixed_mul(fsx_left, fdist), view_sin);
@@ -805,6 +917,96 @@ fn render_flat_spans() {
     return 0;
 }
 
+# ================================================================
+# Render deferred masked midtextures
+# ================================================================
+# Drawn after walls/flats, before sprites. Middle textures on two-sided
+# linedefs are transparent (palette index 0 = skip). They clip to the
+# opening between front and back sector floors/ceilings.
+
+fn render_masked_segs() {
+    if (masked_segs == 0) { return 0; }
+    if (tex_col_buf == 0) { tex_col_buf = alloc(256); }
+
+    for (var mi = 0; mi < masked_count; mi = mi + 1) {
+        var base = masked_segs + mi * MASKED_ENTRY_SIZE;
+        var sx1 = load64(base);
+        var sx2 = load64(base + 8);
+        var mtex = load64(base + 16);
+        var mlight = load64(base + 24);
+        var mty1 = load64(base + 32);
+        var mty2 = load64(base + 40);
+        var mseg_len = load64(base + 48);
+        var mseg_off = load64(base + 56);
+        var mxoff = load64(base + 64);
+        var myoff = load64(base + 72);
+        var mfloor = load64(base + 80);
+        var mceil = load64(base + 88);
+        var mbfloor = load64(base + 96);
+        var mbceil = load64(base + 104);
+
+        # Opening: highest floor to lowest ceiling
+        var open_floor = mfloor;
+        if (mbfloor > open_floor) { open_floor = mbfloor; }
+        var open_ceil = mceil;
+        if (mbceil < open_ceil) { open_ceil = mbceil; }
+        if (open_floor >= open_ceil) { continue; }
+
+        var tex_h = texture_height(mtex);
+        if (tex_h <= 0) { continue; }
+
+        for (var col = sx1; col <= sx2; col = col + 1) {
+            # Interpolate depth
+            var frac = 0;
+            if (sx2 != sx1) {
+                frac = fixed_div((col - sx1) << 16, (sx2 - sx1) << 16);
+            }
+            var depth = fixed_lerp(mty1, mty2, frac);
+            if (depth <= 0) { depth = 256; }
+
+            var eye_h = (mfloor << 16) + VIEW_HEIGHT;
+
+            var open_top = HALF_HEIGHT - fixed_to_int(
+                fixed_div(fixed_mul((open_ceil << 16) - eye_h, PROJ_DIST), depth));
+            var open_bot = HALF_HEIGHT - fixed_to_int(
+                fixed_div(fixed_mul((open_floor << 16) - eye_h, PROJ_DIST), depth));
+
+            if (open_top >= open_bot) { continue; }
+            var wh = open_bot - open_top;
+            if (wh <= 0) { continue; }
+
+            var col_scale = fixed_div(PROJ_DIST, depth);
+            var col_lv = render_wall_light(mlight, col_scale);
+
+            # Texture U coordinate
+            var tex_u = fixed_to_int(fixed_mul(frac, mseg_len)) + mxoff + mseg_off;
+
+            # Get texture column
+            var th = texture_get_column(mtex, tex_u, tex_col_buf);
+            if (th <= 0) { continue; }
+
+            var ty_step = fixed_div(th << 16, wh << 16);
+            var ty_pos = myoff << 16;
+
+            for (var row = open_top; row < open_bot; row = row + 1) {
+                if (row < 0) { ty_pos = ty_pos + ty_step; continue; }
+                if (row >= SCREEN_HEIGHT) { break; }
+                var src_y = fixed_to_int(ty_pos);
+                if (src_y >= 0) {
+                    if (src_y < th) {
+                        var pal = load8(tex_col_buf + src_y);
+                        if (pal != 0) {
+                            framebuf_pixel(col, row, render_shade(pal, col_lv));
+                        }
+                    }
+                }
+                ty_pos = ty_pos + ty_step;
+            }
+        }
+    }
+    return 0;
+}
+
 fn render_frame() {
     view_cos = fixed_cos(view_angle);
     view_sin = fixed_sin(view_angle);
@@ -812,14 +1014,18 @@ fn render_frame() {
     framebuf_clear(0);
     render_init_clip();
     render_init_visplanes();
+    masked_count = 0;
 
-    # BSP pass: walls + collect floor/ceiling spans
+    # BSP pass: walls + collect floor/ceiling spans + store masked segs
     if (map_num_nodes > 0) {
         render_bsp_node(map_num_nodes - 1);
     }
 
-    # Flat pass: draw all floor/ceiling spans (row-by-row, much faster)
+    # Flat pass: draw all floor/ceiling spans
     render_flat_spans();
+
+    # Masked midtexture pass: deferred transparent middle textures
+    render_masked_segs();
 
     return 0;
 }
