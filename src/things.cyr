@@ -163,35 +163,40 @@ fn thing_classify(ttype) {
     if (ttype == TTYPE_SPIDER) { return CAT_MONSTER; }
     if (ttype == TTYPE_LOSTSOUL) { return CAT_MONSTER; }
 
-    # Weapons
-    if (ttype == TTYPE_SHOTGUN) { return CAT_WEAPON; }
-    if (ttype == TTYPE_CHAINGUN) { return CAT_WEAPON; }
-    if (ttype == TTYPE_LAUNCHER) { return CAT_WEAPON; }
-    if (ttype == TTYPE_PLASMA) { return CAT_WEAPON; }
-    if (ttype == TTYPE_CHAINSAW) { return CAT_WEAPON; }
-    if (ttype == TTYPE_BFG) { return CAT_WEAPON; }
+    # Weapons (2001-2006): dense range, qualifies for jump table
+    switch (ttype) {
+        case 2001: { return CAT_WEAPON; }
+        case 2002: { return CAT_WEAPON; }
+        case 2003: { return CAT_WEAPON; }
+        case 2004: { return CAT_WEAPON; }
+        case 2005: { return CAT_WEAPON; }
+        case 2006: { return CAT_WEAPON; }
+    }
 
     # Keys
     if (ttype == TTYPE_KEY_BLUE) { return CAT_KEY; }
     if (ttype == TTYPE_KEY_YELLOW) { return CAT_KEY; }
     if (ttype == TTYPE_KEY_RED) { return CAT_KEY; }
 
-    # Items
-    if (ttype == TTYPE_HEALTH_POTION) { return CAT_ITEM; }
-    if (ttype == TTYPE_STIMPACK) { return CAT_ITEM; }
-    if (ttype == TTYPE_MEDIKIT) { return CAT_ITEM; }
-    if (ttype == TTYPE_SOULSPHERE) { return CAT_ITEM; }
-    if (ttype == TTYPE_ARMOR_GREEN) { return CAT_ITEM; }
-    if (ttype == TTYPE_ARMOR_BLUE) { return CAT_ITEM; }
-    if (ttype == TTYPE_ARMOR_BONUS) { return CAT_ITEM; }
-    if (ttype == TTYPE_CLIP) { return CAT_ITEM; }
-    if (ttype == TTYPE_CLIPBOX) { return CAT_ITEM; }
-    if (ttype == TTYPE_SHELLS) { return CAT_ITEM; }
-    if (ttype == TTYPE_SHELLBOX) { return CAT_ITEM; }
-    if (ttype == TTYPE_ROCKET) { return CAT_ITEM; }
-    if (ttype == TTYPE_ROCKETBOX) { return CAT_ITEM; }
-    if (ttype == TTYPE_CELL) { return CAT_ITEM; }
+    # Items — health/armor/ammo cluster (2007-2019, 2046-2049)
+    # TTYPE_CELLPACK=17 handled separately (outside main item range)
     if (ttype == TTYPE_CELLPACK) { return CAT_ITEM; }
+    switch (ttype) {
+        case 2007: { return CAT_ITEM; }  # CLIP
+        case 2008: { return CAT_ITEM; }  # SHELLS
+        case 2010: { return CAT_ITEM; }  # ROCKET
+        case 2011: { return CAT_ITEM; }  # STIMPACK
+        case 2012: { return CAT_ITEM; }  # MEDIKIT
+        case 2013: { return CAT_ITEM; }  # SOULSPHERE
+        case 2014: { return CAT_ITEM; }  # HEALTH_POTION
+        case 2015: { return CAT_ITEM; }  # ARMOR_BONUS
+        case 2018: { return CAT_ITEM; }  # ARMOR_GREEN
+        case 2019: { return CAT_ITEM; }  # ARMOR_BLUE
+        case 2046: { return CAT_ITEM; }  # ROCKETBOX
+        case 2047: { return CAT_ITEM; }  # CELL
+        case 2048: { return CAT_ITEM; }  # CLIPBOX
+        case 2049: { return CAT_ITEM; }  # SHELLBOX
+    }
 
     # Barrel
     if (ttype == TTYPE_BARREL) { return CAT_DECOR; }
@@ -533,40 +538,42 @@ fn things_check_pickups() {
         var ttype = thing_type(i);
         var picked = 0;
 
-        # Health
-        if (ttype == TTYPE_HEALTH_POTION) { player_health += 1; picked = 1; }
-        if (ttype == TTYPE_STIMPACK) { player_health += 10; picked = 1; }
-        if (ttype == TTYPE_MEDIKIT) { player_health += 25; picked = 1; }
-        if (ttype == TTYPE_SOULSPHERE) { player_health += 100; picked = 1; }
+        # Unified pickup dispatch. Cases grouped by value for jump-table
+        # potential per cluster (keys 5-13, weapons/items 2001-2049).
+        # Armor has conditional logic — stays outside the switch.
+        switch (ttype) {
+            # Keys (5-13)
+            case 5:  { player_keys |= KEY_CARD_BLUE; picked = 1; }    # BLUE
+            case 6:  { player_keys |= KEY_CARD_YELLOW; picked = 1; }  # YELLOW
+            case 13: { player_keys |= KEY_CARD_RED; picked = 1; }     # RED
+            # Cellpack (oddly numbered)
+            case 17: { player_ammo_cells += 100; picked = 1; }
+            # Weapons (2001-2006): bitmask 1<<N for weapon N
+            case 2001: { player_ammo_shells += 8;  player_weapons |= 8;   picked = 1; }  # SHOTGUN
+            case 2002: { player_ammo_bullets += 20; player_weapons |= 16; picked = 1; }  # CHAINGUN
+            case 2003: { player_ammo_rockets += 2; player_weapons |= 32; picked = 1; }  # LAUNCHER
+            case 2004: { player_ammo_cells += 40; player_weapons |= 128; picked = 1; }  # PLASMA
+            case 2005: { player_weapons |= 64; picked = 1; }                            # CHAINSAW
+            case 2006: { player_ammo_cells += 40; player_weapons |= 256; picked = 1; }  # BFG
+            # Ammo + health + armor cluster (2007-2019)
+            case 2007: { player_ammo_bullets += 10; picked = 1; }  # CLIP
+            case 2008: { player_ammo_shells += 4;  picked = 1; }   # SHELLS
+            case 2010: { player_ammo_rockets += 1; picked = 1; }   # ROCKET
+            case 2011: { player_health += 10; picked = 1; }        # STIMPACK
+            case 2012: { player_health += 25; picked = 1; }        # MEDIKIT
+            case 2013: { player_health += 100; picked = 1; }       # SOULSPHERE
+            case 2014: { player_health += 1; picked = 1; }         # HEALTH_POTION
+            # Ammo boxes (2046-2049)
+            case 2046: { player_ammo_rockets += 5; picked = 1; }
+            case 2047: { player_ammo_cells += 20; picked = 1; }
+            case 2048: { player_ammo_bullets += 50; picked = 1; }
+            case 2049: { player_ammo_shells += 20; picked = 1; }
+        }
 
-        # Armor
+        # Armor has conditional logic (don't pick up if already at max tier)
         if (ttype == TTYPE_ARMOR_BONUS) { player_armor += 1; picked = 1; }
         if (ttype == TTYPE_ARMOR_GREEN && player_armor < 100) { player_armor = 100; picked = 1; }
         if (ttype == TTYPE_ARMOR_BLUE && player_armor < 200) { player_armor = 200; picked = 1; }
-
-        # Ammo
-        if (ttype == TTYPE_CLIP) { player_ammo_bullets += 10; picked = 1; }
-        if (ttype == TTYPE_CLIPBOX) { player_ammo_bullets += 50; picked = 1; }
-        if (ttype == TTYPE_SHELLS) { player_ammo_shells += 4; picked = 1; }
-        if (ttype == TTYPE_SHELLBOX) { player_ammo_shells += 20; picked = 1; }
-        if (ttype == TTYPE_ROCKET) { player_ammo_rockets += 1; picked = 1; }
-        if (ttype == TTYPE_ROCKETBOX) { player_ammo_rockets += 5; picked = 1; }
-        if (ttype == TTYPE_CELL) { player_ammo_cells += 20; picked = 1; }
-        if (ttype == TTYPE_CELLPACK) { player_ammo_cells += 100; picked = 1; }
-
-        # Weapons (give weapon + some ammo)
-        # Bitmask: 1<<N for weapon N. 1=fist, 2=pistol, 3=shotgun, 4=chaingun, 5=rocket, 6=chainsaw, 7=plasma
-        if (ttype == TTYPE_SHOTGUN) { player_ammo_shells += 8; player_weapons |= 8; picked = 1; }
-        if (ttype == TTYPE_CHAINGUN) { player_ammo_bullets += 20; player_weapons |= 16; picked = 1; }
-        if (ttype == TTYPE_LAUNCHER) { player_ammo_rockets += 2; player_weapons |= 32; picked = 1; }
-        if (ttype == TTYPE_CHAINSAW) { player_weapons |= 64; picked = 1; }
-        if (ttype == TTYPE_PLASMA) { player_ammo_cells += 40; player_weapons |= 128; picked = 1; }
-        if (ttype == TTYPE_BFG) { player_ammo_cells += 40; player_weapons |= 256; picked = 1; }
-
-        # Keys
-        if (ttype == TTYPE_KEY_BLUE) { player_keys |= KEY_CARD_BLUE; picked = 1; }
-        if (ttype == TTYPE_KEY_YELLOW) { player_keys |= KEY_CARD_YELLOW; picked = 1; }
-        if (ttype == TTYPE_KEY_RED) { player_keys |= KEY_CARD_RED; picked = 1; }
 
         # Clamp health
         if (player_health > 200) { player_health = 200; }

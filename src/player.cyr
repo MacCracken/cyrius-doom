@@ -288,47 +288,50 @@ fn player_take_damage(dmg) {
 # Ammo consumption
 # ================================================================
 # Returns the player's ammo count for current weapon. -1 = no ammo needed.
+# 1=fist, 2=pistol, 3=shotgun, 4=chaingun, 5=rocket, 6=chainsaw, 7=plasma
 fn player_current_ammo() {
-    if (player_weapon == 1) { return -1; }
-    if (player_weapon == 6) { return -1; }
-    if (player_weapon == 2) { return player_ammo_bullets; }
-    if (player_weapon == 4) { return player_ammo_bullets; }
-    if (player_weapon == 3) { return player_ammo_shells; }
-    if (player_weapon == 5) { return player_ammo_rockets; }
-    if (player_weapon == 7) { return player_ammo_cells; }
+    switch (player_weapon) {
+        case 1: { return -1; }
+        case 2: { return player_ammo_bullets; }
+        case 3: { return player_ammo_shells; }
+        case 4: { return player_ammo_bullets; }
+        case 5: { return player_ammo_rockets; }
+        case 6: { return -1; }
+        case 7: { return player_ammo_cells; }
+    }
     return 0;
 }
 
 # Try to fire: check ammo, deduct if available. Returns 1 if ok, 0 if empty.
 fn player_try_fire() {
-    # Fist and chainsaw need no ammo
-    if (player_weapon == 1) { return 1; }
-    if (player_weapon == 6) { return 1; }
-
-    if (player_weapon == 2) {
-        if (player_ammo_bullets <= 0) { return 0; }
-        player_ammo_bullets -= 1;
-        return 1;
-    }
-    if (player_weapon == 4) {
-        if (player_ammo_bullets <= 0) { return 0; }
-        player_ammo_bullets -= 1;
-        return 1;
-    }
-    if (player_weapon == 3) {
-        if (player_ammo_shells <= 0) { return 0; }
-        player_ammo_shells -= 1;
-        return 1;
-    }
-    if (player_weapon == 5) {
-        if (player_ammo_rockets <= 0) { return 0; }
-        player_ammo_rockets -= 1;
-        return 1;
-    }
-    if (player_weapon == 7) {
-        if (player_ammo_cells <= 0) { return 0; }
-        player_ammo_cells -= 1;
-        return 1;
+    switch (player_weapon) {
+        case 1: { return 1; }
+        case 6: { return 1; }
+        case 2: {
+            if (player_ammo_bullets <= 0) { return 0; }
+            player_ammo_bullets -= 1;
+            return 1;
+        }
+        case 4: {
+            if (player_ammo_bullets <= 0) { return 0; }
+            player_ammo_bullets -= 1;
+            return 1;
+        }
+        case 3: {
+            if (player_ammo_shells <= 0) { return 0; }
+            player_ammo_shells -= 1;
+            return 1;
+        }
+        case 5: {
+            if (player_ammo_rockets <= 0) { return 0; }
+            player_ammo_rockets -= 1;
+            return 1;
+        }
+        case 7: {
+            if (player_ammo_cells <= 0) { return 0; }
+            player_ammo_cells -= 1;
+            return 1;
+        }
     }
     return 0;
 }

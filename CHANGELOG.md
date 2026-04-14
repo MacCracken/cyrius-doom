@@ -5,6 +5,23 @@ All notable changes to cyrius-doom will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.4] - 2026-04-14
+
+### Changed
+
+- **Cyrius 4.8.2** — cyrius.toml pinned to 4.8.2 minimum. Switch jump-table tuning (density 33%, range cap 1024) makes more cases eligible for O(1) dispatch.
+- **Switch conversions for hot paths** — converted 4 if-chains to switch statements. Compiler decides jump-table vs chain per cluster:
+  - `player_current_ammo()` — 7-case weapon → ammo-type lookup (range 1-7, dense, jump-table qualifies)
+  - `player_try_fire()` — 7-case weapon → fire+deduct (same structure)
+  - `thing_classify()` — weapon type (2001-2006, dense 6-case)
+  - `things_check_pickups()` — unified 21-case pickup dispatch with keys (5-13), weapons (2001-2006), items (2007-2019), ammo boxes (2046-2049). Armor stays in if-chain (has conditional logic).
+
+### Performance
+
+- **render_frame: 2.66ms → 2.59ms** (2.6% faster)
+- **render_frame+sprites: 2.76ms → 2.63ms** (4.7% faster)
+- Hot-path dispatch is now measurably cheaper on per-tick item pickup checks
+
 ## [0.24.3] - 2026-04-14
 
 ### Changed
