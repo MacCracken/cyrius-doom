@@ -20,6 +20,17 @@ include "src/map.cyr"
 include "src/texture.cyr"
 include "src/render.cyr"
 include "src/sprite.cyr"
+include "src/input.cyr"
+include "src/player.cyr"
+include "src/tick.cyr"
+include "src/things.cyr"
+include "src/status.cyr"
+include "src/sound.cyr"
+include "src/audio.cyr"
+include "src/doors.cyr"
+include "src/automap.cyr"
+include "src/level.cyr"
+include "src/menu.cyr"
 
 var _b_startan = 0;
 var _b_texcol = 0;

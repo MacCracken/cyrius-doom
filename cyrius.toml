@@ -1,9 +1,11 @@
 [package]
 name = "cyrius-doom"
-version = "0.24.2"
-description = "DOOM in Cyrius — 30-50KB, direct framebuffer, no libc, just syscalls."
+version = "0.24.3"
+description = "DOOM in Cyrius — clean-room, direct framebuffer, no libc, just syscalls."
 license = "GPL-3.0-only"
 repository = "https://github.com/MacCracken/cyrius-doom"
+language = "cyrius"
+cyrius = "4.6.2"
 
 [build]
 src = "src/main.cyr"

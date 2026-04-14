@@ -5,6 +5,14 @@ All notable changes to cyrius-doom will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.3] - 2026-04-14
+
+### Changed
+
+- **Cyrius 4.6.2** — rebuilt and verified on the new toolchain. Added `cyrius = "4.6.2"` pin + `language = "cyrius"` to cyrius.toml. No code changes. All 9 maps render, 51K fuzz iterations pass.
+- **BSP 1.0.1** — dep tag bumped (also rebuilt on 4.6.2, no code changes). 74/74 tests pass.
+- Minor benchmark improvements: `atan2` 17ns → 13ns, `colormap_shade` 6ns → 4ns, `pcache_get_hit` 13ns → 12ns. DCE report smaller (32KB → 26KB of dead stdlib — compiler got smarter about reachability).
+
 ## [0.24.2] - 2026-04-13
 
 ### Changed
