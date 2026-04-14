@@ -9,7 +9,7 @@
 - **Language**: Cyrius (native, compiled via cc3 4.0.0)
 - **Version**: SemVer, version file at `VERSION`
 - **Binary size**: 194KB (20 modules), renders at 3.9ms/frame
-- **Status**: v0.24.0 — Security hardened. Full gameplay loop: shooting, ammo, death/respawn, key cards, armor absorption. DOOM-accurate lighting, masked midtextures, animated walls/flats/sprites, WAD-native HUD + menus + intermission, ALSA audio, weapon switching + bob, doors/lifts, automap, level transitions (E1M1-E1M9). CVE audit: 5 findings fixed. Cyrius 4.0.0.
+- **Status**: v0.24.1 — Security hardened + short-circuit cleanup. Full gameplay loop: shooting, ammo, death/respawn, key cards, armor absorption. DOOM-accurate lighting, masked midtextures, animated walls/flats/sprites, WAD-native HUD + menus + intermission, ALSA audio, weapon switching + bob, doors/lifts, automap, level transitions (E1M1-E1M9). CVE audit: 5 findings fixed. Cyrius 4.4.3.
 - **Genesis repo**: [agnosticos](https://github.com/MacCracken/agnosticos)
 - **Philosophy**: [AGNOS Philosophy](https://github.com/MacCracken/agnosticos/blob/main/docs/philosophy.md)
 - **Standards**: [First-Party Standards](https://github.com/MacCracken/agnosticos/blob/main/docs/development/applications/first-party-standards.md)

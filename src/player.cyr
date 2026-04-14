@@ -231,31 +231,31 @@ fn player_check_linedef(nx, ny, radius, i) {
         if ((flags & ML_TWOSIDED) != 0) {
             var right_side = map_linedef_side_right(i);
             var left_side = map_linedef_side_left(i);
-            if (right_side >= 0) { if (left_side >= 0) {
-                    var rs = map_sidedef_sector(right_side);
-                    var ls = map_sidedef_sector(left_side);
-                    var rf = map_sector_floorh(rs);
-                    var lf = map_sector_floorh(ls);
+            if (right_side >= 0 && left_side >= 0) {
+                var rs = map_sidedef_sector(right_side);
+                var ls = map_sidedef_sector(left_side);
+                var rf = map_sector_floorh(rs);
+                var lf = map_sector_floorh(ls);
 
-                    # Can't step up more than 24 units
-                    var step = lf - rf;
-                    if (step < 0) { step = -step; }
-                    var player_floor = fixed_to_int(player_z);
-                    var target_floor = rf;
-                    if (lf > rf) { target_floor = lf; }
-                    if (target_floor - player_floor > PLAYER_MAX_STEP) {
-                        return 0;
-                    }
+                # Can't step up more than 24 units
+                var step = lf - rf;
+                if (step < 0) { step = -step; }
+                var player_floor = fixed_to_int(player_z);
+                var target_floor = rf;
+                if (lf > rf) { target_floor = lf; }
+                if (target_floor - player_floor > PLAYER_MAX_STEP) {
+                    return 0;
+                }
 
-                    # Can't fit under ceiling
-                    var rc = map_sector_ceilh(rs);
-                    var lc = map_sector_ceilh(ls);
-                    var min_ceil = rc;
-                    if (lc < min_ceil) { min_ceil = lc; }
-                    if (min_ceil - target_floor < PLAYER_HEIGHT) {
-                        return 0;
-                    }
-                } }
+                # Can't fit under ceiling
+                var rc = map_sector_ceilh(rs);
+                var lc = map_sector_ceilh(ls);
+                var min_ceil = rc;
+                if (lc < min_ceil) { min_ceil = lc; }
+                if (min_ceil - target_floor < PLAYER_HEIGHT) {
+                    return 0;
+                }
+            }
         }
     }
 

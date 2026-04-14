@@ -240,7 +240,7 @@ fn things_spawn_from_map() {
         var ttype = map_thing_type(i);
 
         # Skip player starts
-        if (ttype >= TTYPE_PLAYER1) { if (ttype <= TTYPE_PLAYER4) { continue; } }
+        if (ttype >= TTYPE_PLAYER1 && ttype <= TTYPE_PLAYER4) { continue; }
 
         var cat = thing_classify(ttype);
         var idx = thing_count;
@@ -337,11 +337,9 @@ fn thing_check_sight(mx, my, tx, ty) {
         var t2 = fixed_div(t2_num, denom);
 
         # Intersection if 0 < t1 < 1 and 0 < t2 < 1
-        if (t1 > 0) { if (t1 < FIXED_ONE) {
-                if (t2 > 0) { if (t2 < FIXED_ONE) {
-                        return 0;
-                    } }
-            } }
+        if (t1 > 0 && t1 < FIXED_ONE && t2 > 0 && t2 < FIXED_ONE) {
+            return 0;
+        }
     }
 
     return 1;
@@ -543,8 +541,8 @@ fn things_check_pickups() {
 
         # Armor
         if (ttype == TTYPE_ARMOR_BONUS) { player_armor += 1; picked = 1; }
-        if (ttype == TTYPE_ARMOR_GREEN) { if (player_armor < 100) { player_armor = 100; picked = 1; } }
-        if (ttype == TTYPE_ARMOR_BLUE) { if (player_armor < 200) { player_armor = 200; picked = 1; } }
+        if (ttype == TTYPE_ARMOR_GREEN && player_armor < 100) { player_armor = 100; picked = 1; }
+        if (ttype == TTYPE_ARMOR_BLUE && player_armor < 200) { player_armor = 200; picked = 1; }
 
         # Ammo
         if (ttype == TTYPE_CLIP) { player_ammo_bullets += 10; picked = 1; }

@@ -5,6 +5,13 @@ All notable changes to cyrius-doom will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.1] - 2026-04-13
+
+### Changed
+
+- **`&&` / `||` short-circuit cleanup** — now that Cyrius 4.4.1 fixed short-circuit semantics, converted nested `if (a) { if (b) { ... } }` patterns to `if (a && b) { ... }` across 9 files. 15+ sites cleaned: WAD magic check (4-level nest → 1 line), sky name check, near-plane clip, walk-over crossing, player collision ceiling/floor checks, screen bounds, armor pickup conditions, level coord parsing. Same semantics, half the lines.
+- **Cyrius 4.4.3 verified** — cc3 reports 196 unreachable fns (32KB dead stdlib). `CYRIUS_DCE=1` NOPs 17KB. Clean `cyrlint` across all 20 files.
+
 ## [0.24.0] - 2026-04-13
 
 ### Security (CVE Audit Hardening)

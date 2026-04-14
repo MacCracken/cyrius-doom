@@ -43,7 +43,7 @@ fn tex_name_hash(name_ptr) {
         var c = load8(name_ptr + i);
         if (c == 0) { break; }
         # Uppercase
-        if (c >= 97) { if (c <= 122) { c -= 32; } }
+        if (c >= 97 && c <= 122) { c -= 32; }
         h = h * 31 + c;
     }
     return h;

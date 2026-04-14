@@ -56,8 +56,9 @@ fn wad_open(path) {
     var m3 = load8(&hdr + 3);
 
     var valid = 0;
-    if (m0 == 73) { if (m1 == 87) { if (m2 == 65) { if (m3 == 68) { valid = 1; } } } }
-    if (m0 == 80) { if (m1 == 87) { if (m2 == 65) { if (m3 == 68) { valid = 1; } } } }
+    if (m1 == 87 && m2 == 65 && m3 == 68) {
+        if (m0 == 73 || m0 == 80) { valid = 1; }
+    }
 
     if (valid == 0) {
         sakshi_error("not a WAD file", 14);
@@ -101,7 +102,7 @@ fn wad_name_eq(lump_name_ptr, name) {
         var lc = load8(lump_name_ptr + i);
         if (i < nlen) {
             var nc = load8(name + i);
-            if (nc >= 97) { if (nc <= 122) { nc -= 32; } }
+            if (nc >= 97 && nc <= 122) { nc -= 32; }
             if (lc != nc) { return 0; }
         } else {
             if (lc != 0) { return 0; }

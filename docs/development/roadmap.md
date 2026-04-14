@@ -1,7 +1,7 @@
 # cyrius-doom Development Roadmap
 
-> **v0.24.0** — 194KB, 20 modules, full gameplay loop, DOOM-accurate lighting,
-> security hardened (CVE audit: 5/5 fixed), Cyrius 4.0.0.
+> **v0.24.1** — 196KB, 20 modules, full gameplay loop, DOOM-accurate lighting,
+> security hardened (CVE audit: 5/5 fixed), Cyrius 4.4.3 + short-circuit cleanup.
 > Clean build, zero warnings, 51K fuzz iterations.
 
 ## Completed
@@ -34,6 +34,7 @@
 | v0.23.1 | Cyrius 4.0.0 modernization (~300 changes: +=, negative literals) |
 | v0.23.2 | P(-1) hardening: termios iflag bitmask fix, full audit clean |
 | v0.24.0 | Security: CVE audit, map/texture/blockmap bounds validation, WAD read zero-fill |
+| v0.24.1 | Short-circuit cleanup (15+ nested-if → && chains), Cyrius 4.4.3 verified |
 
 ## v0.24.0 — Security Hardening (CVE Audit Fixes)
 
@@ -77,3 +78,7 @@ See: `docs/audit/2026-04-13-security-cve-audit.md`
 | Network multiplayer | Peer-to-peer via majra |
 | PWAD support | Custom maps/mods |
 | Full DOOM.WAD | Episodes 2-3 (registered version) |
+
+## AgentWorld / DOOM Crossover
+
+See [roadmap-crossover.md](roadmap-crossover.md) — secureyeoman spatial threat visualization via DOOM engine.

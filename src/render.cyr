@@ -514,7 +514,7 @@ fn render_seg(seg_idx) {
     var tx2, ty2 = render_transform_vertex(wx2, wy2);
 
     # Both behind the viewer? Skip.
-    if (ty1 <= 0) { if (ty2 <= 0) { return 0; } }
+    if (ty1 <= 0 && ty2 <= 0) { return 0; }
 
     # Near-plane clipping: if a vertex is behind the viewer,
     # clip it to a small positive depth
@@ -613,11 +613,10 @@ fn render_seg(seg_idx) {
     # Check for sky ceiling (F_SKY1)
     var is_sky = 0;
     var sky_name = map_sector_ceil_tex(sector_idx);
-    if (load8(sky_name) == 70) { if (load8(sky_name + 1) == 95) {
-            if (load8(sky_name + 2) == 83) { if (load8(sky_name + 3) == 75) {
-                    is_sky = 1;
-                } }
-        } }
+    if (load8(sky_name) == 70 && load8(sky_name + 1) == 95 &&
+        load8(sky_name + 2) == 83 && load8(sky_name + 3) == 75) {
+        is_sky = 1;
+    }
 
     # Eye height for floor plane distance calculation
     var plane_eye_h = VIEW_HEIGHT;

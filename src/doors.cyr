@@ -348,8 +348,8 @@ fn doors_walk_trigger(old_x, old_y, new_x, new_y) {
         var ns = asr(new_x - lx1, 8) * asr(ldy, 8) - asr(new_y - ly1, 8) * asr(ldx, 8);
 
         var crossed = 0;
-        if (os >= 0) { if (ns < 0) { crossed = 1; } }
-        if (os < 0) { if (ns >= 0) { crossed = 1; } }
+        if (os >= 0 && ns < 0) { crossed = 1; }
+        if (os < 0 && ns >= 0) { crossed = 1; }
         if (crossed == 0) { continue; }
 
         # Exit lines

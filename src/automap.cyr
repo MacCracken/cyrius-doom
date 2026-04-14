@@ -54,7 +54,7 @@ fn am_draw_line(x1, y1, x2, y2, color) {
 
     while (safety < 1000) {
         framebuf_pixel(x1, y1, color);
-        if (x1 == x2) { if (y1 == y2) { break; } }
+        if (x1 == x2 && y1 == y2) { break; }
 
         var e2 = err * 2;
         if (e2 > -dy) {
@@ -123,10 +123,10 @@ fn automap_render() {
         var y2 = am_screen_y(map_vertex_y(v2));
 
         # Skip if entirely off screen
-        if (x1 < 0) { if (x2 < 0) { continue; } }
-        if (x1 >= SCREEN_WIDTH) { if (x2 >= SCREEN_WIDTH) { continue; } }
-        if (y1 < 0) { if (y2 < 0) { continue; } }
-        if (y1 >= SCREEN_HEIGHT) { if (y2 >= SCREEN_HEIGHT) { continue; } }
+        if (x1 < 0 && x2 < 0) { continue; }
+        if (x1 >= SCREEN_WIDTH && x2 >= SCREEN_WIDTH) { continue; }
+        if (y1 < 0 && y2 < 0) { continue; }
+        if (y1 >= SCREEN_HEIGHT && y2 >= SCREEN_HEIGHT) { continue; }
 
         # Don't draw hidden lines
         if ((flags & ML_DONTDRAW) != 0) { continue; }
@@ -139,16 +139,16 @@ fn automap_render() {
             # Two-sided: check for height change
             var rs = map_linedef_side_right(i);
             var ls = map_linedef_side_left(i);
-            if (rs >= 0) { if (ls >= 0) {
-                    var rs_sec = map_sidedef_sector(rs);
-                    var ls_sec = map_sidedef_sector(ls);
-                    var rf = map_sector_floorh(rs_sec);
-                    var lf = map_sector_floorh(ls_sec);
-                    var rc = map_sector_ceilh(rs_sec);
-                    var lc = map_sector_ceilh(ls_sec);
-                    if (rf != lf) { color = 160; }
-                    if (rc != lc) { color = 160; }
-                } }
+            if (rs >= 0 && ls >= 0) {
+                var rs_sec = map_sidedef_sector(rs);
+                var ls_sec = map_sidedef_sector(ls);
+                var rf = map_sector_floorh(rs_sec);
+                var lf = map_sector_floorh(ls_sec);
+                var rc = map_sector_ceilh(rs_sec);
+                var lc = map_sector_ceilh(ls_sec);
+                if (rf != lf) { color = 160; }
+                if (rc != lc) { color = 160; }
+            }
         }
 
         am_draw_line(x1, y1, x2, y2, color);
@@ -157,7 +157,7 @@ fn automap_render() {
     # Draw things as dots
     for (var i = 0; i < map_num_things; i += 1) {
         var ttype = map_thing_type(i);
-        if (ttype >= 1) { if (ttype <= 4) { continue; } }
+        if (ttype >= 1 && ttype <= 4) { continue; }
         var tx = am_screen_x(map_thing_x(i));
         var ty = am_screen_y(map_thing_y(i));
         framebuf_pixel(tx, ty, 200);

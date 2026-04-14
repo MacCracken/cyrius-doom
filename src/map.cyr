@@ -337,7 +337,7 @@ fn map_validate() {
         var rs = load64(base + 40);
         if (rs >= map_num_sidedefs) { return -1; }
         var ls = load64(base + 48);
-        if (ls >= 0) { if (ls >= map_num_sidedefs) { return -1; } }
+        if (ls >= 0 && ls >= map_num_sidedefs) { return -1; }
     }
 
     # Validate sidedef sector references

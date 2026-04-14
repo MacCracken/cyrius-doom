@@ -54,7 +54,7 @@ fn load_map() {
 fn doom_main() {
     alloc_init();
     args_init();
-    sakshi_info("cyrius-doom v0.24.0", 19);
+    sakshi_info("cyrius-doom v0.24.1", 19);
 
     if (argc() < 2) {
         sakshi_error("usage: doom <wad> [map] [--ppm]", 31);
@@ -96,10 +96,10 @@ fn doom_main() {
         if (load8(arg) == 69) {
             var ep = load8(arg + 1) - 48;
             var mp = load8(arg + 3) - 48;
-            if (ep >= 1) { if (ep <= 3) { if (mp >= 1) { if (mp <= 9) {
-                            level_set(ep, mp);
-                            direct_map = 1;
-                        } } } }
+            if (ep >= 1 && ep <= 3 && mp >= 1 && mp <= 9) {
+                level_set(ep, mp);
+                direct_map = 1;
+            }
         }
     }
 
