@@ -6,7 +6,7 @@
 
 A playable DOOM engine implemented from documented specs in Cyrius — the sovereign systems language bootstrapped from a 29KB seed. Reads standard DOOM1.WAD shareware files. Full gameplay loop: shoot monsters, collect keys, open doors, die and respawn, transition between all 9 maps of Episode 1.
 
-## Status — v0.24.1
+## Status — v0.24.2
 
 - **20 modules**, ~5,500 lines of Cyrius
 - **196KB** static ELF binary, no external dependencies
