@@ -128,3 +128,71 @@ fn strstr(haystack, needle) {
     }
     return 0 - 1;
 }
+
+# ================================================================
+# ASCII case helpers (v4.8.5-alpha7)
+# ================================================================
+# Case conversion on null-terminated cstrings. ASCII-only by design —
+# matches the existing `lib/string.cyr` convention (strlen, streq,
+# etc. all treat the byte stream as bytes, no UTF-8 awareness).
+# Downstream ports (abaco, vidya) were each carrying the same
+# twelve-line loop; centralising saves the duplication and keeps the
+# single-source-of-truth rule honest.
+#
+# Two variants per direction: copy (returns a new alloc'd cstring)
+# and in-place (mutates the caller's buffer, returns same pointer).
+# Callers that own the buffer should prefer the in-place variants —
+# no alloc, no free, no cost beyond the loop itself.
+
+# Return a lowercase ASCII copy of `s` (null-terminated). Allocates
+# `strlen(s) + 1` bytes. Non-ASCII bytes pass through unchanged.
+fn str_lower_cstr(s) {
+    var n = strlen(s);
+    var dst = alloc(n + 1);
+    var i = 0;
+    while (i < n) {
+        var c = load8(s + i);
+        if (c >= 65) { if (c <= 90) { c = c + 32; } }   # 'A'..'Z' → 'a'..'z'
+        store8(dst + i, c);
+        i = i + 1;
+    }
+    store8(dst + n, 0);
+    return dst;
+}
+
+# Return an uppercase ASCII copy of `s` (null-terminated).
+fn str_upper_cstr(s) {
+    var n = strlen(s);
+    var dst = alloc(n + 1);
+    var i = 0;
+    while (i < n) {
+        var c = load8(s + i);
+        if (c >= 97) { if (c <= 122) { c = c - 32; } }  # 'a'..'z' → 'A'..'Z'
+        store8(dst + i, c);
+        i = i + 1;
+    }
+    store8(dst + n, 0);
+    return dst;
+}
+
+# Lowercase `s` in place. Returns `s`.
+fn str_lower_cstr_inplace(s) {
+    var i = 0;
+    while (load8(s + i) != 0) {
+        var c = load8(s + i);
+        if (c >= 65) { if (c <= 90) { store8(s + i, c + 32); } }
+        i = i + 1;
+    }
+    return s;
+}
+
+# Uppercase `s` in place. Returns `s`.
+fn str_upper_cstr_inplace(s) {
+    var i = 0;
+    while (load8(s + i) != 0) {
+        var c = load8(s + i);
+        if (c >= 97) { if (c <= 122) { store8(s + i, c - 32); } }
+        i = i + 1;
+    }
+    return s;
+}

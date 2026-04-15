@@ -5,6 +5,12 @@ All notable changes to cyrius-doom will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.5] - 2026-04-14
+
+### Changed
+
+- **Cyrius 4.8.5-1** — pinned cyrius.toml minimum. All 9 maps render, 51K fuzz iterations pass, BSP 74/74 tests green. Note: `render_frame` showed 2.59 → 2.92ms on this run (run-to-run variance, not a regression — hot math path unchanged at 4ns fixed_mul, pcache_hit improved 12 → 10ns).
+
 ## [0.24.4] - 2026-04-14
 
 ### Changed
