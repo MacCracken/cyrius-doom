@@ -1,11 +1,21 @@
-# alloc.cyr — heap allocator using brk syscall
+# alloc.cyr — heap allocator with per-OS dispatch.
 # Usage: include "lib/alloc.cyr"
 # Call alloc_init() before any allocations.
 #
 # Bump allocator: fast, no individual free.
 # alloc(size) returns aligned pointer or 0 on failure.
 # alloc_reset() frees everything (batch).
+#
+# v5.5.0 split the implementation: Linux + aarch64 use the brk-
+# based path below; Windows (CYRIUS_TARGET_WIN) delegates to
+# lib/alloc_windows.cyr which uses VirtualAlloc. arena_* helpers
+# are OS-agnostic and shipped inline after the selector.
 
+#ifdef CYRIUS_TARGET_WIN
+include "lib/alloc_windows.cyr"
+#endif
+
+#ifdef CYRIUS_TARGET_LINUX
 var _heap_base = 0;
 var _heap_ptr = 0;
 var _heap_end = 0;
@@ -58,9 +68,10 @@ fn alloc_reset() {
 fn alloc_used() {
     return _heap_ptr - _heap_base;
 }
+#endif
 
 # ================================================================
-# Arena allocator — independent memory pools
+# Arena allocator — independent memory pools (OS-agnostic)
 # ================================================================
 # Unlike alloc_reset() which frees EVERYTHING, arenas are independent.
 # Each arena has its own bump pointer. Freeing one arena doesn't

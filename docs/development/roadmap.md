@@ -1,8 +1,12 @@
 # cyrius-doom Development Roadmap
 
-> **v0.24.1** — 196KB, 20 modules, full gameplay loop, DOOM-accurate lighting,
-> security hardened (CVE audit: 5/5 fixed), Cyrius 4.4.3 + short-circuit cleanup.
-> Clean build, zero warnings, 51K fuzz iterations.
+> **v0.26.1** — 259,920 B (cc5 5.5.2 enum-fold: −7,296 B vs 5.5.0),
+> 20 modules + vendored `lib/bsp.cyr` (bsp 1.1.2), full gameplay loop,
+> DOOM-accurate lighting, 9/9 shareware maps render via bsp library
+> traversal, security hardened (CVE audit: 5/5 fixed), signed-shift
+> correctness audit landed in bsp 1.1.0. CI runs the WAD-free test subset
+> + DCE on release builds. 73/73 cyrius-doom tests, 79/79 bsp tests,
+> 76K fuzz iters total. fmt + lint clean.
 
 ## Completed
 
@@ -35,6 +39,10 @@
 | v0.23.2 | P(-1) hardening: termios iflag bitmask fix, full audit clean |
 | v0.24.0 | Security: CVE audit, map/texture/blockmap bounds validation, WAD read zero-fill |
 | v0.24.1 | Short-circuit cleanup (15+ nested-if → && chains), Cyrius 4.4.3 verified |
+| v0.24.2–0.24.5 | bsp dep tag bump (1.0.0 → 1.0.1), Cyrius 4.6.2 / 4.8.2 / 4.8.5-1 toolchain rollups, switch-jump-table tuning (4-case weapon/ammo conversions) |
+| v0.24.6 | Cyrius 5.5.0 bump, E1M6 map-cap fix (MAP_MAX_SSECTORS 512 → 1024), test suite includes repaired |
+| v0.26.0 | bsp real dep: `cyrius.cyml` migration + `[deps.bsp] @ 1.1.1`, `render_bsp_node` uses bsp primitives, DCE in release CI, test job in CI, `scripts/bench-history.sh` modernized |
+| v0.26.1 | Cyrius 5.5.2 + bsp 1.1.2 (enum-constant fold, −7,296 B / −2.7 %). No source changes. |
 
 ## v0.24.0 — Security Hardening (CVE Audit Fixes)
 
@@ -48,26 +56,42 @@
 
 See: `docs/audit/2026-04-13-security-cve-audit.md`
 
-## v0.26.0 — BSP as a real dep (2026-04-20)
+## v0.27.0 — Performance pass (held against Cyrius O4 regalloc)
 
-Today `src/render.cyr` rolls its own BSP traversal (`render_bsp_node`) and
-`src/map.cyr` rolls its own `map_point_on_side`. bsp 1.1.0 provides the
-same primitives — identical 112-byte node layout, same field offsets —
-but with the signed-shift correctness audit landed in 1.1.0. This version
-turns the "Composes: bsp" line in CLAUDE.md from aspirational into
-mechanical truth. Manifest layout modelled on `libro/cyrius.cyml`
-(`[deps.bsp]` with `git` + `tag` + `modules` → vendored single-file
-bundle in `lib/`).
+Deliberate hold. Cyrius's parallel compiler-optimization track (O1–O6
+in `cyrius/docs/development/roadmap.md` §"v5.4.x Queue") has three
+phases that directly move cyrius-doom's hot paths. Hand-optimizing
+`fx_mul` / `asr` / column loops today would fight the codegen once
+O4's linear-scan register allocator lands and delivers its projected
+2–3× on hot inner loops.
 
 | # | Item | Status | Detail |
 |---|------|--------|--------|
-| 1 | Migrate manifest to `cyrius.cyml` | In progress | Match libro pattern (5.x convention). Retire `cyrius.toml` / `cyrb.toml` if the build tool accepts `.cyml` alone. |
-| 2 | `[deps.bsp]` pinned at `1.1.0` | In progress | `git = "https://github.com/MacCracken/bsp.git"`, `tag = "1.1.0"`, `modules = ["dist/bsp.cyr"]`. |
-| 3 | bsp ships a `dist/bsp.cyr` bundle | In progress | Add `[lib]` to bsp's own manifest listing `src/*.cyr` in include order; concat into `dist/bsp.cyr`. Matches the sigil/patra dist shape libro consumes. |
-| 4 | Vendor `lib/bsp.cyr` in cyrius-doom | In progress | Single-file copy of bsp's dist. Include early in `main.cyr` (before `src/render.cyr`). |
-| 5 | Replace ad-hoc primitives with bsp calls | In progress | `map_point_on_side` → `bsp_point_on_side`; `render_bsp_node` uses `bsp_node_child_r/l`, `bsp_is_subsector`, `bsp_subsector_idx`. Layout is already compatible (112-byte nodes, identical field offsets). |
-| 6 | Delete dead code in `src/map.cyr` | Planned | Drop the duplicated map-side primitives once bsp replaces them. |
-| 7 | Verify all 9 maps + benches unchanged | Planned | `render_frame` should land within ±5% of 0.24.6 (2.73ms). |
+| 1 | Wait for **Cyrius O2** (peephole: strength reduction, flag reuse, LEA combining, aarch64 `madd`/`msub`) | Upstream | Small runtime wins on math-dense loops. Free bump once shipped. |
+| 2 | Wait for **Cyrius O3** (IR-driven DCE + const prop + dead-store elim) | Upstream | Today we NOP 49 KB of dead code (same file size). O3 strips it for real — binary genuinely shrinks. |
+| 3 | Wait for **Cyrius O4** (linear-scan regalloc, Poletto–Sarkar) | Upstream | The single biggest win. `render_frame` projection: 2.5 ms → ≤1 ms. Column renderer, BSP walk, patch cache all benefit. |
+| 4 | Re-bench hot paths on O2/O3/O4-enabled toolchain | Pending | `bench-history.csv` row per upstream phase landing, with A/B before/after numbers to confirm the compiler wins stick. |
+| 5 | Revisit manual patterns only after O4 | Pending | At that point any remaining 5–10 % wins from column-loop restructure are worth chasing; before then, no. |
+
+## v0.26.1 — Cyrius 5.5.2 + bsp 1.1.2 (2026-04-20) — DONE
+
+Pure toolchain bump, no source changes. Picks up the 5.5.2 enum-constant
+`sc_num` fold — every enum variant read now emits `mov rax, imm32` (5 B)
+instead of `mov rcx, gvaddr; mov rax, [rcx]` (~10 B). cyrius-doom is
+enum-dense, so the win compounds: **267,216 → 259,920 B (−7,296 B,
+−2.7 %)**. bsp's standalone binary: −1,448 B (−1.86 %). Bench numbers
+within run-to-run variance of 0.26.0 — this is a codegen-size win, not
+a runtime-hot-path win.
+
+## v0.26.0 — BSP as a real dep (2026-04-20) — DONE
+
+Turned the "Composes: bsp" line from aspirational into mechanical truth.
+Manifest migrated to `cyrius.cyml` with `[deps.bsp] @ 1.1.1`.
+`render.cyr` / `player.cyr` / `sprite.cyr` swap `map_point_on_side` /
+`map_node_child_{r,l}` / `map_is_subsector` / `map_subsector_idx` for
+`bsp_*` equivalents; `map.cyr` sheds the duplicates. Layout-compatible
+(identical 112-byte node block). Release CI runs `CYRIUS_DCE=1`;
+cyrius-doom CI now runs the WAD-free 37-assert test subset.
 
 ## v0.25.0 — DOOM Black Book Audit (2026-04-15) — deferred behind 0.26.0
 

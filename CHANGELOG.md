@@ -5,6 +5,58 @@ All notable changes to cyrius-doom will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.26.1] - 2026-04-20
+
+### Changed
+
+- **Cyrius 5.5.0 → 5.5.2** — picks up the enum-constant `sc_num`
+  fold that shipped in 5.5.1 (PE syscall reroutes) + 5.5.2 (the
+  actual fold). Every enum variant read now emits `mov rax, imm32`
+  (5 B) instead of `mov rcx, gvaddr; mov rax, [rcx]` (~10 B).
+  cyrius-doom is enum-dense (`MapMax`, `MapSize`, `MapLineFlag`,
+  `MapMisc`, `Fixed`, `Angle`, `ViewConst`, `WeaponConst`,
+  `BspFixed`, `BspNode`, `BBox`, `BlockmapConst`, …), so the win
+  compounds across the codebase.
+- **BSP 1.1.1 → 1.1.2** — bsp's own toolchain pin bumped, same
+  enum-fold benefit on its standalone build.
+- **Binary shrink**: 267,216 B (on 5.5.0) → **259,920 B (on 5.5.2)** —
+  **−7,296 B (−2.7 %)** purely from the 5.5.2 enum fold, no code
+  changes in cyrius-doom. bsp standalone: 77,944 → 76,496 B
+  (−1,448 B, −1.86 %).
+- **Benches on 5.5.2**: `fixed_mul` 4 ns, `pcache_get_hit` 9 ns,
+  `atan2` 13 ns, `point_on_side` 29 ns, `render_frame` 2.53 ms —
+  within run-to-run variance of 0.26.0 numbers (the enum fold is
+  a codegen-size win, not a runtime-hot-path win).
+
+### Gates
+
+- 9/9 shareware maps render (via bsp library traversal).
+- 73/73 tests pass; 50K + 1K fuzz iters clean.
+- fmt + lint clean across all 20 cyrius-doom modules and vendored
+  lib/bsp.cyr.
+
+### Tracking the upstream optimizer track
+
+Cyrius's parallel O1–O6 compiler-optimization queue (see
+`cyrius/docs/development/roadmap.md` §"v5.4.x Queue"). The 5.5.2
+fold is a narrow peephole-class win that doesn't touch the hot
+runtime path; the larger wins for cyrius-doom arrive with:
+
+- **Phase O2** (peephole: strength reduction, flag reuse, LEA
+  combining, aarch64 `madd`/`msub`): small runtime wins on hot
+  loops. Incrementally.
+- **Phase O3** (IR-driven DCE + const prop + dead-store elim):
+  **real** DCE replaces today's NOP-sled — binary actually
+  shrinks instead of staying 260 KB with 49 KB of `0x90` filler.
+- **Phase O4** (linear-scan register allocator): the one that
+  matters. 2–3× on hot inner loops per Poletto-Sarkar; will
+  unlock a v0.27.0 "performance pass" release targeting sub-
+  millisecond `render_frame`.
+
+No hand-optimization of `fx_mul` / `asr` / column loops until
+O2–O4 land — the compiler will do it uniformly and avoid
+fighting the codegen.
+
 ## [0.26.0] - 2026-04-20
 
 ### Added — bsp is a real dep

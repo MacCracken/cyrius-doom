@@ -1,5 +1,5 @@
 name = "cyrius-doom"
-version = "0.26.0"
+version = "0.26.1"
 license = "GPL-3.0-only"
 entry = "src/main.cyr"
 output = "doom"
@@ -11,7 +11,7 @@ stdlib = ["string", "alloc", "fmt", "args"]
 
 [deps.bsp]
 git = "https://github.com/MacCracken/bsp"
-tag = "1.1.1"
+tag = "1.1.2"
 modules = ["dist/bsp.cyr"]
 
 [deps.shravan]

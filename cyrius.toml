@@ -1,11 +1,11 @@
 [package]
 name = "cyrius-doom"
-version = "0.26.0"
+version = "0.26.1"
 description = "DOOM in Cyrius — clean-room, direct framebuffer, no libc, just syscalls."
 license = "GPL-3.0-only"
 repository = "https://github.com/MacCracken/cyrius-doom"
 language = "cyrius"
-cyrius = "5.5.0"
+cyrius = "5.5.2"
 
 # NOTE: cyrius.cyml is the canonical manifest as of v0.26.0 (5.x convention).
 # This .toml is kept in sync as a build-tool compatibility shim during the
