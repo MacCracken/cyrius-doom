@@ -112,22 +112,17 @@ fn map_seg_offset(idx) { return load64(map_segs + idx * MAP_SEG_SIZE + 40); }
 fn map_ssector_count(idx) { return load64(map_ssectors + idx * MAP_SSECTOR_SIZE); }
 fn map_ssector_first(idx) { return load64(map_ssectors + idx * MAP_SSECTOR_SIZE + 8); }
 
-fn map_node_x(idx) { return load64(map_nodes + idx * MAP_NODE_SIZE); }
-fn map_node_y(idx) { return load64(map_nodes + idx * MAP_NODE_SIZE + 8); }
-fn map_node_dx(idx) { return load64(map_nodes + idx * MAP_NODE_SIZE + 16); }
-fn map_node_dy(idx) { return load64(map_nodes + idx * MAP_NODE_SIZE + 24); }
-fn map_node_child_r(idx) { return load64(map_nodes + idx * MAP_NODE_SIZE + 96); }
-fn map_node_child_l(idx) { return load64(map_nodes + idx * MAP_NODE_SIZE + 104); }
+# Node accessors migrated to the bsp library in 0.26.0 —
+# `bsp_node_{x,y,dx,dy,child_r,child_l}(map_nodes, idx)` replaces these.
+# MAP_NODE_SIZE is kept for map_alloc() and the loader loop below; the
+# layout matches bsp's BSP_NODE_SIZE (112 bytes, same field offsets).
 
 fn map_thing_x(idx) { return load64(map_things + idx * MAP_THING_SIZE); }
 fn map_thing_y(idx) { return load64(map_things + idx * MAP_THING_SIZE + 8); }
 fn map_thing_angle(idx) { return load64(map_things + idx * MAP_THING_SIZE + 16); }
 fn map_thing_type(idx) { return load64(map_things + idx * MAP_THING_SIZE + 24); }
-fn map_is_subsector(child) {
-    if ((child & NF_SUBSECTOR) != 0) { return 1; }
-    return 0;
-}
-fn map_subsector_idx(child) { return child & 0x7FFF; }
+# Subsector flag helpers migrated to the bsp library in 0.26.0 —
+# use `bsp_is_subsector(child)` / `bsp_subsector_idx(child)` instead.
 
 fn sign_extend_16(val) {
     var lo = val & 0xFFFF;
@@ -409,18 +404,8 @@ fn player_start_x() { return load64(player_start); }
 fn player_start_y() { return load64(player_start + 8); }
 fn player_start_angle() { return load64(player_start + 16); }
 
-fn map_point_on_side(x, y, node_idx) {
-    var nx = map_node_x(node_idx);
-    var ny = map_node_y(node_idx);
-    var ndx = map_node_dx(node_idx);
-    var ndy = map_node_dy(node_idx);
-    var dx = x - nx;
-    var dy = y - ny;
-    var left = asr(dx, 8) * asr(ndy, 8);
-    var right = asr(dy, 8) * asr(ndx, 8);
-    if (left >= right) { return 0; }
-    return 1;
-}
+# Point-on-side migrated to bsp library in 0.26.0 —
+# use `bsp_point_on_side(map_nodes, node_idx, x, y)`.
 
 fn map_print_stats() {
     syscall(1, 1, "map: V=", 7); fmt_int(map_num_vertexes);

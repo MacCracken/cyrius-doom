@@ -279,11 +279,11 @@ fn sprite_render_all() {
         var thing_light = 160;
         if (map_num_nodes > 0) {
             var nw = map_num_nodes - 1;
-            while (map_is_subsector(nw) == 0) {
-                if (map_point_on_side(tx, ty, nw) == 0) { nw = map_node_child_r(nw); }
-                else { nw = map_node_child_l(nw); }
+            while (bsp_is_subsector(nw) == 0) {
+                if (bsp_point_on_side(map_nodes, nw, tx, ty) == 0) { nw = bsp_node_child_r(map_nodes, nw); }
+                else { nw = bsp_node_child_l(map_nodes, nw); }
             }
-            var ssi = map_subsector_idx(nw);
+            var ssi = bsp_subsector_idx(nw);
             if (ssi < map_num_ssectors) {
                 var s0 = map_ssector_first(ssi);
                 if (s0 < map_num_segs) {

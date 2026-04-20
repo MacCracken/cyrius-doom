@@ -48,7 +48,28 @@
 
 See: `docs/audit/2026-04-13-security-cve-audit.md`
 
-## v0.25.0 — DOOM Black Book Audit (2026-04-15)
+## v0.26.0 — BSP as a real dep (2026-04-20)
+
+Today `src/render.cyr` rolls its own BSP traversal (`render_bsp_node`) and
+`src/map.cyr` rolls its own `map_point_on_side`. bsp 1.1.0 provides the
+same primitives — identical 112-byte node layout, same field offsets —
+but with the signed-shift correctness audit landed in 1.1.0. This version
+turns the "Composes: bsp" line in CLAUDE.md from aspirational into
+mechanical truth. Manifest layout modelled on `libro/cyrius.cyml`
+(`[deps.bsp]` with `git` + `tag` + `modules` → vendored single-file
+bundle in `lib/`).
+
+| # | Item | Status | Detail |
+|---|------|--------|--------|
+| 1 | Migrate manifest to `cyrius.cyml` | In progress | Match libro pattern (5.x convention). Retire `cyrius.toml` / `cyrb.toml` if the build tool accepts `.cyml` alone. |
+| 2 | `[deps.bsp]` pinned at `1.1.0` | In progress | `git = "https://github.com/MacCracken/bsp.git"`, `tag = "1.1.0"`, `modules = ["dist/bsp.cyr"]`. |
+| 3 | bsp ships a `dist/bsp.cyr` bundle | In progress | Add `[lib]` to bsp's own manifest listing `src/*.cyr` in include order; concat into `dist/bsp.cyr`. Matches the sigil/patra dist shape libro consumes. |
+| 4 | Vendor `lib/bsp.cyr` in cyrius-doom | In progress | Single-file copy of bsp's dist. Include early in `main.cyr` (before `src/render.cyr`). |
+| 5 | Replace ad-hoc primitives with bsp calls | In progress | `map_point_on_side` → `bsp_point_on_side`; `render_bsp_node` uses `bsp_node_child_r/l`, `bsp_is_subsector`, `bsp_subsector_idx`. Layout is already compatible (112-byte nodes, identical field offsets). |
+| 6 | Delete dead code in `src/map.cyr` | Planned | Drop the duplicated map-side primitives once bsp replaces them. |
+| 7 | Verify all 9 maps + benches unchanged | Planned | `render_frame` should land within ±5% of 0.24.6 (2.73ms). |
+
+## v0.25.0 — DOOM Black Book Audit (2026-04-15) — deferred behind 0.26.0
 
 | # | Item | Status | Detail |
 |---|------|--------|--------|

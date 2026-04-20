@@ -48,6 +48,38 @@ jobs:
           path: build/doom
           retention-days: 5
 
+  test:
+    name: Test (WAD-free subset — 37 asserts)
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Cyrius toolchain
+        run: |
+          CYRIUS_VERSION="${CYRIUS_VERSION:-$(cat .cyrius-toolchain | tr -d '[:space:]')}"
+          echo "Installing Cyrius $CYRIUS_VERSION"
+          curl -sLO "https://github.com/MacCracken/cyrius/releases/download/$CYRIUS_VERSION/cyrius-$CYRIUS_VERSION-x86_64-linux.tar.gz"
+          tar xzf "cyrius-$CYRIUS_VERSION-x86_64-linux.tar.gz"
+          CYRIUS_DIR="cyrius-$CYRIUS_VERSION-x86_64-linux"
+          mkdir -p "$HOME/.cyrius/bin" "$HOME/.cyrius/lib"
+          cp "$CYRIUS_DIR/bin/"* "$HOME/.cyrius/bin/" 2>/dev/null || true
+          cp -r "$CYRIUS_DIR/lib/"* "$HOME/.cyrius/lib/" 2>/dev/null || true
+          chmod +x "$HOME/.cyrius/bin/"* 2>/dev/null || true
+          echo "$HOME/.cyrius/bin" >> $GITHUB_PATH
+          echo "CYRIUS_HOME=$HOME/.cyrius" >> $GITHUB_ENV
+
+      - name: Resolve dependencies
+        run: cyrius deps
+
+      - name: Run tests (WAD-free assertions)
+        run: |
+          # WAD is not checked into the repo, so this runs the 37-assertion
+          # subset that doesn't need DOOM1.WAD (asr, fixed-point, trig, angles).
+          # The full 73-assertion suite requires passing a WAD path.
+          cyrius test tests/doom.tcyr 2>&1 | tee /tmp/test_output
+          tail -1 /tmp/test_output | grep "0 failed"
+
   docs:
     name: Documentation
     runs-on: ubuntu-latest

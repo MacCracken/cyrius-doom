@@ -19,12 +19,9 @@ enum Angle {
     ANG_MASK = 1023;
 }
 
-# Arithmetic right shift (sign-preserving)
-fn asr(val, bits) {
-    if (val >= 0) { return val >> bits; }
-    var pos = -val;
-    return -(pos >> bits);
-}
+# Arithmetic right shift: provided by the bsp vendor bundle (lib/bsp.cyr,
+# included before this file). Sharing the definition keeps the two copies
+# from drifting and avoids the duplicate-symbol error on 0.26.0+.
 
 fn fixed_from_int(n) { return n << 16; }
 fn fixed_to_int(f) { return asr(f, 16); }

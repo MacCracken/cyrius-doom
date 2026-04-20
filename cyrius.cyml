@@ -1,0 +1,32 @@
+[package]
+name = "cyrius-doom"
+version = "0.26.0"
+description = "DOOM in Cyrius — clean-room, direct framebuffer, no libc, just syscalls."
+license = "GPL-3.0-only"
+repository = "https://github.com/MacCracken/cyrius-doom"
+language = "cyrius"
+cyrius = "5.5.0"
+
+[build]
+src = "src/main.cyr"
+output = "build/doom"
+
+# ── Dependencies ─────────────────────────────────────────────────
+# Order matters — Cyrius is single-pass, deps are prepended as includes.
+# string/alloc must come before anything that uses strlen/alloc/memcpy.
+# io before audio (audio uses syscall wrappers). sakshi standalone.
+[deps]
+stdlib = ["string", "alloc", "fmt", "vec", "str", "io", "args", "syscalls", "sakshi", "audio"]
+
+# bsp — spatial geometry primitives. Consumed as a single-file vendor
+# (`lib/bsp.cyr`) produced from bsp's `dist/bsp.cyr` bundle. 1.1.1 added
+# the [lib] section + dist target; 1.1.0 landed the signed-shift
+# correctness audit that made the library safe for non-DOOM coord ranges.
+#
+# Shape mirrors `libro/cyrius.cyml`'s `[deps.sigil]` / `[deps.patra]`:
+# `modules` is the path within the upstream repo, `cyrius deps` resyncs
+# `lib/bsp.cyr` to the tag below.
+[deps.bsp]
+git = "https://github.com/MacCracken/bsp.git"
+tag = "1.1.1"
+modules = ["dist/bsp.cyr"]

@@ -2,6 +2,10 @@
 /build/
 /target/
 
+# External deps resolved by `cyrius build` from cyrius.cyml [deps.*]
+# (symlinks into ~/.cyrius/deps/). Run `cyrius deps` to repopulate.
+/lib/bsp.cyr
+
 # WAD files (user provides their own)
 *.wad
 *.WAD

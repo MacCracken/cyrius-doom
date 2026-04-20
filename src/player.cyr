@@ -92,18 +92,18 @@ fn player_find_sector() {
 
     var node_idx = map_num_nodes - 1;
 
-    # Walk BSP to leaf
-    while (map_is_subsector(node_idx) == 0) {
-        var side = map_point_on_side(player_x, player_y, node_idx);
+    # Walk BSP to leaf (via the bsp library — same 112-byte layout).
+    while (bsp_is_subsector(node_idx) == 0) {
+        var side = bsp_point_on_side(map_nodes, node_idx, player_x, player_y);
         if (side == 0) {
-            node_idx = map_node_child_r(node_idx);
+            node_idx = bsp_node_child_r(map_nodes, node_idx);
         } else {
-            node_idx = map_node_child_l(node_idx);
+            node_idx = bsp_node_child_l(map_nodes, node_idx);
         }
     }
 
     # Got a subsector -- find sector from first seg
-    var ss_idx = map_subsector_idx(node_idx);
+    var ss_idx = bsp_subsector_idx(node_idx);
     var first_seg = map_ssector_first(ss_idx);
     var line_idx = map_seg_linedef(first_seg);
     var seg_side = map_seg_side(first_seg);

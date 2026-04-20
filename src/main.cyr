@@ -2,8 +2,14 @@
 # Build: cyrius build src/main.cyr build/doom
 # Run:   ./build/doom <wadfile> [mapname] [--ppm]
 
-# stdlib deps resolved via cyrius.toml [deps] — auto-included by build tool
+# stdlib deps resolved via cyrius.cyml [deps] — auto-included by build tool
 
+# bsp library (vendored from https://github.com/MacCracken/bsp @ 1.1.1).
+# Included first: bsp provides `asr` (shared with src/fixed.cyr), plus the
+# `bsp_*` traversal primitives used by render/player/sprite. See
+# cyrius.cyml [deps.bsp]; the build tool resolves this to
+# ~/.cyrius/deps/bsp/1.1.1/dist/bsp.cyr via a symlink.
+include "lib/bsp.cyr"
 include "src/fixed.cyr"
 include "src/tables.cyr"
 include "src/wad.cyr"
@@ -54,7 +60,7 @@ fn load_map() {
 fn doom_main() {
     alloc_init();
     args_init();
-    sakshi_info("cyrius-doom v0.24.6", 19);
+    sakshi_info("cyrius-doom v0.26.0", 19);
 
     if (argc() < 2) {
         sakshi_error("usage: doom <wad> [map] [--ppm]", 31);

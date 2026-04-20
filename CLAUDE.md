@@ -9,7 +9,7 @@
 - **Language**: Cyrius (native, compiled via cc5 5.5.0)
 - **Version**: SemVer, version file at `VERSION`
 - **Binary size**: 194KB (20 modules), renders at 3.9ms/frame
-- **Status**: v0.24.6 — BSP 1.0.1. Cyrius 5.5.0. E1M6 map-cap fix (MAP_MAX_SSECTORS 512→1024). Security hardened + short-circuit cleanup + switch jump tables. Full gameplay loop: shooting, ammo, death/respawn, key cards, armor absorption. DOOM-accurate lighting, masked midtextures, animated walls/flats/sprites, WAD-native HUD + menus + intermission, ALSA audio, weapon switching + bob, doors/lifts, automap, level transitions (E1M1-E1M9 all rendering). CVE audit: 5 findings fixed. **Next: v0.25.0 DOOM Black Book Audit — book in hand, ready for chapter-by-chapter verification.**
+- **Status**: v0.26.0 — bsp is a real dep (vendored as `lib/bsp.cyr` from `dist/bsp.cyr` @ bsp 1.1.1). Manifest migrated to `cyrius.cyml`. `render.cyr` / `player.cyr` / `sprite.cyr` now call `bsp_is_subsector` / `bsp_point_on_side` / `bsp_node_child_{r,l}`; the rolled-own primitives in `map.cyr` are deleted. `render_frame` improved 2.73ms → 2.50ms on Cyrius 5.5.0. E1M6 map-cap fix (MAP_MAX_SSECTORS 512→1024 from 0.24.6). Security hardened + short-circuit cleanup + switch jump tables. Full gameplay loop: shooting, ammo, death/respawn, key cards, armor absorption. DOOM-accurate lighting, masked midtextures, animated walls/flats/sprites, WAD-native HUD + menus + intermission, ALSA audio, weapon switching + bob, doors/lifts, automap, level transitions (E1M1-E1M9 all rendering). CVE audit: 5 findings fixed. **Next: v0.25.0 DOOM Black Book Audit — deferred behind 0.26.0; book in hand for chapter-by-chapter verification.**
 - **Genesis repo**: [agnosticos](https://github.com/MacCracken/agnosticos)
 - **Philosophy**: [AGNOS Philosophy](https://github.com/MacCracken/agnosticos/blob/main/docs/philosophy.md)
 - **Standards**: [First-Party Standards](https://github.com/MacCracken/agnosticos/blob/main/docs/development/applications/first-party-standards.md)
@@ -18,7 +18,7 @@
 
 AGNOS kernel (initrd demo), kiran (game engine reference), vidya (field notes / language research)
 
-**Composes**: bsp (spatial geometry, git dep tag 1.0.1), sakshi (tracing 0.9.0)
+**Composes**: bsp (spatial geometry, git dep tag 1.1.1, vendored as `lib/bsp.cyr`), sakshi (tracing 0.9.0)
 
 ## References
 
@@ -119,6 +119,10 @@ src/
 ```sh
 # Build (requires Cyrius 5.5.0+)
 cyrius build src/main.cyr build/doom
+
+# Release build: NOPs dead functions in-place (binary size unchanged,
+# but ~49KB of unreachable code becomes inert — used by release.yml).
+CYRIUS_DCE=1 cyrius build src/main.cyr build/doom
 
 # Run (requires DOOM1.WAD)
 ./build/doom wad/DOOM1.WAD              # interactive (needs /dev/fb0 or GTK viewer)

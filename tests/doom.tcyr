@@ -11,6 +11,7 @@ include "lib/args.cyr"
 include "lib/assert.cyr"
 include "lib/sakshi.cyr"
 
+include "lib/bsp.cyr"
 include "src/fixed.cyr"
 include "src/tables.cyr"
 include "src/wad.cyr"

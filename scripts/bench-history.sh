@@ -13,9 +13,11 @@ if [ ! -f "$WAD" ]; then
     exit 1
 fi
 
-# Build benchmark
-cat benches/doom.bcyr | cc3 > "$BUILD" 2>/dev/null
-chmod +x "$BUILD"
+# Build benchmark via the modern Cyrius 5.x build tool. Pre-5.0 this
+# was `cat ... | cc3 > "$BUILD"`; cc3 was renamed to cc5 and `cyrius
+# build` is the documented entry point.
+mkdir -p "$(dirname "$BUILD")"
+cyrius build benches/doom.bcyr "$BUILD" > /dev/null
 
 # Run and capture output
 OUTPUT=$("$BUILD" "$WAD" 2>&1)

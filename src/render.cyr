@@ -331,8 +331,8 @@ var masked_segs = 0;
 var masked_count = 0;
 
 fn render_store_masked(sx1, sx2, mid_tex, lightnum_val, ty1_val, ty2_val,
-    seg_len_val, seg_offset_val, sd_xoff_val, sd_yoff_val,
-    floor_h_val, ceil_h_val, back_floor_h_val, back_ceil_h_val, dpb) {
+seg_len_val, seg_offset_val, sd_xoff_val, sd_yoff_val,
+floor_h_val, ceil_h_val, back_floor_h_val, back_ceil_h_val, dpb) {
     if (masked_segs == 0) { masked_segs = alloc(MASKED_MAX * MASKED_ENTRY_SIZE); }
     if (masked_count >= MASKED_MAX) { return 0; }
     var base = masked_segs + masked_count * MASKED_ENTRY_SIZE;
@@ -614,7 +614,7 @@ fn render_seg(seg_idx) {
     var is_sky = 0;
     var sky_name = map_sector_ceil_tex(sector_idx);
     if (load8(sky_name) == 70 && load8(sky_name + 1) == 95 &&
-        load8(sky_name + 2) == 83 && load8(sky_name + 3) == 75) {
+    load8(sky_name + 2) == 83 && load8(sky_name + 3) == 75) {
         is_sky = 1;
     }
 
@@ -648,8 +648,8 @@ fn render_seg(seg_idx) {
     if (is_twosided != 0) {
         if (mid_tex >= 0) {
             render_store_masked(sx1, sx2, mid_tex, lightnum, ty1, ty2,
-                seg_len, seg_offset, sd_xoff, sd_yoff,
-                floor_h, ceil_h, back_floor_h, back_ceil_h, dont_peg_bottom);
+            seg_len, seg_offset, sd_xoff, sd_yoff,
+            floor_h, ceil_h, back_floor_h, back_ceil_h, dont_peg_bottom);
         }
     }
 
@@ -838,26 +838,27 @@ fn render_bsp_node(node_idx) {
     # Early out: all columns occluded
     if (clip_count >= SCREEN_WIDTH) { return 0; }
 
-    # Is this a subsector (leaf)?
-    if (map_is_subsector(node_idx) == 1) {
-        render_subsector(map_subsector_idx(node_idx));
+    # Is this a subsector (leaf)? — bsp lib provides the flag test.
+    if (bsp_is_subsector(node_idx) == 1) {
+        render_subsector(bsp_subsector_idx(node_idx));
         return 0;
     }
 
-    # Determine which side of the partition line the player is on
-    var side = map_point_on_side(view_x, view_y, node_idx);
+    # Which side of the partition line is the player on?
+    # bsp's node layout is identical to cyrius-doom's (112-byte nodes,
+    # same field offsets), so `map_nodes` is a valid `nodes` pointer.
+    var side = bsp_point_on_side(map_nodes, node_idx, view_x, view_y);
 
     # Render front side first (the side the player is on)
     if (side == 0) {
-        render_bsp_node(map_node_child_r(node_idx));
-        # Then back side (if not fully occluded)
+        render_bsp_node(bsp_node_child_r(map_nodes, node_idx));
         if (clip_count < SCREEN_WIDTH) {
-            render_bsp_node(map_node_child_l(node_idx));
+            render_bsp_node(bsp_node_child_l(map_nodes, node_idx));
         }
     } else {
-        render_bsp_node(map_node_child_l(node_idx));
+        render_bsp_node(bsp_node_child_l(map_nodes, node_idx));
         if (clip_count < SCREEN_WIDTH) {
-            render_bsp_node(map_node_child_r(node_idx));
+            render_bsp_node(bsp_node_child_r(map_nodes, node_idx));
         }
     }
 
@@ -987,9 +988,9 @@ fn render_masked_segs() {
             var eye_h = (mfloor << 16) + VIEW_HEIGHT;
 
             var open_top = HALF_HEIGHT - fixed_to_int(
-                fixed_div(fixed_mul((open_ceil << 16) - eye_h, PROJ_DIST), depth));
+            fixed_div(fixed_mul((open_ceil << 16) - eye_h, PROJ_DIST), depth));
             var open_bot = HALF_HEIGHT - fixed_to_int(
-                fixed_div(fixed_mul((open_floor << 16) - eye_h, PROJ_DIST), depth));
+            fixed_div(fixed_mul((open_floor << 16) - eye_h, PROJ_DIST), depth));
 
             if (open_top >= open_bot) { continue; }
             var wh = open_bot - open_top;

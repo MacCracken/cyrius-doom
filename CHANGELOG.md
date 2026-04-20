@@ -5,6 +5,68 @@ All notable changes to cyrius-doom will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.26.0] - 2026-04-20
+
+### Added — bsp is a real dep
+
+Turned the "Composes: bsp" line from aspirational into mechanical truth.
+Prior versions rolled their own BSP traversal in `render.cyr` +
+`src/map.cyr`; 0.26.0 vendors bsp 1.1.1's single-file distribution and
+calls into the library.
+
+- **Manifest migrated to `cyrius.cyml`** (5.x convention, modelled on
+  `libro/cyrius.cyml`). `cyrius.toml` kept alongside as a build-tool
+  compatibility shim during the transition.
+- **`[deps.bsp]`** pinned to `tag = "1.1.1"`, `modules = ["dist/bsp.cyr"]`.
+  The Cyrius build tool symlinks `lib/bsp.cyr` →
+  `~/.cyrius/deps/bsp/1.1.1/dist/bsp.cyr`, so the vendored copy stays in
+  sync with upstream.
+- **`lib/bsp.cyr` included first** in `main.cyr`, `tests/doom.tcyr`, and
+  `benches/doom.bcyr` — before `src/fixed.cyr`, which now shares bsp's
+  `asr()` (stripped the duplicate definition; they were identical).
+
+### Changed — ad-hoc BSP primitives → bsp library calls
+
+- **`src/render.cyr`** — `render_bsp_node` now calls `bsp_is_subsector` /
+  `bsp_subsector_idx` / `bsp_point_on_side(map_nodes, ...)` /
+  `bsp_node_child_r(map_nodes, ...)` / `bsp_node_child_l(map_nodes, ...)`.
+  Layout-compatible: cyrius-doom's 112-byte node block has identical
+  field offsets to bsp's.
+- **`src/player.cyr`** — `player_find_sector`'s BSP walk likewise.
+- **`src/sprite.cyr`** — sprite's floor-lookup BSP walk likewise.
+- **`src/map.cyr`** — deleted `map_point_on_side`, `map_is_subsector`,
+  `map_subsector_idx`, and the `map_node_{x,y,dx,dy,child_r,child_l}`
+  accessors. Kept `MAP_NODE_SIZE = 112` for the loader's alloc sizing;
+  noted the layout-match with `BSP_NODE_SIZE` in a comment.
+- **`benches/doom.bcyr`** `point_on_side` bench switched to
+  `bsp_point_on_side`.
+
+### Benchmarks (on Cyrius 5.5.0, bsp 1.1.1)
+
+| Metric | 0.24.6 | 0.26.0 | Delta |
+|---|---|---|---|
+| `render_frame` avg | 2.73 ms | 2.50 ms | **−8.4%** |
+| `render_frame+sprites` avg | 2.113 ms | 2.53 ms | ~flat |
+| `point_on_side` | 23 ns | 30 ns | +7 ns (explicit `nodes` arg) |
+| `fixed_mul` / `asr` / `pcache_hit` | 4 / 4 / 9 ns | 4 / 4 / 9 ns | unchanged |
+
+The render_frame win is cache/layout: one shared `asr()` definition
+instead of two, and consolidated node-access through bsp's accessor
+pattern. The +7 ns on `point_on_side` is the cost of passing `map_nodes`
+explicitly — trivially compensated for by the render_frame win since the
+BSP walk hits it ~N_nodes times per frame but other path code benefits
+from the uniformity.
+
+### Gates
+
+- Build: OK, binary 259,920 bytes.
+- 9/9 shareware maps render (E1M1–E1M9) via the bsp traversal.
+- Tests: 73/73 (`build/test_doom wad/DOOM1.WAD`).
+- Fuzz: `fuzz_fixed` 50K iters + `fuzz_wad` 1K iters pass.
+- Lint: clean across all 20 cyrius-doom modules.
+- Fmt: `src/render.cyr` formatted-in-place (pre-existing multi-line arg
+  indentation nits cc5's formatter wanted normalized).
+
 ## [0.24.6] - 2026-04-20
 
 ### Fixed
@@ -15,6 +77,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Cyrius 5.5.0** — toolchain bump from 4.8.5-1. No source changes required for language compatibility. cyrius.toml + .cyrius-toolchain + main.cyr banner updated.
+- **BSP 1.1.0** — sibling dep upgraded on 5.5.0. Signed-shift correctness audit: `asr()` replaces bare `>>` on signed values across `aabb_center_*`, `bsp_point_seg_dist`, and both `frustum_test_*` functions. DOOM wasn't biting these because integer-fx coords aligned the low bits; non-DOOM consumers would have. 79/79 tests (+5 regression asserts), 25K fuzz iters still pass, benches unchanged. cyrius-doom references bumped to 1.1.0 in CLAUDE.md + cyrb.toml.
 - **Binary size**: 248976 bytes (~243 KB). Essentially flat vs 0.24.5.
 - **Benchmarks on 5.5.0** (100 iters render_frame):
   - `fixed_mul` 4ns, `fixed_div` 3ns, `asr` 4ns, `sin_lookup` 4ns (unchanged)

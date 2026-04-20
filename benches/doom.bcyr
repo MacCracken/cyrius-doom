@@ -12,6 +12,7 @@ include "lib/fnptr.cyr"
 include "lib/bench.cyr"
 include "lib/sakshi.cyr"
 
+include "lib/bsp.cyr"
 include "src/fixed.cyr"
 include "src/tables.cyr"
 include "src/wad.cyr"
@@ -162,7 +163,7 @@ fn main() {
     for (var r = 0; r < ROUNDS; r = r + 1) {
         bench_batch_start(b11);
         for (var i = 0; i < BATCH; i = i + 1) {
-            map_point_on_side(player_start_x(), player_start_y(), 0);
+            bsp_point_on_side(map_nodes, 0, player_start_x(), player_start_y());
         }
         bench_batch_stop(b11, BATCH);
     }
