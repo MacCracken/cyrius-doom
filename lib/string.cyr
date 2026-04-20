@@ -2,10 +2,29 @@
 # Usage: include "lib/string.cyr"
 # All functions take raw pointers (addresses from &var or &buf).
 
-# Length of null-terminated string
+# Length of null-terminated string (word-at-a-time, portable)
 fn strlen(s) {
+    # Byte-at-a-time until 8-byte aligned
     var n: i64 = 0;
-    while (load8(s + n) != 0) { n = n + 1; }
+    while ((s + n) & 7 != 0) {
+        if (load8(s + n) == 0) { return n; }
+        n = n + 1;
+    }
+    # Word-at-a-time: read 8 bytes, detect any zero byte via
+    # (v - 0x0101..01) & ~v & 0x8080..80
+    var lo = 0x0101010101010101;
+    var hi = 0x8080808080808080;
+    var done = 0;
+    while (done == 0) {
+        var v = load64(s + n);
+        if ((v - lo) & (v ^ 0xFFFFFFFFFFFFFFFF) & hi != 0) {
+            # Zero byte found in this word — find which one
+            for (var i = 0; i < 8; i = i + 1) {
+                if (load8(s + n + i) == 0) { return n + i; }
+            }
+        }
+        n = n + 8;
+    }
     return n;
 }
 
@@ -25,30 +44,30 @@ fn memeq(a, b, n) {
     return 1;
 }
 
-# Copy n bytes from src to dst (rep movsb — hardware-optimized on modern x86)
+# Copy n bytes from src to dst.
+#
+# Historically this used a 15-byte x86 `cld; mov rdi/rsi/rcx; rep movsb`
+# inline asm block — fine on x86, but emitted identically by the
+# aarch64 backend, which then lost 4-byte instruction alignment for
+# every call site downstream. Any aarch64 program `include`ing this
+# file would misalign and SIGILL. Pure-Cyrius loop works on both
+# arches; rep-movsb was a micro-optimisation, not load-bearing.
 fn memcpy(dst, src, n) {
-    if (n == 0) { return dst; }
-    # rdi=dst, rsi=src, rcx=n → cld; rep movsb
-    asm {
-        0xFC;                       # cld (clear direction flag — CVE-08)
-        0x48; 0x8B; 0x7D; 0xF8;    # mov rdi, [rbp-8]  (dst)
-        0x48; 0x8B; 0x75; 0xF0;    # mov rsi, [rbp-16] (src)
-        0x48; 0x8B; 0x4D; 0xE8;    # mov rcx, [rbp-24] (n)
-        0xF3; 0xA4;                 # rep movsb
+    var i = 0;
+    while (i < n) {
+        store8(dst + i, load8(src + i));
+        i = i + 1;
     }
     return dst;
 }
 
-# Fill n bytes at dst with val (rep stosb — hardware-optimized on modern x86)
+# Fill n bytes at dst with val.
+# See memcpy for why the x86 `rep stosb` asm is gone.
 fn memset(dst, val, n) {
-    if (n == 0) { return dst; }
-    # rdi=dst, al=val, rcx=n → cld; rep stosb
-    asm {
-        0xFC;                       # cld (clear direction flag — CVE-08)
-        0x48; 0x8B; 0x7D; 0xF8;    # mov rdi, [rbp-8]  (dst)
-        0x48; 0x8B; 0x45; 0xF0;    # mov rax, [rbp-16] (val)
-        0x48; 0x8B; 0x4D; 0xE8;    # mov rcx, [rbp-24] (n)
-        0xF3; 0xAA;                 # rep stosb
+    var i = 0;
+    while (i < n) {
+        store8(dst + i, val);
+        i = i + 1;
     }
     return dst;
 }
@@ -130,7 +149,7 @@ fn strstr(haystack, needle) {
 }
 
 # ================================================================
-# ASCII case helpers (v4.8.5-alpha7)
+# ASCII case helpers
 # ================================================================
 # Case conversion on null-terminated cstrings. ASCII-only by design —
 # matches the existing `lib/string.cyr` convention (strlen, streq,

@@ -18,6 +18,9 @@ include "src/framebuf.cyr"
 include "src/map.cyr"
 include "src/texture.cyr"
 include "src/render.cyr"
+include "src/input.cyr"
+include "src/player.cyr"
+include "src/things.cyr"
 include "src/sprite.cyr"
 
 fn main() {

@@ -5,6 +5,23 @@ All notable changes to cyrius-doom will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.6] - 2026-04-20
+
+### Fixed
+
+- **E1M6 map load** — `MAP_MAX_SSECTORS` raised 512 → 1024. E1M6 ("Central Processing") has 606 subsectors; prior cap truncated loading and left node child indices dangling, so `map_validate()` correctly rejected the map. Latent since the v0.24.0 validator shipped — the "all 9 maps render" claim in 0.24.x was inaccurate (test suite only exercised E1M1). All 9 shareware maps now render.
+- **tests/doom.tcyr missing includes** — `input.cyr`, `player.cyr`, and `things.cyr` added. Cyrius 5.5.0 hardens undefined-variable references into compile errors (previously soft-warn), so the incomplete include chain now fails loudly at `cyrius test`. `./build/test_doom wad/DOOM1.WAD` → 73/73 pass.
+
+### Changed
+
+- **Cyrius 5.5.0** — toolchain bump from 4.8.5-1. No source changes required for language compatibility. cyrius.toml + .cyrius-toolchain + main.cyr banner updated.
+- **Binary size**: 248976 bytes (~243 KB). Essentially flat vs 0.24.5.
+- **Benchmarks on 5.5.0** (100 iters render_frame):
+  - `fixed_mul` 4ns, `fixed_div` 3ns, `asr` 4ns, `sin_lookup` 4ns (unchanged)
+  - `atan2` 13ns, `pcache_get_hit` 9ns (was 10ns), `colormap_shade` 4ns
+  - `render_frame` avg 2.73ms, `render_frame+sprites` avg 2.113ms (well under 22ms budget)
+- **Fuzz**: `fuzz_fixed` 50000 iterations OK, `fuzz_wad` 1000 iterations OK.
+
 ## [0.24.5] - 2026-04-14
 
 ### Changed

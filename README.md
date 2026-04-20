@@ -6,14 +6,14 @@
 
 A playable DOOM engine implemented from documented specs in Cyrius — the sovereign systems language bootstrapped from a 29KB seed. Reads standard DOOM1.WAD shareware files. Full gameplay loop: shoot monsters, collect keys, open doors, die and respawn, transition between all 9 maps of Episode 1.
 
-## Status — v0.24.4
+## Status — v0.24.6
 
 - **20 modules**, ~5,500 lines of Cyrius
-- **196KB** static ELF binary, no external dependencies
-- **All 9 shareware maps** (E1M1–E1M9) load and render
-- **2.59ms per frame** (91% headroom on 35Hz tick budget)
+- **243KB** static ELF binary, no external dependencies
+- **All 9 shareware maps** (E1M1–E1M9) load and render (E1M6 subsector cap bumped in 0.24.6)
+- **2.73ms per frame** (88% headroom on 35Hz tick budget)
 - **Security hardened** — CVE audit with 5 findings, all fixed
-- Built on **Cyrius 4.8.2** (cc3 compiler)
+- Built on **Cyrius 5.5.0** (cc5 compiler)
 
 ### Features
 
@@ -36,7 +36,7 @@ A playable DOOM engine implemented from documented specs in Cyrius — the sover
 # Download shareware WAD
 sh scripts/get-wad.sh wad
 
-# Build (requires Cyrius 4.0.0+)
+# Build (requires Cyrius 5.5.0+)
 cyrius build src/main.cyr build/doom
 
 # Run (interactive — needs /dev/fb0 or use GTK viewer)

@@ -6,10 +6,10 @@
 
 - **Type**: Standalone game binary / kernel demo
 - **License**: GPL-3.0-only (clean-room implementation)
-- **Language**: Cyrius (native, compiled via cc3 4.0.0)
+- **Language**: Cyrius (native, compiled via cc5 5.5.0)
 - **Version**: SemVer, version file at `VERSION`
 - **Binary size**: 194KB (20 modules), renders at 3.9ms/frame
-- **Status**: v0.24.5 — BSP 1.0.1. Security hardened + short-circuit cleanup + switch jump tables. Full gameplay loop: shooting, ammo, death/respawn, key cards, armor absorption. DOOM-accurate lighting, masked midtextures, animated walls/flats/sprites, WAD-native HUD + menus + intermission, ALSA audio, weapon switching + bob, doors/lifts, automap, level transitions (E1M1-E1M9). CVE audit: 5 findings fixed. Cyrius 4.8.5-1. **Next: v0.25.0 DOOM Black Book Audit — book in hand, ready for chapter-by-chapter verification.**
+- **Status**: v0.24.6 — BSP 1.0.1. Cyrius 5.5.0. E1M6 map-cap fix (MAP_MAX_SSECTORS 512→1024). Security hardened + short-circuit cleanup + switch jump tables. Full gameplay loop: shooting, ammo, death/respawn, key cards, armor absorption. DOOM-accurate lighting, masked midtextures, animated walls/flats/sprites, WAD-native HUD + menus + intermission, ALSA audio, weapon switching + bob, doors/lifts, automap, level transitions (E1M1-E1M9 all rendering). CVE audit: 5 findings fixed. **Next: v0.25.0 DOOM Black Book Audit — book in hand, ready for chapter-by-chapter verification.**
 - **Genesis repo**: [agnosticos](https://github.com/MacCracken/agnosticos)
 - **Philosophy**: [AGNOS Philosophy](https://github.com/MacCracken/agnosticos/blob/main/docs/philosophy.md)
 - **Standards**: [First-Party Standards](https://github.com/MacCracken/agnosticos/blob/main/docs/development/applications/first-party-standards.md)
@@ -117,7 +117,7 @@ src/
 ## Build & Test Commands
 
 ```sh
-# Build (requires Cyrius 4.0.0+)
+# Build (requires Cyrius 5.5.0+)
 cyrius build src/main.cyr build/doom
 
 # Run (requires DOOM1.WAD)
