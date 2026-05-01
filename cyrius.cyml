@@ -5,7 +5,7 @@ description = "DOOM in Cyrius — clean-room, direct framebuffer, no libc, just 
 license = "GPL-3.0-only"
 repository = "https://github.com/MacCracken/cyrius-doom"
 language = "cyrius"
-cyrius = "5.5.2"
+cyrius = "5.7.48"
 
 [build]
 src = "src/main.cyr"
@@ -16,7 +16,20 @@ output = "build/doom"
 # string/alloc must come before anything that uses strlen/alloc/memcpy.
 # io before audio (audio uses syscall wrappers). sakshi standalone.
 [deps]
-stdlib = ["string", "alloc", "fmt", "vec", "str", "io", "args", "syscalls", "sakshi", "audio"]
+# `audio` retired from stdlib here — vani 0.3.0 owns that surface
+# and ships byte-stable `audio_*` so src/audio.cyr keeps working
+# with zero code changes. cyrius/lib/audio.cyr retires in cyrius
+# 5.8.0. Added: fs, hashmap, tagged, fnptr, freelist, process,
+# patra — vani's dist transitively references these.
+stdlib = ["string", "alloc", "fmt", "vec", "str", "io", "fs", "args", "syscalls", "hashmap", "tagged", "fnptr", "freelist", "process", "patra", "sakshi"]
+
+# vani — audio device I/O. Provides `audio_*` (lifted from cyrius
+# stdlib) plus the higher-level `vani_*` API. Same `[deps.X]` shape
+# as bsp below — git tag + dist single-file module.
+[deps.vani]
+git = "https://github.com/MacCracken/vani.git"
+tag = "0.3.0"
+modules = ["dist/vani.cyr"]
 
 # bsp — spatial geometry primitives. Consumed as a single-file vendor
 # (`lib/bsp.cyr`) produced from bsp's `dist/bsp.cyr` bundle. 1.1.1 added

@@ -10,6 +10,12 @@
 # cyrius.cyml [deps.bsp]; the build tool resolves this to
 # ~/.cyrius/deps/bsp/1.1.1/dist/bsp.cyr via a symlink.
 include "lib/bsp.cyr"
+# vani — audio device I/O (vendored from https://github.com/MacCracken/vani @ 0.3.0).
+# Provides the `audio_*` ioctl surface src/audio.cyr calls — formerly
+# the cyrius stdlib `audio` dep, retiring in cyrius 5.8.0. The vani
+# bundle also exposes `vani_*` higher-level helpers (XRUN recovery,
+# format negotiation, latency presets) if a later sound rework wants them.
+include "lib/vani.cyr"
 include "src/fixed.cyr"
 include "src/tables.cyr"
 include "src/wad.cyr"
