@@ -5,6 +5,143 @@ All notable changes to cyrius-doom will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.26.2] - 2026-05-01
+
+Toolchain + audio-stack hygiene cut. Unblocks CI (vani 0.9.x
+requires Cyrius 5.7.48 stdlib surface, but `.cyrius-toolchain`
+was still pinned at 5.5.2), opts cyrius-doom into vani's new
+`audio-core` distribution profile (29 KB single-module bundle
+vs the 76 KB full bundle, 22 `audio_*` symbols vs 106), and
+collapses the manifest drift between `cyrius.cyml` /
+`cyrius.toml` / `cyrb.toml`. No source behavior changes — the
+`audio_*` ABI is byte-identical between vani profiles, and
+`src/audio.cyr` calls exactly six of the 22 core-profile
+symbols.
+
+### Changed
+
+- **Cyrius 5.5.2 → 5.7.48** — `.cyrius-toolchain`,
+  `cyrius.toml`, and `cyrius.cyml` all pinned. The CI break
+  was caused by `cyrius.cyml` declaring `cyrius = "5.7.48"`
+  (required by vani 0.9.x's manifest, which references stdlib
+  modules `fs` / `hashmap` / `tagged` / `fnptr` / `freelist` /
+  `process` / `patra` that didn't ship in the 5.5.2 stdlib
+  bundle) while the toolchain installer file CI reads
+  (`.cyrius-toolchain`) was still 5.5.2.
+- **vani 0.3.0 → 0.9.1 (`core` profile)** — `[deps.vani]` now
+  pins `tag = "0.9.1"` with `modules = ["dist/vani-core.cyr"]`
+  (was `"dist/vani.cyr"`). The core profile is a strict subset
+  of the full bundle: only `src/alsa.cyr`'s `audio_*` shim,
+  29,015 B / 800 lines / 22 public symbols. cyrius-doom's
+  `src/audio.cyr` calls 6 of those 22 — every other vani
+  module (`buffer` / `capture` / `device` / `error` /
+  `format` / `mixer` / `playback`) is dropped at the bundle
+  level, not just at the dead-code level. The `audio_*` ABI
+  is byte-identical between profiles, so `src/audio.cyr` is
+  unchanged.
+- **`src/main.cyr` include** swapped `lib/vani.cyr` →
+  `lib/vani-core.cyr` to match the new manifest path. Header
+  comment refreshed to point at vani 0.9.1 and to call out
+  that the full `vani_*` higher-level helpers are still one
+  manifest line away if a later sound rework wants them.
+- **Manifest hygiene**:
+  - `cyrius.toml` and `cyrb.toml` synced to `cyrius.cyml`'s
+    canonical `[deps]` shape: stdlib list now drops the
+    retired `audio` (5.8.0) and adds `fs` / `hashmap` /
+    `tagged` / `fnptr` / `freelist` / `process` / `patra` to
+    cover vani's transitive needs.
+  - `cyrb.toml`'s stale `[deps.shravan]` (2.0.0, never used
+    in this branch) replaced by `[deps.vani] @ 0.9.1`.
+  - Orphan `lib/vani.cyr` symlink (left behind when the
+    `modules` field changed) removed; lockfile rewrites
+    clean at 5 entries (`vani-core`, `bsp`, `yukti`, `patra`,
+    `sakshi`). Lockfile no longer carries a stale 6th
+    `lib/vani.cyr` row from the in-flight transition.
+
+### Binary size — honest read
+
+| Build | `build/doom` | Δ |
+|---|---|---|
+| 0.26.1 (vani 0.3.0, full) | 259,920 B | baseline |
+| 0.26.2 mid-bump (vani 0.9.0, full) | 600,608 B | +340,688 B |
+| **0.26.2 final (vani 0.9.1, core)** | **565,856 B** | **+305,936 B vs 0.26.1, −34,752 B vs full** |
+
+Trimming vani's bundled source from 76 KB → 29 KB (47 KB
+delta) translates to a ~35 KB binary savings — about 5.8 % off
+the full-bundle build. The remaining ~306 KB of regression vs.
+0.26.1 is unreachable today: every public symbol vani exports
+gets a NOPped function body in the cyrius-doom output under
+the current cc5 NOP-sled DCE. Real recovery to ~260 KB lands
+when **Cyrius phase O3 (real DCE replaces NOP-sled)** ships,
+at which point the core profile's smaller surface compounds
+with O3 to drop the unused `audio_*` getters and the
+capture-side path entirely.
+
+The proposal that drove the audio-core profile predicted
+"~340 KB recovered"; that prediction was overstated for the
+same DCE reason. The mechanism works as designed; the size
+win is bottlenecked on Cyrius, not on vani. See
+`docs/proposals/archive/vani-audio-core-profile.md` for the
+full closing-loop analysis.
+
+### Audio dep — transitional shape
+
+`vani` is **not** the long-term audio dep for cyrius-doom.
+The current trajectory:
+
+1. **vani** (today, 0.9.1 core) — covers the gap left by the
+   cyrius stdlib `audio` retirement (5.8.0 fold-in). Stable
+   `audio_*` shim, byte-stable ABI, single-module 29 KB
+   bundle. Good enough until dhvani lands.
+2. **dhvani** (planned) — Rust-to-Cyrius port. Will replace
+   vani in `[deps.*]` once the port hits feature parity for
+   the playback path cyrius-doom uses. Same `audio_*` shape
+   is the migration target so `src/audio.cyr` stays
+   ABI-stable across the swap.
+
+Treat vani's surface in cyrius-doom as a temporary pin, not a
+long-term commitment. The audio-core profile choice was made
+specifically with this swap in mind: the smaller the vani
+surface, the smaller the dhvani port's day-one feature target.
+
+### Documentation
+
+- **Audio-core proposal**, drafted, accepted, and archived at
+  `docs/proposals/archive/vani-audio-core-profile.md`. Includes
+  the original three-cut patch-series proposal (0.9.1 → 0.9.2 →
+  0.9.3) that vani collapsed into a single 0.9.1 cut, the
+  resolution section, and the closing-loop measurement
+  (565,856 B post-flip). First entry under
+  `docs/proposals/archive/`; future settled proposals will
+  land alongside it.
+
+### Gates
+
+- `cyrius deps`: 5/5 resolved, `cyrius.lock` rewritten clean.
+- `cyrius build src/main.cyr build/doom`: OK (565,856 B).
+- `cyrius test tests/doom.tcyr`: 37/37 WAD-free assertions
+  pass (CI's headless subset). Full 73-assertion suite needs a
+  WAD path; not exercised in CI by design.
+- `./build/doom wad/DOOM1.WAD --ppm`: E1M1, automap, and
+  intermission render cleanly. ALSA path emits the expected
+  `[WARN] audio: no device` on the headless CI runner, no
+  device under `/dev/snd/`.
+
+### Tracking the upstream optimizer track
+
+Unchanged from 0.26.1 — cyrius-doom still holds v0.27.0
+"performance pass" against Cyrius O4 linear-scan regalloc
+landing. The 0.26.2 toolchain bump (5.5.2 → 5.7.48) does not
+include any of O2 / O3 / O4 — those are scheduled in the
+parallel cyrius optimizer queue, not in the 5.7.x stabilization
+line.
+
+The honest-read above on binary size is the most concrete
+demonstration to date of why O3 matters: a clean 47 KB
+source-bundle trim recovered only ~35 KB of binary, because
+~306 KB of `0x90` filler is structurally trapped behind the
+NOP-sled DCE. O3 unlocks it as a free win.
+
 ## [0.26.1] - 2026-04-20
 
 ### Changed

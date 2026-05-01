@@ -1,5 +1,5 @@
 name = "cyrius-doom"
-version = "0.26.1"
+version = "0.26.2"
 license = "GPL-3.0-only"
 entry = "src/main.cyr"
 output = "doom"
@@ -16,5 +16,5 @@ modules = ["dist/bsp.cyr"]
 
 [deps.vani]
 git = "https://github.com/MacCracken/vani"
-tag = "0.9.0"
-modules = ["dist/vani.cyr"]
+tag = "0.9.1"
+modules = ["dist/vani-core.cyr"]

@@ -1,6 +1,6 @@
 [package]
 name = "cyrius-doom"
-version = "0.26.1"
+version = "0.26.2"
 description = "DOOM in Cyrius — clean-room, direct framebuffer, no libc, just syscalls."
 license = "GPL-3.0-only"
 repository = "https://github.com/MacCracken/cyrius-doom"
@@ -28,8 +28,8 @@ stdlib = ["string", "alloc", "fmt", "vec", "str", "io", "fs", "args", "syscalls"
 # as bsp below — git tag + dist single-file module.
 [deps.vani]
 git = "https://github.com/MacCracken/vani.git"
-tag = "0.9.0"
-modules = ["dist/vani.cyr"]
+tag = "0.9.1"
+modules = ["dist/vani-core.cyr"]
 
 # bsp — spatial geometry primitives. Consumed as a single-file vendor
 # (`lib/bsp.cyr`) produced from bsp's `dist/bsp.cyr` bundle. 1.1.1 added

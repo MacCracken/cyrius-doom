@@ -10,12 +10,13 @@
 # cyrius.cyml [deps.bsp]; the build tool resolves this to
 # ~/.cyrius/deps/bsp/1.1.1/dist/bsp.cyr via a symlink.
 include "lib/bsp.cyr"
-# vani — audio device I/O (vendored from https://github.com/MacCracken/vani @ 0.3.0).
-# Provides the `audio_*` ioctl surface src/audio.cyr calls — formerly
-# the cyrius stdlib `audio` dep, retiring in cyrius 5.8.0. The vani
-# bundle also exposes `vani_*` higher-level helpers (XRUN recovery,
-# format negotiation, latency presets) if a later sound rework wants them.
-include "lib/vani.cyr"
+# vani — audio device I/O (vendored from https://github.com/MacCracken/vani @ 0.9.1).
+# Pulls the `core` profile (dist/vani-core.cyr, src/alsa.cyr only) — 22
+# `audio_*` symbols, the entire surface src/audio.cyr calls. The full
+# `vani_*` higher-level helpers (XRUN recovery, format negotiation,
+# latency presets, mixer, ring buffers) live in dist/vani.cyr; switch
+# `modules` in cyrius.cyml if a later sound rework wants them.
+include "lib/vani-core.cyr"
 include "src/fixed.cyr"
 include "src/tables.cyr"
 include "src/wad.cyr"
@@ -66,7 +67,7 @@ fn load_map() {
 fn doom_main() {
     alloc_init();
     args_init();
-    sakshi_info("cyrius-doom v0.26.1", 19);
+    sakshi_info("cyrius-doom v0.26.2", 19);
 
     if (argc() < 2) {
         sakshi_error("usage: doom <wad> [map] [--ppm]", 31);

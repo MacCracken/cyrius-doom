@@ -1,12 +1,18 @@
 # cyrius-doom Development Roadmap
 
-> **v0.26.1** — 259,920 B (cc5 5.5.2 enum-fold: −7,296 B vs 5.5.0),
-> 20 modules + vendored `lib/bsp.cyr` (bsp 1.1.2), full gameplay loop,
-> DOOM-accurate lighting, 9/9 shareware maps render via bsp library
-> traversal, security hardened (CVE audit: 5/5 fixed), signed-shift
-> correctness audit landed in bsp 1.1.0. CI runs the WAD-free test subset
-> + DCE on release builds. 73/73 cyrius-doom tests, 79/79 bsp tests,
-> 76K fuzz iters total. fmt + lint clean.
+> **v0.26.2** — 565,856 B (cc5 5.7.48 + vani 0.9.1 `core` profile;
+> +305 KB vs 0.26.1, gated on Cyrius phase O3 real DCE for recovery),
+> 20 modules + vendored `lib/bsp.cyr` (bsp 1.1.2) + vendored
+> `lib/vani-core.cyr` (vani 0.9.1, `dist/vani-core.cyr` single-module
+> bundle, 22 `audio_*` symbols). Full gameplay loop, DOOM-accurate
+> lighting, 9/9 shareware maps render via bsp library traversal,
+> security hardened (CVE audit: 5/5 fixed). Manifest hygiene:
+> `cyrius.toml` / `cyrb.toml` synced to `cyrius.cyml`, lockfile clean
+> at 5 deps. CI unblocked (5.5.2 → 5.7.48 toolchain bump, vani 0.9.x
+> requires 5.7.48 stdlib surface). vani is **transitional** — will be
+> replaced by dhvani once the Rust→Cyrius port lands. CI runs the
+> WAD-free test subset + DCE on release builds. 73/73 cyrius-doom tests,
+> 79/79 bsp tests, 76K fuzz iters total. fmt + lint clean.
 
 ## Completed
 
@@ -43,6 +49,7 @@
 | v0.24.6 | Cyrius 5.5.0 bump, E1M6 map-cap fix (MAP_MAX_SSECTORS 512 → 1024), test suite includes repaired |
 | v0.26.0 | bsp real dep: `cyrius.cyml` migration + `[deps.bsp] @ 1.1.1`, `render_bsp_node` uses bsp primitives, DCE in release CI, test job in CI, `scripts/bench-history.sh` modernized |
 | v0.26.1 | Cyrius 5.5.2 + bsp 1.1.2 (enum-constant fold, −7,296 B / −2.7 %). No source changes. |
+| v0.26.2 | Cyrius 5.5.2 → 5.7.48 (CI dep-resolve unblock); vani 0.3.0 → 0.9.1 `core` profile (`dist/vani-core.cyr`, 22 `audio_*` symbols vs 106 in full bundle); manifest hygiene across `cyrius.cyml` / `cyrius.toml` / `cyrb.toml`; audio-core proposal authored, accepted in vani 0.9.1, archived. Binary 565,856 B (full recovery to ~260 KB gated on Cyrius O3). |
 
 ## v0.24.0 — Security Hardening (CVE Audit Fixes)
 
@@ -72,6 +79,47 @@ O4's linear-scan register allocator lands and delivers its projected
 | 3 | Wait for **Cyrius O4** (linear-scan regalloc, Poletto–Sarkar) | Upstream | The single biggest win. `render_frame` projection: 2.5 ms → ≤1 ms. Column renderer, BSP walk, patch cache all benefit. |
 | 4 | Re-bench hot paths on O2/O3/O4-enabled toolchain | Pending | `bench-history.csv` row per upstream phase landing, with A/B before/after numbers to confirm the compiler wins stick. |
 | 5 | Revisit manual patterns only after O4 | Pending | At that point any remaining 5–10 % wins from column-loop restructure are worth chasing; before then, no. |
+
+## v0.26.2 — Cyrius 5.7.48 + vani 0.9.1 `core` profile (2026-05-01) — DONE
+
+Toolchain + audio-stack hygiene cut. Two motivations:
+
+1. **CI was failing on dependency resolution.** `cyrius.cyml`
+   declared `cyrius = "5.7.48"` (required by vani 0.9.x's
+   transitive stdlib surface — `fs` / `hashmap` / `tagged` /
+   `fnptr` / `freelist` / `process` / `patra`), but
+   `.cyrius-toolchain` was still pinned at 5.5.2. CI installed
+   the wrong toolchain, then `cyrius deps` choked on missing
+   stdlib modules.
+2. **vani's full bundle was overkill.** Bumping vani 0.3.0 →
+   0.9.0 grew `build/doom` by +340 KB for a 117-line audio
+   module that calls 6 of vani's 106 public symbols. Authored
+   a proposal for a `core` distribution profile, vani accepted
+   it in 0.9.1 (collapsed from a three-cut patch series into a
+   single cut), shipped `dist/vani-core.cyr` — a 29 KB
+   single-module bundle exposing only the 22 `audio_*` symbols
+   from `src/alsa.cyr`. cyrius-doom flipped its `[deps.vani]`
+   `modules` field over and recovered ~35 KB of binary.
+
+| Change | Detail |
+|--------|--------|
+| Cyrius toolchain | 5.5.2 → **5.7.48** in `.cyrius-toolchain`, `cyrius.toml`, `cyrius.cyml` |
+| vani | 0.3.0 → **0.9.1**, profile `dist/vani.cyr` → `dist/vani-core.cyr` (22 symbols vs 106) |
+| `src/main.cyr:18` include | `lib/vani.cyr` → `lib/vani-core.cyr` |
+| `cyrius.toml` / `cyrb.toml` `[deps]` stdlib | retired `audio` dropped; added `fs` / `hashmap` / `tagged` / `fnptr` / `freelist` / `process` / `patra` to match `cyrius.cyml` |
+| `cyrb.toml` | stale `[deps.shravan] @ 2.0.0` replaced by `[deps.vani] @ 0.9.1` |
+| Lockfile | rewritten clean (5 deps, orphan `lib/vani.cyr` symlink removed) |
+| Binary size | 259,920 → 565,856 B (+305 KB regression vs 0.26.1; recovery gated on Cyrius O3 real DCE) |
+
+**vani is transitional.** Replaces the retiring cyrius stdlib
+`audio` (5.8.0 fold-in), and will itself be replaced by
+**dhvani** once the Rust→Cyrius port lands. The `audio_*` shape
+is the migration target, so `src/audio.cyr` stays ABI-stable
+across the eventual swap.
+
+Proposal artifact (drafted, accepted by vani, closing-loop
+delta logged) archived at
+`docs/proposals/archive/vani-audio-core-profile.md`.
 
 ## v0.26.1 — Cyrius 5.5.2 + bsp 1.1.2 (2026-04-20) — DONE
 
