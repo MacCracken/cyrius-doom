@@ -20,7 +20,9 @@ jobs:
 
       - name: Install Cyrius toolchain
         run: |
-          CYRIUS_VERSION="${CYRIUS_VERSION:-$(cat .cyrius-toolchain | tr -d '[:space:]')}"
+          # Read pinned toolchain from cyrius.cyml (single source of
+          # truth, matching vani / yukti CI).
+          CYRIUS_VERSION="${CYRIUS_VERSION:-$(grep -oP '(?<=^cyrius = ")[^"]+' cyrius.cyml)}"
           echo "Installing Cyrius $CYRIUS_VERSION"
           curl -sLO "https://github.com/MacCracken/cyrius/releases/download/$CYRIUS_VERSION/cyrius-$CYRIUS_VERSION-x86_64-linux.tar.gz"
           tar xzf "cyrius-$CYRIUS_VERSION-x86_64-linux.tar.gz"
@@ -32,8 +34,23 @@ jobs:
           echo "$HOME/.cyrius/bin" >> $GITHUB_PATH
           echo "CYRIUS_HOME=$HOME/.cyrius" >> $GITHUB_ENV
 
+      - name: Lock file present
+        # cyrius.lock is the supply-chain integrity anchor for the
+        # [deps.bsp] / [deps.vani] git overrides + transitive
+        # [deps.yukti] / [deps.patra]. Without a committed lock,
+        # `cyrius deps --verify` trivially matches the just-created
+        # lock — providing zero integrity. Same gate vani / yukti use.
+        run: |
+          test -f cyrius.lock || {
+            echo "::error::cyrius.lock missing — supply-chain integrity requires this committed"
+            exit 1
+          }
+
       - name: Resolve dependencies
         run: cyrius deps
+
+      - name: Verify dep hashes
+        run: cyrius deps --verify
 
       - name: Build
         run: |
@@ -57,7 +74,9 @@ jobs:
 
       - name: Install Cyrius toolchain
         run: |
-          CYRIUS_VERSION="${CYRIUS_VERSION:-$(cat .cyrius-toolchain | tr -d '[:space:]')}"
+          # Read pinned toolchain from cyrius.cyml (single source of
+          # truth, matching vani / yukti CI).
+          CYRIUS_VERSION="${CYRIUS_VERSION:-$(grep -oP '(?<=^cyrius = ")[^"]+' cyrius.cyml)}"
           echo "Installing Cyrius $CYRIUS_VERSION"
           curl -sLO "https://github.com/MacCracken/cyrius/releases/download/$CYRIUS_VERSION/cyrius-$CYRIUS_VERSION-x86_64-linux.tar.gz"
           tar xzf "cyrius-$CYRIUS_VERSION-x86_64-linux.tar.gz"
@@ -69,8 +88,18 @@ jobs:
           echo "$HOME/.cyrius/bin" >> $GITHUB_PATH
           echo "CYRIUS_HOME=$HOME/.cyrius" >> $GITHUB_ENV
 
+      - name: Lock file present
+        run: |
+          test -f cyrius.lock || {
+            echo "::error::cyrius.lock missing — supply-chain integrity requires this committed"
+            exit 1
+          }
+
       - name: Resolve dependencies
         run: cyrius deps
+
+      - name: Verify dep hashes
+        run: cyrius deps --verify
 
       - name: Run tests (WAD-free assertions)
         run: |
@@ -87,6 +116,19 @@ jobs:
       - uses: actions/checkout@v4
       - name: Check required docs
         run: |
-          for doc in README.md CHANGELOG.md VERSION LICENSE cyrius.toml; do
+          for doc in README.md CHANGELOG.md VERSION LICENSE cyrius.cyml cyrius.toml; do
             test -f "$doc" && echo "OK: $doc" || { echo "MISSING: $doc"; exit 1; }
           done
+
+      - name: Verify version consistency
+        # VERSION is the release-gate anchor (release.yml's "Verify
+        # version" step compares it to the pushed tag). Ensure it
+        # also appears in CHANGELOG.md so a release never ships
+        # without a documented entry.
+        run: |
+          VERSION=$(cat VERSION | tr -d '[:space:]')
+          echo "VERSION file: $VERSION"
+          grep -q "$VERSION" CHANGELOG.md || { echo "FAIL: version not in CHANGELOG.md"; exit 1; }
+          grep -q "version = \"$VERSION\"" cyrius.cyml || { echo "FAIL: version mismatch in cyrius.cyml"; exit 1; }
+          grep -q "version = \"$VERSION\"" cyrius.toml || { echo "FAIL: version mismatch in cyrius.toml"; exit 1; }
+          echo "Version consistent across VERSION / cyrius.cyml / cyrius.toml / CHANGELOG.md"

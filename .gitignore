@@ -2,9 +2,12 @@
 /build/
 /target/
 
-# External deps resolved by `cyrius build` from cyrius.cyml [deps.*]
-# (symlinks into ~/.cyrius/deps/). Run `cyrius deps` to repopulate.
-/lib/bsp.cyr
+# `lib/` is populated by `cyrius deps` from cyrius.cyml [deps] — a
+# build artifact, not source. Stdlib modules are copied from
+# $CYRIUS_HOME/lib/; [deps.X] git overrides are symlinked into
+# $CYRIUS_HOME/deps/<name>/<tag>/. Never commit. Same shape as
+# vani / yukti.
+/lib/
 
 # WAD files (user provides their own)
 *.wad

@@ -20,14 +20,19 @@ symbols.
 
 ### Changed
 
-- **Cyrius 5.5.2 → 5.7.48** — `.cyrius-toolchain`,
-  `cyrius.toml`, and `cyrius.cyml` all pinned. The CI break
-  was caused by `cyrius.cyml` declaring `cyrius = "5.7.48"`
-  (required by vani 0.9.x's manifest, which references stdlib
-  modules `fs` / `hashmap` / `tagged` / `fnptr` / `freelist` /
-  `process` / `patra` that didn't ship in the 5.5.2 stdlib
-  bundle) while the toolchain installer file CI reads
-  (`.cyrius-toolchain`) was still 5.5.2.
+- **Cyrius 5.5.2 → 5.7.48** — `cyrius.cyml` and `cyrius.toml`
+  pinned to 5.7.48. The CI break was caused by `cyrius.cyml`
+  declaring `cyrius = "5.7.48"` (required by vani 0.9.x's
+  manifest, which references stdlib modules `fs` / `hashmap` /
+  `tagged` / `fnptr` / `freelist` / `process` / `patra` that
+  didn't ship in the 5.5.2 stdlib bundle) while the toolchain
+  installer file CI was reading (`.cyrius-toolchain`) was
+  still 5.5.2.
+- **`.cyrius-toolchain` deleted.** CI now reads the pinned
+  toolchain from `cyrius.cyml`'s `cyrius = "..."` line via
+  `grep -oP '(?<=^cyrius = ")[^"]+' cyrius.cyml` — the same
+  pattern vani / yukti CI uses. Single source of truth
+  eliminates the drift vector that caused this CI break.
 - **vani 0.3.0 → 0.9.1 (`core` profile)** — `[deps.vani]` now
   pins `tag = "0.9.1"` with `modules = ["dist/vani-core.cyr"]`
   (was `"dist/vani.cyr"`). The core profile is a strict subset
@@ -46,17 +51,46 @@ symbols.
   manifest line away if a later sound rework wants them.
 - **Manifest hygiene**:
   - `cyrius.toml` and `cyrb.toml` synced to `cyrius.cyml`'s
-    canonical `[deps]` shape: stdlib list now drops the
-    retired `audio` (5.8.0) and adds `fs` / `hashmap` /
-    `tagged` / `fnptr` / `freelist` / `process` / `patra` to
-    cover vani's transitive needs.
+    canonical `[deps]` shape: stdlib list drops the retired
+    `audio` (5.8.0) and adds `fs` / `hashmap` / `tagged` /
+    `fnptr` / `freelist` / `process` / `sakshi` to cover
+    vani's transitive needs.
+  - **`patra` dropped from stdlib** — vani's `[deps.patra] @
+    1.9.2` git override provides it transitively, and listing
+    it in both places triggered double-resolution (the cc5
+    deps writer can't reconcile a stdlib copy + a git symlink
+    for the same `lib/` path). Mirrors what vani did
+    internally to its own stdlib list at 0.9.0. CI surfaced
+    this as `error: cannot write lib/patra.cyr`.
   - `cyrb.toml`'s stale `[deps.shravan]` (2.0.0, never used
     in this branch) replaced by `[deps.vani] @ 0.9.1`.
-  - Orphan `lib/vani.cyr` symlink (left behind when the
-    `modules` field changed) removed; lockfile rewrites
-    clean at 5 entries (`vani-core`, `bsp`, `yukti`, `patra`,
-    `sakshi`). Lockfile no longer carries a stale 6th
-    `lib/vani.cyr` row from the in-flight transition.
+  - **`lib/` no longer committed.** Was tracked as a mix of
+    real stdlib copies (mode 100644) and symlinks to the
+    local developer's `/home/<user>/.cyrius/...` (mode 120000)
+    — the symlinks were dangling on every CI runner. Now
+    fully gitignored (`/lib/` in `.gitignore`, matching vani
+    / yukti); `cyrius deps` populates it fresh on every
+    checkout. 18 previously-tracked files dropped from the
+    index.
+
+### CI alignment with vani / yukti
+
+- **Toolchain version sourced from `cyrius.cyml`** instead of
+  the now-deleted `.cyrius-toolchain` file. Same `grep -oP`
+  pattern vani uses. Applies to both `ci.yml` and
+  `release.yml`.
+- **`Lock file present` step** added before `cyrius deps` —
+  guards against accidental `.gitignore` changes that would
+  let `cyrius.lock` slip out of git, defeating the
+  supply-chain integrity check.
+- **`cyrius deps --verify` step** added after `cyrius deps`
+  in both `build` and `test` jobs. Verifies the lockfile
+  hashes match the just-resolved `lib/` contents — catches
+  upstream tag rewrites and dep tampering.
+- **Version-consistency check** in the `docs` job now
+  cross-checks `VERSION` against `cyrius.cyml`,
+  `cyrius.toml`, and `CHANGELOG.md`. Stops a release from
+  shipping with version drift.
 
 ### Binary size — honest read
 

@@ -19,7 +19,7 @@ output = "build/doom"
 # Order matters — single-pass compiler, deps are prepended as includes.
 # string/alloc must come before anything that uses strlen/alloc/memcpy.
 # `audio` retired from cyrius stdlib (5.8.0); vani owns that surface.
-stdlib = ["string", "alloc", "fmt", "vec", "str", "io", "fs", "args", "syscalls", "hashmap", "tagged", "fnptr", "freelist", "process", "patra", "sakshi"]
+stdlib = ["string", "alloc", "fmt", "vec", "str", "io", "fs", "args", "syscalls", "hashmap", "tagged", "fnptr", "freelist", "process", "sakshi"]
 
 [deps.vani]
 git = "https://github.com/MacCracken/vani.git"

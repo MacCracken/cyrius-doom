@@ -49,7 +49,7 @@
 | v0.24.6 | Cyrius 5.5.0 bump, E1M6 map-cap fix (MAP_MAX_SSECTORS 512 → 1024), test suite includes repaired |
 | v0.26.0 | bsp real dep: `cyrius.cyml` migration + `[deps.bsp] @ 1.1.1`, `render_bsp_node` uses bsp primitives, DCE in release CI, test job in CI, `scripts/bench-history.sh` modernized |
 | v0.26.1 | Cyrius 5.5.2 + bsp 1.1.2 (enum-constant fold, −7,296 B / −2.7 %). No source changes. |
-| v0.26.2 | Cyrius 5.5.2 → 5.7.48 (CI dep-resolve unblock); vani 0.3.0 → 0.9.1 `core` profile (`dist/vani-core.cyr`, 22 `audio_*` symbols vs 106 in full bundle); manifest hygiene across `cyrius.cyml` / `cyrius.toml` / `cyrb.toml`; audio-core proposal authored, accepted in vani 0.9.1, archived. Binary 565,856 B (full recovery to ~260 KB gated on Cyrius O3). |
+| v0.26.2 | Cyrius 5.5.2 → 5.7.48 (CI dep-resolve unblock); vani 0.3.0 → 0.9.1 `core` profile (`dist/vani-core.cyr`, 22 `audio_*` symbols vs 106 in full bundle); `lib/` gitignored + untracked (was a mix of real stdlib copies + dangling local-path symlinks); `patra` dropped from stdlib (vani's `[deps.patra]` provides it); CI aligned with vani / yukti (toolchain via `cyrius.cyml`, `cyrius.lock` presence gate, `cyrius deps --verify`, version-consistency check); audio-core proposal authored, accepted in vani 0.9.1, archived. Binary 565,840 B (full recovery to ~260 KB gated on Cyrius O3). |
 
 ## v0.24.0 — Security Hardening (CVE Audit Fixes)
 
@@ -84,13 +84,20 @@ O4's linear-scan register allocator lands and delivers its projected
 
 Toolchain + audio-stack hygiene cut. Two motivations:
 
-1. **CI was failing on dependency resolution.** `cyrius.cyml`
-   declared `cyrius = "5.7.48"` (required by vani 0.9.x's
-   transitive stdlib surface — `fs` / `hashmap` / `tagged` /
-   `fnptr` / `freelist` / `process` / `patra`), but
-   `.cyrius-toolchain` was still pinned at 5.5.2. CI installed
-   the wrong toolchain, then `cyrius deps` choked on missing
-   stdlib modules.
+1. **CI was failing on dependency resolution** in two
+   compounding ways. First, `cyrius.cyml` declared
+   `cyrius = "5.7.48"` (required by vani 0.9.x's transitive
+   stdlib surface — `fs` / `hashmap` / `tagged` / `fnptr` /
+   `freelist` / `process` / `patra`), but `.cyrius-toolchain`
+   was still pinned at 5.5.2 — CI installed the wrong
+   toolchain. Second, the repo committed `lib/` (mix of real
+   stdlib copies and dangling local-path symlinks) and listed
+   `patra` in both stdlib AND vani's transitive `[deps.patra]`
+   override, which `cyrius deps` couldn't reconcile
+   (`error: cannot write lib/patra.cyr`). Fixed by gitignoring
+   `lib/` (matching vani / yukti), dropping `patra` from
+   stdlib, deleting `.cyrius-toolchain` and reading the
+   toolchain pin from `cyrius.cyml` directly.
 2. **vani's full bundle was overkill.** Bumping vani 0.3.0 →
    0.9.0 grew `build/doom` by +340 KB for a 117-line audio
    module that calls 6 of vani's 106 public symbols. Authored
@@ -103,13 +110,16 @@ Toolchain + audio-stack hygiene cut. Two motivations:
 
 | Change | Detail |
 |--------|--------|
-| Cyrius toolchain | 5.5.2 → **5.7.48** in `.cyrius-toolchain`, `cyrius.toml`, `cyrius.cyml` |
+| Cyrius toolchain | 5.5.2 → **5.7.48** in `cyrius.cyml` + `cyrius.toml`; `.cyrius-toolchain` deleted (CI now reads from `cyrius.cyml`, matching vani / yukti) |
 | vani | 0.3.0 → **0.9.1**, profile `dist/vani.cyr` → `dist/vani-core.cyr` (22 symbols vs 106) |
 | `src/main.cyr:18` include | `lib/vani.cyr` → `lib/vani-core.cyr` |
-| `cyrius.toml` / `cyrb.toml` `[deps]` stdlib | retired `audio` dropped; added `fs` / `hashmap` / `tagged` / `fnptr` / `freelist` / `process` / `patra` to match `cyrius.cyml` |
+| `cyrius.toml` / `cyrb.toml` `[deps]` stdlib | retired `audio` dropped; added `fs` / `hashmap` / `tagged` / `fnptr` / `freelist` / `process` / `sakshi` to match `cyrius.cyml`; **`patra` dropped** (vani's `[deps.patra] @ 1.9.2` provides it transitively — listing it in both places caused `error: cannot write lib/patra.cyr` in CI) |
 | `cyrb.toml` | stale `[deps.shravan] @ 2.0.0` replaced by `[deps.vani] @ 0.9.1` |
-| Lockfile | rewritten clean (5 deps, orphan `lib/vani.cyr` symlink removed) |
-| Binary size | 259,920 → 565,856 B (+305 KB regression vs 0.26.1; recovery gated on Cyrius O3 real DCE) |
+| `lib/` | now fully gitignored (`/lib/` in `.gitignore`); 18 previously-tracked files untracked (mix of real stdlib copies and dangling local-path symlinks). `cyrius deps` populates fresh per checkout. |
+| `.github/workflows/ci.yml` | toolchain version from `cyrius.cyml`; `Lock file present` gate; `cyrius deps --verify` step; version-consistency check across VERSION / `cyrius.cyml` / `cyrius.toml` / CHANGELOG.md |
+| `.github/workflows/release.yml` | toolchain version from `cyrius.cyml` (was `.cyrius-toolchain`) |
+| Lockfile | clean 5-deps state (`vani-core`, `bsp`, `yukti`, `patra`, `sakshi`); `cyrius deps --verify` passes |
+| Binary size | 259,920 → 565,840 B (+305 KB regression vs 0.26.1; recovery gated on Cyrius O3 real DCE) |
 
 **vani is transitional.** Replaces the retiring cyrius stdlib
 `audio` (5.8.0 fold-in), and will itself be replaced by

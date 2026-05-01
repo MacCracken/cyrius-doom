@@ -21,7 +21,12 @@ output = "build/doom"
 # with zero code changes. cyrius/lib/audio.cyr retires in cyrius
 # 5.8.0. Added: fs, hashmap, tagged, fnptr, freelist, process,
 # patra — vani's dist transitively references these.
-stdlib = ["string", "alloc", "fmt", "vec", "str", "io", "fs", "args", "syscalls", "hashmap", "tagged", "fnptr", "freelist", "process", "patra", "sakshi"]
+# `patra` dropped from stdlib — vani's `[deps.patra]` git override
+# at 1.9.2 provides it transitively, and listing it both places
+# triggers double-resolution (the cc5 deps writer can't reconcile
+# stdlib copy + git symlink for the same lib/ path). Mirrors what
+# vani 0.9.0 did internally to its own stdlib list.
+stdlib = ["string", "alloc", "fmt", "vec", "str", "io", "fs", "args", "syscalls", "hashmap", "tagged", "fnptr", "freelist", "process", "sakshi"]
 
 # vani — audio device I/O. Provides `audio_*` (lifted from cyrius
 # stdlib) plus the higher-level `vani_*` API. Same `[deps.X]` shape

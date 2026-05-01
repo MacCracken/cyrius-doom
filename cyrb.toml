@@ -7,7 +7,7 @@ description = "DOOM in Cyrius — 129KB, direct framebuffer, no libc, just sysca
 repository = "https://github.com/MacCracken/cyrius-doom"
 
 [deps]
-stdlib = ["string", "alloc", "fmt", "vec", "str", "io", "fs", "args", "syscalls", "hashmap", "tagged", "fnptr", "freelist", "process", "patra", "sakshi"]
+stdlib = ["string", "alloc", "fmt", "vec", "str", "io", "fs", "args", "syscalls", "hashmap", "tagged", "fnptr", "freelist", "process", "sakshi"]
 
 [deps.bsp]
 git = "https://github.com/MacCracken/bsp"
