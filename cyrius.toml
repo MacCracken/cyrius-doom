@@ -5,11 +5,11 @@ description = "DOOM in Cyrius — clean-room, direct framebuffer, no libc, just 
 license = "GPL-3.0-only"
 repository = "https://github.com/MacCracken/cyrius-doom"
 language = "cyrius"
-cyrius = "5.5.2"
+cyrius = "5.7.48"
 
 # NOTE: cyrius.cyml is the canonical manifest as of v0.26.0 (5.x convention).
 # This .toml is kept in sync as a build-tool compatibility shim during the
-# transition. The authoritative [deps.bsp] entry lives in cyrius.cyml.
+# transition. The authoritative [deps.*] entries live in cyrius.cyml.
 
 [build]
 src = "src/main.cyr"
@@ -18,5 +18,15 @@ output = "build/doom"
 [deps]
 # Order matters — single-pass compiler, deps are prepended as includes.
 # string/alloc must come before anything that uses strlen/alloc/memcpy.
-# io before audio (audio uses syscall wrappers). sakshi standalone.
-stdlib = ["string", "alloc", "fmt", "vec", "str", "io", "args", "syscalls", "sakshi", "audio"]
+# `audio` retired from cyrius stdlib (5.8.0); vani owns that surface.
+stdlib = ["string", "alloc", "fmt", "vec", "str", "io", "fs", "args", "syscalls", "hashmap", "tagged", "fnptr", "freelist", "process", "patra", "sakshi"]
+
+[deps.vani]
+git = "https://github.com/MacCracken/vani.git"
+tag = "0.9.0"
+modules = ["dist/vani.cyr"]
+
+[deps.bsp]
+git = "https://github.com/MacCracken/bsp.git"
+tag = "1.1.2"
+modules = ["dist/bsp.cyr"]

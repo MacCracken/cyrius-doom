@@ -7,14 +7,14 @@ description = "DOOM in Cyrius — 129KB, direct framebuffer, no libc, just sysca
 repository = "https://github.com/MacCracken/cyrius-doom"
 
 [deps]
-stdlib = ["string", "alloc", "fmt", "args"]
+stdlib = ["string", "alloc", "fmt", "vec", "str", "io", "fs", "args", "syscalls", "hashmap", "tagged", "fnptr", "freelist", "process", "patra", "sakshi"]
 
 [deps.bsp]
 git = "https://github.com/MacCracken/bsp"
 tag = "1.1.2"
 modules = ["dist/bsp.cyr"]
 
-[deps.shravan]
-git = "https://github.com/MacCracken/shravan"
-tag = "2.0.0"
-modules = ["src/pcm.cyr", "src/wav.cyr", "src/codec.cyr"]
+[deps.vani]
+git = "https://github.com/MacCracken/vani"
+tag = "0.9.0"
+modules = ["dist/vani.cyr"]
