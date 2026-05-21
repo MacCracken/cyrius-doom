@@ -1,80 +1,72 @@
 # Cyrius DOOM — Claude Code Instructions
 
+> **Core rule**: this file is **preferences, process, and procedures** — durable rules that change rarely. Volatile state (current version, binary sizes, dep pins, in-flight slots, gates, consumers, recent releases) lives in [`docs/development/state.md`](docs/development/state.md), refreshed every release. Historical release narrative lives in [`docs/development/completed-phases.md`](docs/development/completed-phases.md). Do not inline state here — inlined state rots within a minor.
+
+---
+
 ## Project Identity
 
 **cyrius-doom** (homage to id Software's DOOM, 1993) — Clean-room DOOM engine in Cyrius. Direct framebuffer, no libc, no SDL, kernel syscalls only.
 
 - **Type**: Standalone game binary / kernel demo
-- **License**: GPL-3.0-only (clean-room implementation)
-- **Language**: Cyrius (native, compiled via cycc 6.0.1)
-- **Version**: SemVer, single source of truth at `VERSION`
-  (referenced via `version = "${file:VERSION}"` in `cyrius.cyml`)
-- **Binary size**: 585,224 B (20 modules + vani-core + bsp);
-  585,224 → ~260 KB recovery gated on Cyrius phase O3 real DCE.
-  `render_frame` 2.114 ms (bench-history 2026-05-21, 0.27.2).
-- **Status**: v0.27.2 — `: i64` return-type annotation sweep
-  across all 20 modules in `src/*.cyr`. 270 fn signatures total
-  (269 single-line + 1 multi-line `render_store_masked`).
-  Parse-only / ABI-identical — binary stays at 585,224 B
-  byte-for-byte against the 0.27.1 baseline, confirming the
-  v5.11.x annotation arc produces zero codegen delta.
-  `render_transform_vertex` (multi-return tuple) is annotated
-  too; cycc 6.0.1 treats `: i64` as documentation metadata
-  without enforcing it against tuple-shaped returns. Sets up
-  0.27.3's `Result<T, E>` retrofit at the IO/parse boundary
-  without further signature churn. v0.27.1 (prior cut) was the
-  bsp 1.1.3 + vani 0.9.4 dep-tag re-pin (585,320 → 585,224 B
-  via `Version:` header byte-swap; lockfile re-anchored on the
-  refreshed transitive hashes).
-- v0.27.0 (parent cut) covered the Cyrius 5.7.48 → 6.0.1 lift
-  (v5.8.x sum-types / `Result<T,E>` / `?` / exhaustive-match;
-  v5.11.x annotation arc; v6.0.0 `cyrc → cybs` + `cc5 → cycc`
-  rename; v6.0.1 stdlib-path hotfixes), vani 0.9.1 → 0.9.3
-  annotation pass, manifest modernization (`cyrius.toml` +
-  `cyrb.toml` retired, single `cyrius.cyml` with
-  `${file:VERSION}` template — matches patra/vani/sakshi/mihi),
-  and CI lift to the patra-style installer (pre-flight HTTP
-  gate, version-pinned install layout, `cyrius deps --verify`
-  guarded on populated lockfile pending the cycc 6.0.1
-  lockfile-writer regression fix). Honest growth-tax 565,856
-  → 585,320 B from v5.11.x annotation rt-table + v5.8.x
-  sum-type emit. E1M6 map-cap fix (MAP_MAX_SSECTORS 512→1024
-  from 0.24.6). Security hardened. Full gameplay loop,
-  DOOM-accurate lighting, masked midtextures, animated walls/
-  flats/sprites, WAD-native HUD + menus + intermission, ALSA
-  audio, weapon switching + bob, doors/lifts, automap, level
-  transitions (E1M1–E1M9 all rendering). CVE audit: 5 findings
-  fixed. **vani is transitional**: replaces retiring cyrius
-  stdlib `audio` (5.8.0); will itself be replaced by **dhvani**
-  once that port lands. **Next**: 0.27.3 `Result<T,E>` adoption
-  in `wad.cyr` / `texture.cyr` / `render.cyr` error paths
-  (now that the public-fn surface is annotated, retrofits land
-  cleanly); 0.27.4 `lib/test.cyr` table-driven refactor; 0.27.5
-  upstream-fix cleanup (drop lockfile workaround) once cycc
-  publishes the fix. **0.28.x** = DOOM Black Book Audit (was
-  0.25.0, re-anchored). **0.29.x** = performance pass against
-  Cyrius O4 regalloc.
+- **License**: GPL-3.0-only (clean-room implementation from documented specs)
+- **Language**: Cyrius (toolchain pinned in `cyrius.cyml [package].cyrius` — `cycc 6.0.1` at the time of writing; canonical pin is the file)
+- **Version**: `VERSION` at project root is the source of truth (referenced via `version = "${file:VERSION}"` in `cyrius.cyml`). Do not inline the number here.
 - **Genesis repo**: [agnosticos](https://github.com/MacCracken/agnosticos)
+- **Standards**: [First-Party Standards](https://github.com/MacCracken/agnosticos/blob/main/docs/development/planning/first-party-standards.md) · [First-Party Documentation](https://github.com/MacCracken/agnosticos/blob/main/docs/development/planning/first-party-documentation.md)
 - **Philosophy**: [AGNOS Philosophy](https://github.com/MacCracken/agnosticos/blob/main/docs/philosophy.md)
-- **Standards**: [First-Party Standards](https://github.com/MacCracken/agnosticos/blob/main/docs/development/applications/first-party-standards.md)
 
-## Consumers
+## Goal
 
-AGNOS kernel (initrd demo), kiran (game engine reference), vidya (field notes / language research)
+Own a clean-room DOOM engine in Cyrius — runnable on /dev/fb0, on AGNOS, and eventually on bare metal. No id Software code copied; everything from documented specs. Proves Cyrius can drive a real-time renderer at original-DOOM fidelity without libc, FPU, or external runtime.
 
-**Composes**: bsp (spatial geometry, git dep tag 1.1.3; vendored as `lib/bsp.cyr`), vani (audio, git dep tag 0.9.4; `dist/vani-core.cyr` profile, 22 `audio_*` symbols), sakshi (tracing, via cyrius stdlib)
+## Current State
 
-## References
+> Volatile state lives in [`docs/development/state.md`](docs/development/state.md) — current version, binary sizes, dep pins (bsp / vani tags), in-flight slot status, last-green gates, known-issue workarounds. Refreshed every release.
+>
+> Historical release narrative lives in [`docs/development/completed-phases.md`](docs/development/completed-phases.md). Per-release detail lives in [`CHANGELOG.md`](CHANGELOG.md).
+>
+> Forward-facing slots live in [`docs/development/roadmap.md`](docs/development/roadmap.md).
 
-These are the primary sources for clean-room implementation. Read before implementing.
+## Scaffolding
 
-- **[Game Engine Black Book: DOOM](https://fabiensanglard.net/gebbdoom/)** — Fabien Sanglard's engine analysis (rendering pipeline, BSP, visplanes, sprites)
-- **[Unofficial DOOM Specs](https://doomwiki.org/wiki/WAD)** — WAD format, lump types, map data structures
-- **[DOOM Source Code](https://github.com/id-Software/DOOM)** — GPL-2.0 reference (DO NOT copy — read for understanding only)
-- **[DOOM1.WAD (shareware)](https://github.com/nneonneo/universal-doom)** — Test WAD, downloaded by `scripts/get-wad.sh`
-- **vidya** — `content/cyrius/field_notes.toml` documents Cyrius-specific lessons from this build
+Project was scaffolded manually; subsequent modernization passes match the patra/vani/sakshi/mihi convention (single `cyrius.cyml`, `${file:VERSION}` template, patra-style CI installer). Do not hand-roll new structure if `cyrius init` covers it — fix the tool, then re-propagate.
 
-## Architecture
+## Quick Start
+
+```sh
+# Build (requires the toolchain pinned in cyrius.cyml)
+cyrius build src/main.cyr build/doom
+
+# Release build: NOPs dead functions in-place (used by release.yml)
+CYRIUS_DCE=1 cyrius build src/main.cyr build/doom
+
+# Run (requires DOOM1.WAD — see scripts/get-wad.sh)
+./build/doom wad/DOOM1.WAD              # interactive (/dev/fb0 or GTK bridge)
+./build/doom wad/DOOM1.WAD --ppm        # game screenshot mode (headless)
+./build/doom wad/DOOM1.WAD --ppm-menu   # menu screenshots
+./build/doom wad/DOOM1.WAD E1M3 --ppm   # specific map
+
+# Download shareware WAD (one-time, not in repo)
+sh scripts/get-wad.sh wad
+
+# Test
+cyrius test tests/doom.tcyr                                  # WAD-free subset
+cyrius build tests/doom.tcyr build/test_doom && \
+  ./build/test_doom wad/DOOM1.WAD                            # full suite
+
+# Fuzz
+cyrius build fuzz/fuzz_fixed.cyr build/fuzz_fixed && ./build/fuzz_fixed
+cyrius build fuzz/fuzz_wad.cyr   build/fuzz_wad   && ./build/fuzz_wad
+
+# Bench (also appends a row to bench-history.csv)
+sh scripts/bench-history.sh wad/DOOM1.WAD
+
+# One-shot
+sh scripts/run.sh
+```
+
+## Architecture (durable — module map)
 
 ```
 src/
@@ -93,129 +85,143 @@ src/
   things.cyr      — monster AI state machine, item pickups, damage
   status.cyr      — HUD: bitmap font, health/ammo/armor/face/keys
   sound.cyr       — PC speaker tone queue via ioctl
-  menu.cyr        — WAD-native title screen (TITLEPIC), main menu, skill select, M_SKULL cursor
+  audio.cyr       — WAD SFX loading + ALSA playback via vani
+  doors.cyr       — door / lift sector animation, tagged sectors, walk triggers
+  automap.cyr     — 2D overhead map (TAB toggle, Bresenham lines)
+  level.cyr       — episode/map tracking, exit lines, level stats
+  menu.cyr        — WAD-native title screen (TITLEPIC), main menu, skill select
 ```
 
-## Key Constraints
+Dep pins (bsp / vani versions) and 20-modules-vs-libs counts live in [`state.md`](docs/development/state.md). What composes what is durable; the version numbers are not.
 
-- **All math is 16.16 fixed-point** — no FPU. `asr()` required for right shifts (Cyrius >> is logical)
-- **No libc** — direct syscalls via `lib/io.cyr` for file I/O, framebuffer, keyboard, timer
-- **Heap-allocated data** — all large buffers via `alloc()` to stay under cc2's 256KB output limit
-- **Enums for constants** — saves gvar_toks slots (cc2 limit: 1024 initialized globals)
-- **320x200 resolution** — palette indexed (256 colors from WAD PLAYPAL lump)
-- **35Hz game tick** — matches original DOOM timing
-- **WAD files not included** — `scripts/get-wad.sh` downloads DOOM1.WAD shareware for testing
-- **Clean-room** — implemented from documented specs only, no id Software code copied
+## Key Principles
 
-## Development Process
+- **Correctness is the optimum sovereignty** — wrong code doesn't own anything; bugs own you. Verify before claiming.
+- **22 ms frame budget @ 35 Hz** — never skip benchmarks on changes to the render path. Measure before and after.
+- **Fuzz early** — `fuzz/fuzz_wad.cyr` + `fuzz/fuzz_fixed.cyr` have found bugs unit tests missed. Run before claiming robustness.
+- **`asr()` everywhere on signed shifts** — Cyrius `>>` is logical. Every right-shift on a signed value must use `asr()`.
+- **Lazy init guards** — `if (ptr == 0) { ptr = alloc(N); }` — prevents double-alloc and null deref. Pattern lives in framebuf / texture / masked-segs.
+- **Enum for constants** — saves `gvar_toks` slots (cycc limit: 1024 initialized globals). Use `var` only for mutable state.
+- **Patch cache** — `pcache_get()` eliminates WAD I/O during rendering (200× speedup). Don't bypass it.
+- **Sakshi tracing** — all error paths use `sakshi_error / sakshi_warn / sakshi_info` — structured timestamped logging. Don't `file_write(2, ...)` raw.
+- **Clean-room implementation** — read [Black Book](https://fabiensanglard.net/gebbdoom/) + [Unofficial Specs](https://doomwiki.org/wiki/WAD) before implementing. Never copy from [id Software DOOM source](https://github.com/id-Software/DOOM) (GPL-2.0; read for understanding only).
 
-### P(-1): Research (before implementing any module)
-
-1. Read the relevant chapter in DOOM Black Book
-2. Read the Unofficial DOOM Specs for data format details
-3. Check `vidya/content/cyrius/field_notes.toml` for Cyrius-specific gotchas
-4. Check `vidya/content/cyrius/language.toml` for compiler constraints
-5. **Security research** — for the feature area being implemented:
-   a. Search for known CVEs (DOOM, PrBoom, Chocolate Doom, ZDoom, GZDoom)
-   b. Search for exploit classes (buffer overflow, integer overflow, DoS, ACE)
-   c. Search for malicious WAD/savegame/network/DEHACKED attack vectors
-   d. Check `docs/audit/` for prior findings that apply
-   e. Write findings to `docs/audit/{date}-{topic}.md`
-   f. Add fix items to roadmap as next-version security tasks
-   g. Fix before shipping — no new attack surface without validation
-6. Document findings as comments in the source file header
-
-### Work Loop (continuous)
-
-1. Work phase — implement feature, fix bug, optimize
-2. Build check: `cyrius build src/main.cyr build/doom`
-3. Test: `./build/doom wad/DOOM1.WAD --ppm` (headless screenshot verification)
-4. Run fuzz harnesses: `cyrius fuzz` (fuzz/fuzz_wad.cyr, fuzz/fuzz_fixed.cyr)
-5. Binary size check — track growth per feature
-6. Review — performance (22ms frame budget), correctness (compare PPM to expected), memory (heap usage)
-7. Documentation — CHANGELOG, roadmap, vidya field notes for novel findings
-8. Version check — VERSION (single source of truth — `cyrius.cyml` reads it via `${file:VERSION}`), `src/main.cyr` banner in sync
-
-### Task Sizing
-
-- **Low/Medium**: Batch freely — multiple items per cycle
-- **Large**: Small bites — break into sub-tasks, verify each
-- **If unsure**: Treat as large. Research via vidya first, then externally for information
-
-### Refactoring
-
-- Refactor when the code tells you to — duplication, unclear boundaries, performance
-- Never refactor speculatively. Wait for the third instance
-- Every refactor must pass the same build + test + fuzz gates
-
-### Key Principles
-
-- **Never skip benchmarks.** 22ms frame time is the target. Measure before and after.
-- **Fuzz early.** The fuzz harnesses found 3 bugs that unit tests missed.
-- **asr() everywhere.** Cyrius >> is logical. Every right shift on signed values must use `asr()`.
-- **Lazy init guards.** `if (ptr == 0) { ptr = alloc(N); }` — prevents double-alloc and null deref.
-- **Enum for constants.** Saves gvar_toks slots — use `var` only for mutable state.
-- **Patch cache.** `pcache_get()` eliminates WAD I/O during rendering (200x speedup).
-- **Sakshi tracing.** All error paths use `sakshi_error/warn/info` — structured timestamped logging.
-
-## Build & Test Commands
-
-```sh
-# Build (requires Cyrius 5.5.0+)
-cyrius build src/main.cyr build/doom
-
-# Release build: NOPs dead functions in-place (binary size unchanged,
-# but ~49KB of unreachable code becomes inert — used by release.yml).
-CYRIUS_DCE=1 cyrius build src/main.cyr build/doom
-
-# Run (requires DOOM1.WAD)
-./build/doom wad/DOOM1.WAD              # interactive (needs /dev/fb0 or GTK viewer)
-./build/doom wad/DOOM1.WAD --ppm        # game screenshot mode (headless)
-./build/doom wad/DOOM1.WAD --ppm-menu   # menu screenshots (title/main/skill)
-./build/doom wad/DOOM1.WAD E1M3 --ppm   # specific map
-
-# Download shareware WAD
-sh scripts/get-wad.sh wad
-
-# Fuzz (build + run manually)
-cyrius build fuzz/fuzz_fixed.cyr build/fuzz_fixed && ./build/fuzz_fixed
-cyrius build fuzz/fuzz_wad.cyr build/fuzz_wad && ./build/fuzz_wad
-
-# One-shot run
-sh scripts/run.sh
-```
-
-## DO NOT
+## Rules (Hard Constraints)
 
 - **Do not commit or push** — the user handles all git operations
 - **NEVER use `gh` CLI** — use `curl` to GitHub API only
 - Do not include WAD files in the repo (gitignored)
-- Do not copy id Software source code — clean-room implementation from documented specs only
+- Do not copy id Software source — clean-room from documented specs only
 - Do not use floating point — all math is 16.16 fixed-point
-- Do not use bare `>>` on signed values — use `asr()` function
+- Do not use bare `>>` on signed values — use `asr()`
 - Do not skip fuzz testing before claiming robustness
-- Do not allocate with `var buf[N]` for buffers > 100 bytes — use `alloc()`
+- Do not allocate `var buf[N]` for buffers > 100 bytes — use `alloc()` (cycc 256 KB output limit)
+- Do not hardcode toolchain versions in CI YAML — `cyrius = "X.Y.Z"` in `cyrius.cyml` is the only source of truth
+- Do not inline volatile state in CLAUDE.md — it goes in `docs/development/state.md`
 
-## Documentation Structure
+## Process
 
-```
-Root files (required):
-  README.md, CHANGELOG.md, CLAUDE.md, CONTRIBUTING.md, SECURITY.md,
-  CODE_OF_CONDUCT.md, LICENSE, VERSION, cyrius.cyml
+### P(-1): Research (before implementing any module)
 
-docs/ (required):
-  architecture/overview.md — rendering pipeline, memory layout
-  development/roadmap.md — per-version milestones with status
+1. Read the relevant chapter in DOOM Black Book.
+2. Read the Unofficial DOOM Specs for data-format details.
+3. Check `vidya/content/cyrius/field_notes.toml` for Cyrius-specific gotchas.
+4. Check `vidya/content/cyrius/language.toml` for compiler constraints.
+5. **Security research** — for the feature area:
+   a. Search known CVEs (DOOM / PrBoom / Chocolate Doom / ZDoom / GZDoom).
+   b. Search exploit classes (buffer overflow, integer overflow, DoS, ACE).
+   c. Search malicious-WAD / savegame / network / DEHACKED attack vectors.
+   d. Check `docs/audit/` for prior findings that apply.
+   e. Write findings to `docs/audit/{date}-{topic}.md`.
+   f. Add fix items to roadmap as next-version security tasks.
+   g. Fix before shipping — no new attack surface without validation.
+6. Document findings as comments in the source file header.
 
-scripts/:
-  get-wad.sh — download DOOM1.WAD shareware
-  run.sh — one-shot build + run
+### Work Loop (continuous)
 
-fuzz/:
-  fuzz_wad.cyr — WAD parser with random malformed inputs
-  fuzz_fixed.cyr — fixed-point math with extreme values
-```
+1. **Work phase** — feature, fix, optimize.
+2. **Build check** — `cyrius build src/main.cyr build/doom`.
+3. **Test** — `cyrius test tests/doom.tcyr` (WAD-free) and `./build/test_doom wad/DOOM1.WAD` (full).
+4. **PPM smoke** — `./build/doom wad/DOOM1.WAD --ppm`; verify map summary matches state.md and PPMs are 192,015 B each.
+5. **Fuzz** — `fuzz_wad` + `fuzz_fixed` if the change touches parser or fixed-point.
+6. **Bench** — `sh scripts/bench-history.sh` for any change to the render path; verify variance-level deltas only unless a perf claim is being made.
+7. **Lockfile** — `sha256sum lib/{vani-core,bsp,yukti,patra,sakshi}.cyr > cyrius.lock` and `cyrius deps --verify` (workaround for the cycc 6.0.1 lockfile-writer regression; tracked under v0.27.5).
+8. **Documentation** — CHANGELOG entry, state.md refresh, roadmap forward-list update, doc-health row touched if a doc was edited.
+9. **Version check** — `VERSION` (single source of truth), `src/main.cyr` banner, CHANGELOG header all in sync.
 
-## CHANGELOG Format
+### Closeout Pass (before every minor bump)
 
-Follow [Keep a Changelog](https://keepachangelog.com/). Performance claims MUST include benchmark numbers (frame time, binary size). Every version bump updates VERSION (single source of truth — `cyrius.cyml` resolves it via `${file:VERSION}`) + `src/main.cyr` banner.
+1. Full test suite — all `.tcyr` pass (37/37 WAD-free, 73/73 full).
+2. Bench baseline — `bench-history.sh`; compare against prior closeout.
+3. Dead-code audit — `CYRIUS_DCE=1` build; record NOP-sled size in CHANGELOG.
+4. Refactor pass — consolidate the minor's additions where parallel codepaths accreted.
+5. Code review pass — walk diffs end-to-end for missed guards, ABI leaks, off-by-ones, silently-ignored errors.
+6. Cleanup sweep — stale comments, dead branches, unused includes.
+7. Security re-scan — quick grep for new `sys_system`, unchecked writes, unsanitized input, buffer-size mismatches.
+8. Doc sync — CHANGELOG, roadmap (forward), state.md, completed-phases.md (move shipped row in), doc-health.md (touch affected rows).
+9. Version verify — `VERSION`, `cyrius.cyml`, CHANGELOG header, intended git tag all match.
+10. Full build from clean — `rm -rf build && cyrius deps && CYRIUS_DCE=1 cyrius build` passes clean.
+
+### Task Sizing
+
+- **Low/Medium**: batch freely — multiple items per cycle.
+- **Large**: small bites — break into sub-tasks, verify each.
+- **If unsure**: treat as large. Research via vidya first, then externally.
+
+### Refactoring
+
+- Refactor when the code tells you to — duplication, unclear boundaries, measured bottlenecks.
+- Never refactor speculatively. Wait for the third instance.
+- Every refactor must pass the same build + test + fuzz + bench gates.
+
+## Cyrius Conventions
+
+- **16.16 fixed-point math** — no FPU; `fx_mul` / `fx_div` / `asr` are the workhorses.
+- **No libc** — direct syscalls via `lib/io.cyr`.
+- **Heap-allocated large buffers** — `alloc()` for anything > 100 bytes; `var buf[N]` bloats the binary.
+- **Enum-packed constants** — see `MapMax` / `MapSize` / `MapLineFlag` / `Fixed` / `Angle` / `ViewConst` / `WeaponConst` for the pattern.
+- **35 Hz game tick** — matches original DOOM timing.
+- **320×200 palette-indexed** — 256 colors from WAD PLAYPAL lump.
+- **Multi-return tuples** — `var tx, ty = render_transform_vertex(wx, wy);` — supported since Cyrius 3.7.2.
+- **Switch / case** — case labels require literal integers, not enum identifiers.
+- All struct-field access via `load64` / `store64` with offsets (8-byte field convention).
+- `cycc` accepts `: i64` return-type annotations as parse-only metadata (v5.11.x). Every public fn in `src/*.cyr` carries one as of v0.27.2.
+
+## CI / Release
+
+- **Toolchain pin**: `cyrius = "X.Y.Z"` in `cyrius.cyml [package]`. No separate `.cyrius-toolchain`. CI + release both read this; no hardcoded versions in YAML.
+- **Patra-style installer**: pre-flight HTTP check on the cyrius release asset; version-pinned install layout (`~/.cyrius/versions/$V/{bin,lib}/`).
+- **`cyrius.lock` workaround** (cycc 6.0.1 regression): repo's lockfile is hand-populated via `sha256sum`; CI gates the `--verify` step on a populated lockfile so it doesn't trivially pass against an empty resolver write. Drops at v0.27.5.
+- **Dead-code elimination**: release workflow runs `CYRIUS_DCE=1`. Binary size tracked.
+- **CI test job**: WAD-free 37-assert subset (full 73-assert suite needs a WAD; not exercised in CI by design).
+- **Bench history**: `bench-history.csv` appended via `scripts/bench-history.sh`; compare row-over-row.
+
+## References
+
+These are the primary sources for clean-room implementation. Read before implementing.
+
+- **[Game Engine Black Book: DOOM](https://fabiensanglard.net/gebbdoom/)** — Fabien Sanglard's engine analysis (rendering pipeline, BSP, visplanes, sprites)
+- **[Unofficial DOOM Specs](https://doomwiki.org/wiki/WAD)** — WAD format, lump types, map data structures
+- **[DOOM Source Code](https://github.com/id-Software/DOOM)** — GPL-2.0 reference (DO NOT copy — read for understanding only)
+- **[DOOM1.WAD (shareware)](https://github.com/nneonneo/universal-doom)** — test WAD, downloaded by `scripts/get-wad.sh`
+- **vidya** — `content/cyrius/field_notes.toml` documents Cyrius-specific lessons from this build
+
+## Docs
+
+- [`docs/architecture/`](docs/architecture/) — non-obvious invariants & module-level layout
+- [`docs/audit/`](docs/audit/) — security audit reports (`YYYY-MM-DD-*.md`)
+- [`docs/proposals/`](docs/proposals/) — pre-ADR design drafts (`archive/` for shipped/closed)
+- [`docs/sources.md`](docs/sources.md) — citations for math / engine reference material
+- [`docs/development/roadmap.md`](docs/development/roadmap.md) — **forward-facing slots only**
+- [`docs/development/state.md`](docs/development/state.md) — **live state snapshot, refreshed every release**
+- [`docs/development/completed-phases.md`](docs/development/completed-phases.md) — chronological shipped-version index
+- [`docs/doc-health.md`](docs/doc-health.md) — fresh / stale / archive ledger across the whole doc tree (lives at `docs/` root per first-party-documentation convention)
+- [`CHANGELOG.md`](CHANGELOG.md) — Keep a Changelog format; per-release detail
+
+New non-obvious quirks and constraints land in `docs/architecture/` as numbered items (`NNN-kebab-case.md`) once that subdirectory earns its second entry. New decisions land in `docs/adr/` once that subdirectory is scaffolded. Never renumber either series.
+
+Full doc-tree convention: [first-party-documentation.md](https://github.com/MacCracken/agnosticos/blob/main/docs/development/planning/first-party-documentation.md).
+
+## CHANGELOG format
+
+Follow [Keep a Changelog](https://keepachangelog.com/). Performance claims **must** include benchmark numbers (frame time, binary size). Every version bump updates `VERSION` (single source of truth — `cyrius.cyml` resolves it via `${file:VERSION}`) + `src/main.cyr` banner. State.md and completed-phases.md update in the same commit.
