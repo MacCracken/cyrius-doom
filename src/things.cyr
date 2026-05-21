@@ -125,32 +125,32 @@ enum ThingFlags {
 }
 
 # Field accessors
-fn thing_x(idx) { return load64(things + idx * THING_SIZE); }
-fn thing_y(idx) { return load64(things + idx * THING_SIZE + 8); }
-fn thing_angle(idx) { return load64(things + idx * THING_SIZE + 24); }
-fn thing_type(idx) { return load64(things + idx * THING_SIZE + 32); }
-fn thing_state(idx) { return load64(things + idx * THING_SIZE + 40); }
-fn thing_health(idx) { return load64(things + idx * THING_SIZE + 48); }
-fn thing_category(idx) { return load64(things + idx * THING_SIZE + 56); }
-fn thing_tics(idx) { return load64(things + idx * THING_SIZE + 96); }
-fn thing_radius(idx) { return load64(things + idx * THING_SIZE + 80); }
-fn thing_flags(idx) { return load64(things + idx * THING_SIZE + 104); }
+fn thing_x(idx): i64 { return load64(things + idx * THING_SIZE); }
+fn thing_y(idx): i64 { return load64(things + idx * THING_SIZE + 8); }
+fn thing_angle(idx): i64 { return load64(things + idx * THING_SIZE + 24); }
+fn thing_type(idx): i64 { return load64(things + idx * THING_SIZE + 32); }
+fn thing_state(idx): i64 { return load64(things + idx * THING_SIZE + 40); }
+fn thing_health(idx): i64 { return load64(things + idx * THING_SIZE + 48); }
+fn thing_category(idx): i64 { return load64(things + idx * THING_SIZE + 56); }
+fn thing_tics(idx): i64 { return load64(things + idx * THING_SIZE + 96); }
+fn thing_radius(idx): i64 { return load64(things + idx * THING_SIZE + 80); }
+fn thing_flags(idx): i64 { return load64(things + idx * THING_SIZE + 104); }
 
-fn thing_set_state(idx, st) { store64(things + idx * THING_SIZE + 40, st); return 0; }
-fn thing_set_health(idx, h) { store64(things + idx * THING_SIZE + 48, h); return 0; }
-fn thing_set_tics(idx, t) { store64(things + idx * THING_SIZE + 96, t); return 0; }
-fn thing_set_flags(idx, f) { store64(things + idx * THING_SIZE + 104, f); return 0; }
-fn thing_frame(idx) { return load64(things + idx * THING_SIZE + 112); }
-fn thing_set_frame(idx, f) { store64(things + idx * THING_SIZE + 112, f); return 0; }
-fn thing_set_x(idx, v) { store64(things + idx * THING_SIZE, v); return 0; }
-fn thing_set_y(idx, v) { store64(things + idx * THING_SIZE + 8, v); return 0; }
-fn thing_set_angle(idx, v) { store64(things + idx * THING_SIZE + 24, v); return 0; }
+fn thing_set_state(idx, st): i64 { store64(things + idx * THING_SIZE + 40, st); return 0; }
+fn thing_set_health(idx, h): i64 { store64(things + idx * THING_SIZE + 48, h); return 0; }
+fn thing_set_tics(idx, t): i64 { store64(things + idx * THING_SIZE + 96, t); return 0; }
+fn thing_set_flags(idx, f): i64 { store64(things + idx * THING_SIZE + 104, f); return 0; }
+fn thing_frame(idx): i64 { return load64(things + idx * THING_SIZE + 112); }
+fn thing_set_frame(idx, f): i64 { store64(things + idx * THING_SIZE + 112, f); return 0; }
+fn thing_set_x(idx, v): i64 { store64(things + idx * THING_SIZE, v); return 0; }
+fn thing_set_y(idx, v): i64 { store64(things + idx * THING_SIZE + 8, v); return 0; }
+fn thing_set_angle(idx, v): i64 { store64(things + idx * THING_SIZE + 24, v); return 0; }
 
 # ================================================================
 # Classify a DoomEd thing type
 # ================================================================
 
-fn thing_classify(ttype) {
+fn thing_classify(ttype): i64 {
     # Monsters
     if (ttype == TTYPE_ZOMBIEMAN) { return CAT_MONSTER; }
     if (ttype == TTYPE_SHOTGUY) { return CAT_MONSTER; }
@@ -205,7 +205,7 @@ fn thing_classify(ttype) {
 }
 
 # Get default health for a monster type
-fn thing_default_health(ttype) {
+fn thing_default_health(ttype): i64 {
     if (ttype == TTYPE_ZOMBIEMAN) { return 20; }
     if (ttype == TTYPE_SHOTGUY) { return 30; }
     if (ttype == TTYPE_IMP) { return 60; }
@@ -221,7 +221,7 @@ fn thing_default_health(ttype) {
 }
 
 # Get default radius (in fixed-point, map units << 16)
-fn thing_default_radius(ttype) {
+fn thing_default_radius(ttype): i64 {
     if (ttype == TTYPE_CYBERDEMON) { return 40 << 16; }
     if (ttype == TTYPE_SPIDER) { return 128 << 16; }
     if (ttype == TTYPE_CACODEMON) { return 31 << 16; }
@@ -235,7 +235,7 @@ fn thing_default_radius(ttype) {
 # Spawn things from map data
 # ================================================================
 
-fn things_spawn_from_map() {
+fn things_spawn_from_map(): i64 {
     if (things == 0) { things = alloc(THING_MAX * THING_SIZE); }
     thing_count = 0;
 
@@ -312,7 +312,7 @@ fn things_spawn_from_map() {
 # Can monster at (mx, my) see point at (tx, ty)?
 # Simplified: check if any one-sided linedef blocks the line.
 
-fn thing_check_sight(mx, my, tx, ty) {
+fn thing_check_sight(mx, my, tx, ty): i64 {
     var dx = tx - mx;
     var dy = ty - my;
 
@@ -368,7 +368,7 @@ enum FrameConst {
     FRAME_RATE = 4;
 }
 
-fn thing_animate(idx) {
+fn thing_animate(idx): i64 {
     var state = thing_state(idx);
     var frame = thing_frame(idx);
 
@@ -417,7 +417,7 @@ fn thing_animate(idx) {
     return 0;
 }
 
-fn thing_ai_tick(idx) {
+fn thing_ai_tick(idx): i64 {
     var flags = thing_flags(idx);
     if ((flags & TF_ACTIVE) == 0) { return 0; }
     if ((flags & TF_SHOOTABLE) == 0) { return 0; }
@@ -524,7 +524,7 @@ fn thing_ai_tick(idx) {
 # Item pickup check
 # ================================================================
 
-fn things_check_pickups() {
+fn things_check_pickups(): i64 {
     var pickup_radius = 20 << 16;
 
     for (var i = 0; i < thing_count; i += 1) {
@@ -595,7 +595,7 @@ fn things_check_pickups() {
 # Damage a thing (from player shooting)
 # ================================================================
 
-fn thing_damage(idx, damage) {
+fn thing_damage(idx, damage): i64 {
     var hp = thing_health(idx);
     hp -= damage;
     thing_set_health(idx, hp);
@@ -616,7 +616,7 @@ fn thing_damage(idx, damage) {
 # Tick all things
 # ================================================================
 
-fn things_tick() {
+fn things_tick(): i64 {
     for (var i = 0; i < thing_count; i += 1) {
         thing_ai_tick(i);
         thing_animate(i);
@@ -629,7 +629,7 @@ fn things_tick() {
 # Diagnostics
 # ================================================================
 
-fn things_print_stats() {
+fn things_print_stats(): i64 {
     var monsters = 0;
     var items = 0;
     var decor = 0;

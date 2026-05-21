@@ -21,7 +21,7 @@ var level_time = 0;
 # Map name buffer
 var level_name_buf = 0;
 
-fn level_init() {
+fn level_init(): i64 {
     level_name_buf = alloc(8);
     cur_episode = 1;
     cur_map = 1;
@@ -31,7 +31,7 @@ fn level_init() {
 }
 
 # Build map name string "E1M1" etc.
-fn level_get_name() {
+fn level_get_name(): i64 {
     store8(level_name_buf, 69);
     store8(level_name_buf + 1, 48 + cur_episode);
     store8(level_name_buf + 2, 77);
@@ -40,7 +40,7 @@ fn level_get_name() {
     return level_name_buf;
 }
 
-fn level_reset_stats() {
+fn level_reset_stats(): i64 {
     level_kills = 0;
     level_items = 0;
     level_secrets = 0;
@@ -66,27 +66,27 @@ fn level_reset_stats() {
     return 0;
 }
 
-fn level_add_kill() { level_kills += 1; return 0; }
-fn level_add_item() { level_items += 1; return 0; }
-fn level_add_secret() { level_secrets += 1; return 0; }
-fn level_tick_time() { level_time += 1; return 0; }
+fn level_add_kill(): i64 { level_kills += 1; return 0; }
+fn level_add_item(): i64 { level_items += 1; return 0; }
+fn level_add_secret(): i64 { level_secrets += 1; return 0; }
+fn level_tick_time(): i64 { level_time += 1; return 0; }
 
 # Trigger normal exit (special 11, 52, 124)
-fn level_exit_normal() {
+fn level_exit_normal(): i64 {
     next_level_flag = 1;
     secret_exit_flag = 0;
     return 0;
 }
 
 # Trigger secret exit (special 51)
-fn level_exit_secret() {
+fn level_exit_secret(): i64 {
     next_level_flag = 1;
     secret_exit_flag = 1;
     return 0;
 }
 
 # Advance to next map
-fn level_advance() {
+fn level_advance(): i64 {
     if (secret_exit_flag == 1) {
         # Secret exit: E1M3→E1M9, E2M5→E2M9, E3M6→E3M9
         cur_map = 9;
@@ -119,7 +119,7 @@ fn level_advance() {
 
 # Draw a WI number at (px, py) using WINUM0-WINUM9 patches
 # Returns width drawn (for right-alignment)
-fn wi_draw_number(num, px, py) {
+fn wi_draw_number(num, px, py): i64 {
     if (num < 0) { num = 0; }
     if (num > 999) { num = 999; }
 
@@ -169,7 +169,7 @@ fn wi_draw_number(num, px, py) {
     return 0;
 }
 
-fn wi_draw_percent(num, max, px, py) {
+fn wi_draw_percent(num, max, px, py): i64 {
     var pct = 0;
     if (max > 0) { pct = num * 100 / max; }
     if (pct > 100) { pct = 100; }
@@ -178,7 +178,7 @@ fn wi_draw_percent(num, max, px, py) {
     return 0;
 }
 
-fn wi_draw_time(ticks, px, py) {
+fn wi_draw_time(ticks, px, py): i64 {
     var secs = ticks / 35;
     var mins = secs / 60;
     secs = secs % 60;
@@ -203,7 +203,7 @@ fn wi_draw_time(ticks, px, py) {
 }
 
 # Draw the full intermission screen
-fn level_intermission() {
+fn level_intermission(): i64 {
     menu_init();
     framebuf_clear(0);
 
@@ -258,7 +258,7 @@ fn level_intermission() {
 }
 
 # Set specific map (from command line or menu)
-fn level_set(episode, map) {
+fn level_set(episode, map): i64 {
     cur_episode = episode;
     cur_map = map;
     next_level_flag = 0;

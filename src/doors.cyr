@@ -32,25 +32,25 @@ enum DoorState {
 var door_thinkers = 0;
 var door_count = 0;
 
-fn doors_init() {
+fn doors_init(): i64 {
     door_thinkers = alloc(DOOR_MAX * DOOR_ENTRY_SIZE);
     door_count = 0;
     return 0;
 }
 
-fn door_sector(idx) { return load64(door_thinkers + idx * DOOR_ENTRY_SIZE); }
-fn door_state(idx) { return load64(door_thinkers + idx * DOOR_ENTRY_SIZE + 8); }
-fn door_height(idx) { return load64(door_thinkers + idx * DOOR_ENTRY_SIZE + 16); }
-fn door_target(idx) { return load64(door_thinkers + idx * DOOR_ENTRY_SIZE + 24); }
-fn door_wait(idx) { return load64(door_thinkers + idx * DOOR_ENTRY_SIZE + 32); }
-fn door_original(idx) { return load64(door_thinkers + idx * DOOR_ENTRY_SIZE + 40); }
+fn door_sector(idx): i64 { return load64(door_thinkers + idx * DOOR_ENTRY_SIZE); }
+fn door_state(idx): i64 { return load64(door_thinkers + idx * DOOR_ENTRY_SIZE + 8); }
+fn door_height(idx): i64 { return load64(door_thinkers + idx * DOOR_ENTRY_SIZE + 16); }
+fn door_target(idx): i64 { return load64(door_thinkers + idx * DOOR_ENTRY_SIZE + 24); }
+fn door_wait(idx): i64 { return load64(door_thinkers + idx * DOOR_ENTRY_SIZE + 32); }
+fn door_original(idx): i64 { return load64(door_thinkers + idx * DOOR_ENTRY_SIZE + 40); }
 
-fn door_set_state(idx, v) { store64(door_thinkers + idx * DOOR_ENTRY_SIZE + 8, v); return 0; }
-fn door_set_height(idx, v) { store64(door_thinkers + idx * DOOR_ENTRY_SIZE + 16, v); return 0; }
-fn door_set_wait(idx, v) { store64(door_thinkers + idx * DOOR_ENTRY_SIZE + 32, v); return 0; }
+fn door_set_state(idx, v): i64 { store64(door_thinkers + idx * DOOR_ENTRY_SIZE + 8, v); return 0; }
+fn door_set_height(idx, v): i64 { store64(door_thinkers + idx * DOOR_ENTRY_SIZE + 16, v); return 0; }
+fn door_set_wait(idx, v): i64 { store64(door_thinkers + idx * DOOR_ENTRY_SIZE + 32, v); return 0; }
 
 # Find the highest ceiling of sectors neighboring a given sector
-fn find_highest_neighbor_ceil(sector_idx) {
+fn find_highest_neighbor_ceil(sector_idx): i64 {
     var best = map_sector_ceilh(sector_idx);
     for (var i = 0; i < map_num_linedefs; i += 1) {
         var rs = map_linedef_side_right(i);
@@ -72,7 +72,7 @@ fn find_highest_neighbor_ceil(sector_idx) {
 }
 
 # Find the lowest floor of sectors neighboring a given sector
-fn find_lowest_neighbor_floor(sector_idx) {
+fn find_lowest_neighbor_floor(sector_idx): i64 {
     var best = map_sector_floorh(sector_idx);
     for (var i = 0; i < map_num_linedefs; i += 1) {
         var rs = map_linedef_side_right(i);
@@ -94,7 +94,7 @@ fn find_lowest_neighbor_floor(sector_idx) {
 }
 
 # Check if sector already has an active thinker
-fn door_find_sector(sector_idx) {
+fn door_find_sector(sector_idx): i64 {
     for (var i = 0; i < door_count; i += 1) {
         if (door_sector(i) == sector_idx) { return i; }
     }
@@ -102,7 +102,7 @@ fn door_find_sector(sector_idx) {
 }
 
 # Open a door (raise ceiling)
-fn door_open(sector_idx) {
+fn door_open(sector_idx): i64 {
     if (door_find_sector(sector_idx) >= 0) { return 0; }
     if (door_count >= DOOR_MAX) { return 0; }
 
@@ -125,7 +125,7 @@ fn door_open(sector_idx) {
 }
 
 # Activate a lift (lower floor)
-fn lift_activate(sector_idx) {
+fn lift_activate(sector_idx): i64 {
     if (door_find_sector(sector_idx) >= 0) { return 0; }
     if (door_count >= DOOR_MAX) { return 0; }
 
@@ -146,7 +146,7 @@ fn lift_activate(sector_idx) {
 }
 
 # Tick all active door/lift thinkers
-fn doors_tick() {
+fn doors_tick(): i64 {
     for (var i = 0; i < door_count; i += 1) {
         var sec = door_sector(i);
         var state = door_state(i);
@@ -217,7 +217,7 @@ fn doors_tick() {
 # Cast a short ray forward from the player, find the nearest linedef,
 # check its special type, and trigger the appropriate action.
 
-fn doors_use() {
+fn doors_use(): i64 {
     # Ray from player position in facing direction, length 64 map units
     var use_dist = 64 << 16;
     var rx = player_x + fixed_mul(fixed_cos(player_angle), use_dist);
@@ -313,7 +313,7 @@ fn doors_use() {
 }
 
 # Walk-over triggers: check if player crossed a special linedef
-fn doors_walk_trigger(old_x, old_y, new_x, new_y) {
+fn doors_walk_trigger(old_x, old_y, new_x, new_y): i64 {
     for (var i = 0; i < map_num_linedefs; i += 1) {
         var special = load64(map_linedefs + i * MAP_LINEDEF_SIZE + 24);
         if (special == 0) { continue; }

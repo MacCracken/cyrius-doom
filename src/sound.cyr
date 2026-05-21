@@ -35,7 +35,7 @@ var sound_ticks_left = 0;
 var sound_queue_freq = 0;
 var sound_queue_ticks = 0;
 
-fn sound_init() {
+fn sound_init(): i64 {
     # Try to open /dev/console for speaker control
     sound_fd = syscall(2, "/dev/console", 2, 0);
     if (sound_fd >= 0) {
@@ -44,7 +44,7 @@ fn sound_init() {
     return 0;
 }
 
-fn sound_shutdown() {
+fn sound_shutdown(): i64 {
     if (sound_enabled == 1) {
         # Silence
         syscall(SYS_IOCTL, sound_fd, KIOCSOUND, 0);
@@ -56,7 +56,7 @@ fn sound_shutdown() {
 }
 
 # Set speaker frequency (Hz). 0 = silence.
-fn sound_set_freq(hz) {
+fn sound_set_freq(hz): i64 {
     if (sound_enabled == 0) { return 0; }
     if (hz <= 0) {
         syscall(SYS_IOCTL, sound_fd, KIOCSOUND, 0);
@@ -74,33 +74,33 @@ fn sound_set_freq(hz) {
 # Duration is in game ticks (1/35 sec each).
 
 # Play a tone for N ticks
-fn sound_play(freq, ticks) {
+fn sound_play(freq, ticks): i64 {
     sound_queue_freq = freq;
     sound_queue_ticks = ticks;
     return 0;
 }
 
 # Predefined sound effects
-fn sound_pistol() { sound_play(800, 2); return 0; }
-fn sound_shotgun() { sound_play(400, 3); return 0; }
-fn sound_door_open() { sound_play(200, 5); return 0; }
-fn sound_door_close() { sound_play(150, 5); return 0; }
-fn sound_item_pickup() { sound_play(1200, 2); return 0; }
-fn sound_player_pain() { sound_play(300, 3); return 0; }
-fn sound_monster_pain() { sound_play(250, 2); return 0; }
-fn sound_monster_die() { sound_play(100, 8); return 0; }
-fn sound_switch() { sound_play(600, 2); return 0; }
-fn sound_explode() { sound_play(80, 10); return 0; }
+fn sound_pistol(): i64 { sound_play(800, 2); return 0; }
+fn sound_shotgun(): i64 { sound_play(400, 3); return 0; }
+fn sound_door_open(): i64 { sound_play(200, 5); return 0; }
+fn sound_door_close(): i64 { sound_play(150, 5); return 0; }
+fn sound_item_pickup(): i64 { sound_play(1200, 2); return 0; }
+fn sound_player_pain(): i64 { sound_play(300, 3); return 0; }
+fn sound_monster_pain(): i64 { sound_play(250, 2); return 0; }
+fn sound_monster_die(): i64 { sound_play(100, 8); return 0; }
+fn sound_switch(): i64 { sound_play(600, 2); return 0; }
+fn sound_explode(): i64 { sound_play(80, 10); return 0; }
 
 # Menu sounds
-fn sound_menu_move() { sound_play(500, 1); return 0; }
-fn sound_menu_select() { sound_play(1000, 2); return 0; }
+fn sound_menu_move(): i64 { sound_play(500, 1); return 0; }
+fn sound_menu_select(): i64 { sound_play(1000, 2); return 0; }
 
 # ================================================================
 # Sound tick (called each game tick)
 # ================================================================
 
-fn sound_tick() {
+fn sound_tick(): i64 {
     if (sound_enabled == 0) { return 0; }
 
     # Start queued sound

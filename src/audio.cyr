@@ -15,7 +15,7 @@ var snd_cache_rates = 0;
 var snd_cache_count = 0;
 var audio_dev = 0;
 
-fn audio_init() {
+fn audio_init(): i64 {
     snd_cache_lumps = alloc(SND_CACHE_MAX * 8);
     snd_cache_data = alloc(SND_CACHE_MAX * 8);
     snd_cache_sizes = alloc(SND_CACHE_MAX * 8);
@@ -35,7 +35,7 @@ fn audio_init() {
     return 0;
 }
 
-fn audio_shutdown() {
+fn audio_shutdown(): i64 {
     if (audio_dev != 0) {
         audio_drain(audio_dev);
         audio_close(audio_dev);
@@ -45,7 +45,7 @@ fn audio_shutdown() {
 }
 
 # Load a sound from WAD into cache
-fn audio_load(lump_name) {
+fn audio_load(lump_name): i64 {
     var lump = wad_find_lump(lump_name);
     if (lump < 0) { return -1; }
 
@@ -80,7 +80,7 @@ fn audio_load(lump_name) {
 }
 
 # Preload common DOOM sounds
-fn audio_preload() {
+fn audio_preload(): i64 {
     audio_load("DSPISTOL");
     audio_load("DSSHOTGN");
     audio_load("DSDOROPN");
@@ -97,7 +97,7 @@ fn audio_preload() {
 }
 
 # Play a cached sound effect
-fn audio_play(cache_idx) {
+fn audio_play(cache_idx): i64 {
     if (cache_idx < 0) { return 0; }
     if (cache_idx >= snd_cache_count) { return 0; }
     if (audio_dev == 0) { return 0; }
@@ -110,7 +110,7 @@ fn audio_play(cache_idx) {
 }
 
 # Play by WAD lump name (loads if not cached)
-fn audio_play_name(lump_name) {
+fn audio_play_name(lump_name): i64 {
     var idx = audio_load(lump_name);
     audio_play(idx);
     return 0;

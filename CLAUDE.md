@@ -11,16 +11,22 @@
   (referenced via `version = "${file:VERSION}"` in `cyrius.cyml`)
 - **Binary size**: 585,224 B (20 modules + vani-core + bsp);
   585,224 → ~260 KB recovery gated on Cyrius phase O3 real DCE.
-  `render_frame` 2.146 ms (bench-history 2026-05-21).
-- **Status**: v0.27.1 — bsp 1.1.3 + vani 0.9.4 dep-tag re-pin
-  to the freshly-published upstream tags (both bundles
-  byte-identical to 0.27.0 pins save for `Version:` header).
-  Closes out 0.27.0's "queued for 0.27.1" item. Binary 585,320
-  → 585,224 B (−96 B, `Version:` header byte-swap; not a real
-  shrink). `cyrius.lock` re-anchored on the new bundle hashes
-  (5/5 rotated as vani 0.9.4's transitive resolution refreshed
-  yukti / patra / sakshi too).
-- v0.27.0 (prior cut) covered the Cyrius 5.7.48 → 6.0.1 lift
+  `render_frame` 2.114 ms (bench-history 2026-05-21, 0.27.2).
+- **Status**: v0.27.2 — `: i64` return-type annotation sweep
+  across all 20 modules in `src/*.cyr`. 270 fn signatures total
+  (269 single-line + 1 multi-line `render_store_masked`).
+  Parse-only / ABI-identical — binary stays at 585,224 B
+  byte-for-byte against the 0.27.1 baseline, confirming the
+  v5.11.x annotation arc produces zero codegen delta.
+  `render_transform_vertex` (multi-return tuple) is annotated
+  too; cycc 6.0.1 treats `: i64` as documentation metadata
+  without enforcing it against tuple-shaped returns. Sets up
+  0.27.3's `Result<T, E>` retrofit at the IO/parse boundary
+  without further signature churn. v0.27.1 (prior cut) was the
+  bsp 1.1.3 + vani 0.9.4 dep-tag re-pin (585,320 → 585,224 B
+  via `Version:` header byte-swap; lockfile re-anchored on the
+  refreshed transitive hashes).
+- v0.27.0 (parent cut) covered the Cyrius 5.7.48 → 6.0.1 lift
   (v5.8.x sum-types / `Result<T,E>` / `?` / exhaustive-match;
   v5.11.x annotation arc; v6.0.0 `cyrc → cybs` + `cc5 → cycc`
   rename; v6.0.1 stdlib-path hotfixes), vani 0.9.1 → 0.9.3
@@ -40,15 +46,14 @@
   transitions (E1M1–E1M9 all rendering). CVE audit: 5 findings
   fixed. **vani is transitional**: replaces retiring cyrius
   stdlib `audio` (5.8.0); will itself be replaced by **dhvani**
-  once that port lands. **Next**: 0.27.2 `: i64` annotation
-  sweep on doom's own public-fn surface (parse-only,
-  ABI-identical); 0.27.3 `Result<T,E>` adoption in `wad.cyr` /
-  `texture.cyr` / `render.cyr` error paths; 0.27.4
-  `lib/test.cyr` table-driven refactor; 0.27.5 upstream-fix
-  cleanup (drop lockfile workaround) once cycc publishes the
-  fix. **0.28.x** = DOOM Black Book Audit (was 0.25.0,
-  re-anchored). **0.29.x** = performance pass against Cyrius
-  O4 regalloc.
+  once that port lands. **Next**: 0.27.3 `Result<T,E>` adoption
+  in `wad.cyr` / `texture.cyr` / `render.cyr` error paths
+  (now that the public-fn surface is annotated, retrofits land
+  cleanly); 0.27.4 `lib/test.cyr` table-driven refactor; 0.27.5
+  upstream-fix cleanup (drop lockfile workaround) once cycc
+  publishes the fix. **0.28.x** = DOOM Black Book Audit (was
+  0.25.0, re-anchored). **0.29.x** = performance pass against
+  Cyrius O4 regalloc.
 - **Genesis repo**: [agnosticos](https://github.com/MacCracken/agnosticos)
 - **Philosophy**: [AGNOS Philosophy](https://github.com/MacCracken/agnosticos/blob/main/docs/philosophy.md)
 - **Standards**: [First-Party Standards](https://github.com/MacCracken/agnosticos/blob/main/docs/development/applications/first-party-standards.md)

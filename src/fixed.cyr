@@ -23,44 +23,44 @@ enum Angle {
 # included before this file). Sharing the definition keeps the two copies
 # from drifting and avoids the duplicate-symbol error on 0.26.0+.
 
-fn fixed_from_int(n) { return n << 16; }
-fn fixed_to_int(f) { return asr(f, 16); }
-fn fixed_round(f) { return asr(f + FIXED_HALF, 16); }
+fn fixed_from_int(n): i64 { return n << 16; }
+fn fixed_to_int(f): i64 { return asr(f, 16); }
+fn fixed_round(f): i64 { return asr(f + FIXED_HALF, 16); }
 
-fn fixed_mul(a, b) {
+fn fixed_mul(a, b): i64 {
     return asr(a * b, 16);
 }
 
-fn fixed_div(a, b) {
+fn fixed_div(a, b): i64 {
     if (b == 0) { return FIXED_MAX; }
     return (a << 16) / b;
 }
 
-fn fixed_abs(f) {
+fn fixed_abs(f): i64 {
     if (f < 0) { return -f; }
     return f;
 }
 
-fn fixed_min(a, b) { if (a < b) { return a; } return b; }
-fn fixed_max(a, b) { if (a > b) { return a; } return b; }
+fn fixed_min(a, b): i64 { if (a < b) { return a; } return b; }
+fn fixed_max(a, b): i64 { if (a > b) { return a; } return b; }
 
-fn fixed_clamp(f, lo, hi) {
+fn fixed_clamp(f, lo, hi): i64 {
     if (f < lo) { return lo; }
     if (f > hi) { return hi; }
     return f;
 }
 
-fn angle_normalize(ang) { return ang & ANG_MASK; }
-fn angle_add(a, b) { return (a + b) & ANG_MASK; }
-fn angle_sub(a, b) { return (a - b) & ANG_MASK; }
+fn angle_normalize(ang): i64 { return ang & ANG_MASK; }
+fn angle_add(a, b): i64 { return (a + b) & ANG_MASK; }
+fn angle_sub(a, b): i64 { return (a - b) & ANG_MASK; }
 
-fn fixed_approx_dist(dx, dy) {
+fn fixed_approx_dist(dx, dy): i64 {
     var adx = fixed_abs(dx);
     var ady = fixed_abs(dy);
     if (adx > ady) { return adx + asr(ady, 1); }
     return ady + asr(adx, 1);
 }
 
-fn fixed_lerp(a, b, t) {
+fn fixed_lerp(a, b, t): i64 {
     return a + fixed_mul(t, b - a);
 }

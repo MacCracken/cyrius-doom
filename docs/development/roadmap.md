@@ -1,30 +1,33 @@
 # cyrius-doom Development Roadmap
 
-> **v0.27.1** — 585,224 B (cycc 6.0.1 + vani 0.9.4 `core` profile
-> + bsp 1.1.3; −96 B vs 0.27.0 — `Version:` header byte-swap in
-> the two upstream bundles, not a real shrink; long-term recovery
-> to ~260 KB still gated on Cyrius O3 real DCE). 20 modules +
-> vendored `lib/bsp.cyr` + vendored `lib/vani-core.cyr` (29 KB
-> single-module bundle, 22 `audio_*` symbols). Full gameplay
-> loop, DOOM-accurate lighting, 9/9 shareware maps render via
-> bsp library traversal, security hardened (CVE audit: 5/5
-> fixed). Manifest modernized: single `cyrius.cyml` with
-> `version = "${file:VERSION}"`; legacy `cyrius.toml` +
-> `cyrb.toml` retired (matches patra/vani/sakshi/mihi). CI
-> lifted to patra-style toolchain installer (pre-flight HTTP
-> gate; version-pinned install layout); `cyrius deps --verify`
-> guarded on populated lockfile pending the upstream cycc 6.0.1
-> lockfile-writer regression fix. vani is **transitional** —
-> will be replaced by dhvani once the Rust→Cyrius port lands.
-> CI runs the WAD-free 37-assert test subset + DCE on release
-> builds. 73/73 cyrius-doom tests, 79/79 bsp tests, 76K fuzz
-> iters total. fmt + lint clean. Bench row (0.27.1):
-> `render_frame` 2.146 ms / `+sprites` 2.141 ms — variance-level
-> vs 0.27.0 pre-publish numbers, as predicted for a byte-stable
-> bundle bump. **Next**: 0.27.2 type-annotation sweep on doom's
-> own public-fn surface; then 0.27.3 `Result<T,E>` adoption in
-> wad/render error paths; 0.27.4 `lib/test.cyr` table-driven
-> refactor. 0.28.x = Black Book audit; 0.29.x = perf pass gated
+> **v0.27.2** — 585,224 B (cycc 6.0.1 + vani 0.9.4 `core` profile
+> + bsp 1.1.3; byte-identical to 0.27.1 — the v5.11.x annotation
+> pass is parse-only and produces zero codegen delta; long-term
+> recovery to ~260 KB still gated on Cyrius O3 real DCE). 20
+> modules + vendored `lib/bsp.cyr` + vendored `lib/vani-core.cyr`
+> (29 KB single-module bundle, 22 `audio_*` symbols). Every fn
+> in `src/*.cyr` now carries a `: i64` return-type annotation
+> (270 sigs total — 269 single-line + 1 multi-line). Documents
+> return contracts inline; sets up 0.27.3's `Result<T, E>`
+> retrofit on the IO/parse boundary without further signature
+> churn. Full gameplay loop, DOOM-accurate lighting, 9/9
+> shareware maps render via bsp library traversal, security
+> hardened (CVE audit: 5/5 fixed). Manifest modernized: single
+> `cyrius.cyml` with `version = "${file:VERSION}"`; legacy
+> `cyrius.toml` + `cyrb.toml` retired (matches patra/vani/
+> sakshi/mihi). CI lifted to patra-style toolchain installer;
+> `cyrius deps --verify` guarded on populated lockfile pending
+> the upstream cycc 6.0.1 lockfile-writer regression fix. vani
+> is **transitional** — will be replaced by dhvani once the
+> Rust→Cyrius port lands. CI runs the WAD-free 37-assert test
+> subset + DCE on release builds. 73/73 cyrius-doom tests,
+> 79/79 bsp tests, 76K fuzz iters total. fmt + lint clean.
+> Bench row (0.27.2): `render_frame` 2.114 ms / `+sprites`
+> 2.127 ms — variance-level vs 0.27.1 (2.146 / 2.141), as
+> predicted for a parse-only annotation sweep. **Next**: 0.27.3
+> `Result<T,E>` adoption in wad/render error paths; 0.27.4
+> `lib/test.cyr` table-driven refactor; 0.27.5 upstream-fix
+> cleanup. 0.28.x = Black Book audit; 0.29.x = perf pass gated
 > on Cyrius O4.
 
 ## Completed
@@ -65,6 +68,7 @@
 | v0.26.2 | Cyrius 5.5.2 → 5.7.48 (CI dep-resolve unblock); vani 0.3.0 → 0.9.1 `core` profile (`dist/vani-core.cyr`, 22 `audio_*` symbols vs 106 in full bundle); `lib/` gitignored + untracked (was a mix of real stdlib copies + dangling local-path symlinks); `patra` dropped from stdlib (vani's `[deps.patra]` provides it); CI aligned with vani / yukti (toolchain via `cyrius.cyml`, `cyrius.lock` presence gate, `cyrius deps --verify`, version-consistency check); audio-core proposal authored, accepted in vani 0.9.1, archived. Binary 565,840 B (full recovery to ~260 KB gated on Cyrius O3). |
 | v0.27.0 | Cyrius 5.7.48 → 6.0.1 lift (covers v5.8.x sum-types / `Result<T,E>` / `?` / exhaustive-match, v5.11.x annotation arc, v6.0.0 `cyrc → cybs` + `cc5 → cycc` rename, v6.0.1 stdlib-path hotfixes); vani 0.9.1 → 0.9.3 (annotation pass, ABI-identical); `cyrius.toml` + `cyrb.toml` retired (single `cyrius.cyml`); `${file:VERSION}` template; CI lifted to patra-style installer + pre-flight HTTP gate + lockfile-guarded verify. Binary 585,320 B (+19,464 B growth-tax). |
 | v0.27.1 | Dep-tag re-pin to upstream-published bsp 1.1.3 + vani 0.9.4. Bundle content byte-identical save for `Version:` header. Binary 585,320 → 585,224 B (−96 B). `render_frame` 2.146 ms (variance-level). |
+| v0.27.2 | `: i64` return-type annotation sweep across all 20 modules (270 fn sigs). Parse-only, byte-identical binary (585,224 B). `render_frame` 2.114 ms (variance-level). |
 
 ## v0.24.0 — Security Hardening (CVE Audit Fixes)
 
@@ -148,20 +152,20 @@ v0.26.1's Cyrius pin-only patch. See CHANGELOG entry.
 | 3 | Refresh `cyrius.lock` hashes (5 of 5 rotated — bsp, vani-core, plus yukti / patra / sakshi which got re-resolved through vani's transitive tree) | Done |
 | 4 | Re-bench frame time vs 0.27.0 baseline (expected: variance-level) | Done — `render_frame` 2.146 ms / `+sprites` 2.141 ms; binary 585,320 → 585,224 B (−96 B, `Version:` header swap) |
 
-### v0.27.2 — Type annotations on public surface
+### v0.27.2 — Type annotations on public surface (2026-05-21) — DONE
 
 Mechanical sweep adopting the v5.11.x annotation arc on doom's
 own code — same shape as vani 0.9.3's "every public fn in
 `src/*.cyr` carries a `: i64` return-type annotation" cut.
 Parse-only, zero codegen change. Documents return contracts
 inline; sets up for v0.27.3 to introduce `Result`-returning
-variants on the same fns.
+variants on the same fns. See CHANGELOG entry.
 
 | # | Item | Source modules | Detail |
 |---|------|----------------|--------|
-| 1 | `: i64` return annotations across `src/*.cyr` | all 17 modules | Parse-only, ABI-identical |
-| 2 | Public-surface type-annotation pass | `wad`, `map`, `render`, `texture` | Highest-value boundaries first |
-| 3 | Verify `bench-history.csv` shows variance-level deltas only | benches | Annotations should not move frame time |
+| 1 | `: i64` return annotations across `src/*.cyr` | all 20 modules | Done — 270 fn sigs annotated (269 single-line + 1 multi-line `render_store_masked`). Parse-only, ABI-identical |
+| 2 | Public-surface type-annotation pass | `wad`, `map`, `render`, `texture` | Done — covered as part of the full sweep; no tiered rollout needed since the change is mechanical |
+| 3 | Verify `bench-history.csv` shows variance-level deltas only | benches | Done — `render_frame` 2.146 → 2.114 ms (variance); binary byte-identical at 585,224 B |
 
 ### v0.27.3 — `Result<T, E>` adoption in WAD/render error paths
 

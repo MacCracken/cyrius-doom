@@ -50,7 +50,7 @@ var colormap = 0;
 # Sky texture: drawn when ceiling flat is F_SKY1
 var sky_tex_idx = -1;
 
-fn render_load_sky() {
+fn render_load_sky(): i64 {
     sky_tex_idx = texture_find("SKY1");
     return 0;
 }
@@ -72,7 +72,7 @@ enum WeaponConst {
     BOB_RANGE = 4;
 }
 
-fn render_set_weapon(weapon_id) {
+fn render_set_weapon(weapon_id): i64 {
     if (weapon_patch_buf == 0) { weapon_patch_buf = alloc(WEAPON_BUF_SIZE); }
     if (weapon_prefix == 0) { weapon_prefix = alloc(8); }
     store64(weapon_prefix, 0);
@@ -96,7 +96,7 @@ fn render_set_weapon(weapon_id) {
 }
 
 # Build lump name from prefix + frame letter + "0" and look it up
-fn render_update_weapon_lump() {
+fn render_update_weapon_lump(): i64 {
     var name = alloc(8);
     memcpy(name, weapon_prefix, 4);
     store8(name + 4, 65 + weapon_fire_frame);
@@ -107,7 +107,7 @@ fn render_update_weapon_lump() {
 }
 
 # Start firing animation
-fn weapon_fire() {
+fn weapon_fire(): i64 {
     if (weapon_fire_frame != 0) { return 0; }
     weapon_fire_frame = 1;
     weapon_fire_timer = FIRE_TICKS;
@@ -116,7 +116,7 @@ fn weapon_fire() {
 }
 
 # Advance firing animation (called each game tick)
-fn weapon_tick() {
+fn weapon_tick(): i64 {
     if (weapon_fire_frame == 0) { return 0; }
     weapon_fire_timer -= 1;
     if (weapon_fire_timer <= 0) {
@@ -131,7 +131,7 @@ fn weapon_tick() {
 }
 
 # Update weapon bob based on player movement
-fn weapon_bob_tick(is_moving) {
+fn weapon_bob_tick(is_moving): i64 {
     if (is_moving == 1) {
         weapon_bob_time += 1;
         # Use sine table: 1024 entries, cycle through ~70 ticks per full bob
@@ -147,7 +147,7 @@ fn weapon_bob_tick(is_moving) {
     return 0;
 }
 
-fn render_draw_weapon(light_level) {
+fn render_draw_weapon(light_level): i64 {
     if (weapon_lump < 0) { return 0; }
     if (weapon_patch_buf == 0) { weapon_patch_buf = alloc(16384); }
 
@@ -203,7 +203,7 @@ fn render_draw_weapon(light_level) {
     return 0;
 }
 
-fn render_load_colormap() {
+fn render_load_colormap(): i64 {
     var idx = wad_find_lump("COLORMAP");
     if (idx >= 0) {
         colormap = alloc(8704);
@@ -214,7 +214,7 @@ fn render_load_colormap() {
 
 # Apply COLORMAP: given a base palette index and a light level (0=bright, 31=dark),
 # return the shaded palette index
-fn render_shade(pal_idx, light_level) {
+fn render_shade(pal_idx, light_level): i64 {
     if (colormap == 0) { return pal_idx; }
     if (light_level < 0) { light_level = 0; }
     if (light_level > 31) { light_level = 31; }
@@ -242,7 +242,7 @@ enum LightConst {
 var scalelight = 0;
 var zlight = 0;
 
-fn render_init_light_tables() {
+fn render_init_light_tables(): i64 {
     # scalelight: 16 * 48 = 768 entries
     scalelight = alloc(LIGHTLEVELS * MAXLIGHTSCALE * 8);
     # zlight: 16 * 128 = 2048 entries
@@ -275,7 +275,7 @@ fn render_init_light_tables() {
 }
 
 # Get wall column COLORMAP level from sector lightnum and column scale
-fn render_wall_light(lightnum, scale) {
+fn render_wall_light(lightnum, scale): i64 {
     if (scalelight == 0) { return 0; }
     if (lightnum < 0) { lightnum = 0; }
     if (lightnum >= LIGHTLEVELS) { lightnum = LIGHTLEVELS - 1; }
@@ -286,7 +286,7 @@ fn render_wall_light(lightnum, scale) {
 }
 
 # Get floor/ceiling COLORMAP level from sector lightnum and distance
-fn render_flat_light(lightnum, dist) {
+fn render_flat_light(lightnum, dist): i64 {
     if (zlight == 0) { return 0; }
     if (lightnum < 0) { lightnum = 0; }
     if (lightnum >= LIGHTLEVELS) { lightnum = LIGHTLEVELS - 1; }
@@ -332,7 +332,7 @@ var masked_count = 0;
 
 fn render_store_masked(sx1, sx2, mid_tex, lightnum_val, ty1_val, ty2_val,
 seg_len_val, seg_offset_val, sd_xoff_val, sd_yoff_val,
-floor_h_val, ceil_h_val, back_floor_h_val, back_ceil_h_val, dpb) {
+floor_h_val, ceil_h_val, back_floor_h_val, back_ceil_h_val, dpb): i64 {
     if (masked_segs == 0) { masked_segs = alloc(MASKED_MAX * MASKED_ENTRY_SIZE); }
     if (masked_count >= MASKED_MAX) { return 0; }
     var base = masked_segs + masked_count * MASKED_ENTRY_SIZE;
@@ -355,7 +355,7 @@ floor_h_val, ceil_h_val, back_floor_h_val, back_ceil_h_val, dpb) {
     return 0;
 }
 
-fn render_init_visplanes() {
+fn render_init_visplanes(): i64 {
     if (vp_floor_x1 == 0) {
         vp_floor_x1 = alloc(200 * 8);
         vp_floor_x2 = alloc(200 * 8);
@@ -382,7 +382,7 @@ fn render_init_visplanes() {
 # Draw a single floor/ceiling span at screen row y, from x1 to x2
 # flat_idx = flat texture index, floor_h = world floor height
 # light = COLORMAP level
-fn render_flat_span(y, x1, x2, flat_idx, plane_h, light_level) {
+fn render_flat_span(y, x1, x2, flat_idx, plane_h, light_level): i64 {
     if (flat_idx < 0) { return 0; }
     if (x1 > x2) { return 0; }
 
@@ -431,7 +431,7 @@ fn render_flat_span(y, x1, x2, flat_idx, plane_h, light_level) {
 # tex_idx = texture index, tex_col = texture column (U coord)
 # tex_y_start = texture Y at screen y1 (16.16 fixed), tex_y_step = dY per screen pixel (16.16)
 # light_level = COLORMAP level (0-31)
-fn render_draw_tex_column(x, y1, y2, tex_idx, tex_col, tex_y_start, tex_y_step, light_level) {
+fn render_draw_tex_column(x, y1, y2, tex_idx, tex_col, tex_y_start, tex_y_step, light_level): i64 {
     if (tex_col_buf == 0) { tex_col_buf = alloc(256); }
     if (tex_idx < 0) { return 0; }
 
@@ -451,7 +451,7 @@ fn render_draw_tex_column(x, y1, y2, tex_idx, tex_col, tex_y_start, tex_y_step, 
     return 0;
 }
 
-fn render_init_clip() {
+fn render_init_clip(): i64 {
     if (clip_top == 0) {
         clip_top = alloc(2560);
         clip_bottom = alloc(2560);
@@ -479,7 +479,7 @@ fn render_init_clip() {
 # ================================================================
 
 # Returns: (tx, ty) — view-space X (left/right) and Y (depth/distance)
-fn render_transform_vertex(wx, wy) {
+fn render_transform_vertex(wx, wy): i64 {
     var dx = wx - view_x;
     var dy = wy - view_y;
 
@@ -497,7 +497,7 @@ fn render_transform_vertex(wx, wy) {
 # ================================================================
 # This is where the actual column-by-column drawing happens.
 
-fn render_seg(seg_idx) {
+fn render_seg(seg_idx): i64 {
     var v1_idx = map_seg_v1(seg_idx);
     var v2_idx = map_seg_v2(seg_idx);
     var line_idx = map_seg_linedef(seg_idx);
@@ -815,7 +815,7 @@ fn render_seg(seg_idx) {
 # Render a subsector (leaf node of BSP tree)
 # ================================================================
 
-fn render_subsector(ss_idx) {
+fn render_subsector(ss_idx): i64 {
     var count = map_ssector_count(ss_idx);
     var first = map_ssector_first(ss_idx);
 
@@ -834,7 +834,7 @@ fn render_subsector(ss_idx) {
 #   3. Then recurse into the other side
 #   4. When reaching a subsector (leaf), render its segs
 
-fn render_bsp_node(node_idx) {
+fn render_bsp_node(node_idx): i64 {
     # Early out: all columns occluded
     if (clip_count >= SCREEN_WIDTH) { return 0; }
 
@@ -869,7 +869,7 @@ fn render_bsp_node(node_idx) {
 # Render a full frame
 # ================================================================
 
-fn render_flat_spans() {
+fn render_flat_spans(): i64 {
     # Draw all floor/ceiling spans row by row
     # For each row, we have x1..x2 bounds and the flat index + light
     # Per-row: compute distance once, then step world coords horizontally
@@ -945,7 +945,7 @@ fn render_flat_spans() {
 # linedefs are transparent (palette index 0 = skip). They clip to the
 # opening between front and back sector floors/ceilings.
 
-fn render_masked_segs() {
+fn render_masked_segs(): i64 {
     if (masked_segs == 0) { return 0; }
     if (tex_col_buf == 0) { tex_col_buf = alloc(256); }
 
@@ -1028,7 +1028,7 @@ fn render_masked_segs() {
     return 0;
 }
 
-fn render_frame() {
+fn render_frame(): i64 {
     view_cos = fixed_cos(view_angle);
     view_sin = fixed_sin(view_angle);
 

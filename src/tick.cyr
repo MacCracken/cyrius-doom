@@ -11,13 +11,13 @@ enum TickConst {
 # Packed: [0]=count [8]=start_sec [16]=start_nsec
 var tick_state = 0;
 
-fn tick_get_time_ns() {
+fn tick_get_time_ns(): i64 {
     var ts[16];
     syscall(SYS_CLOCK_GETTIME, CLOCK_MONOTONIC, &ts);
     return load64(&ts) * 1000000000 + load64(&ts + 8);
 }
 
-fn tick_init() {
+fn tick_init(): i64 {
     tick_state = alloc(24);
     store64(tick_state, 0);
     store64(tick_state + 8, 0);
@@ -25,7 +25,7 @@ fn tick_init() {
     return 0;
 }
 
-fn tick_begin() {
+fn tick_begin(): i64 {
     var ts[16];
     syscall(SYS_CLOCK_GETTIME, CLOCK_MONOTONIC, &ts);
     store64(tick_state + 8, load64(&ts));
@@ -33,7 +33,7 @@ fn tick_begin() {
     return 0;
 }
 
-fn tick_wait() {
+fn tick_wait(): i64 {
     var now_ns = tick_get_time_ns();
     var start_ns = load64(tick_state + 8) * 1000000000 + load64(tick_state + 16);
     var elapsed = now_ns - start_ns;
@@ -50,6 +50,6 @@ fn tick_wait() {
     return 0;
 }
 
-fn tick_get_count() {
+fn tick_get_count(): i64 {
     return load64(tick_state);
 }

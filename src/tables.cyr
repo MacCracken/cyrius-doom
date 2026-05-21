@@ -15,7 +15,7 @@ var sine_table = 0;
 var viewangle_to_x = 0;
 var x_to_viewangle = 0;
 
-fn tables_init() {
+fn tables_init(): i64 {
     sine_table = alloc(8192);
     viewangle_to_x = alloc(2560);
     x_to_viewangle = alloc(2560);
@@ -57,7 +57,7 @@ fn tables_init() {
 # ================================================================
 # atan2 approximation: returns angle index 0..1023
 # ================================================================
-fn fixed_atan2(y, x) {
+fn fixed_atan2(y, x): i64 {
     var ax = fixed_abs(x);
     var ay = fixed_abs(y);
 
@@ -97,17 +97,17 @@ fn fixed_atan2(y, x) {
 # Trig functions (use sine_table)
 # ================================================================
 
-fn fixed_sin(ang) {
+fn fixed_sin(ang): i64 {
     var idx = angle_normalize(ang);
     return load64(sine_table + idx * 8);
 }
 
-fn fixed_cos(ang) {
+fn fixed_cos(ang): i64 {
     var idx = angle_normalize(ang + ANG90);
     return load64(sine_table + idx * 8);
 }
 
-fn fixed_tan(ang) {
+fn fixed_tan(ang): i64 {
     var c = fixed_cos(ang);
     if (c == 0) { return FIXED_MAX; }
     return fixed_div(fixed_sin(ang), c);

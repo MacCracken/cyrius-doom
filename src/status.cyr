@@ -19,7 +19,7 @@ var st_percent = 0;
 var st_minus = 0;
 var st_patch_buf = 0;
 
-fn status_init_font() {
+fn status_init_font(): i64 {
     st_patch_buf = alloc(16384);
     st_nums = alloc(10 * 8);
     st_ynums = alloc(10 * 8);
@@ -57,7 +57,7 @@ fn status_init_font() {
     return 0;
 }
 
-fn st_draw_patch(lump, px, py) {
+fn st_draw_patch(lump, px, py): i64 {
     if (lump < 0) { return 0; }
     var sz = wad_lump_size(lump);
     if (sz > 16384) { return 0; }
@@ -66,13 +66,13 @@ fn st_draw_patch(lump, px, py) {
     return 0;
 }
 
-fn st_draw_patch_from_buf(buf, px, py) {
+fn st_draw_patch_from_buf(buf, px, py): i64 {
     st_draw_patch_shaded(buf, px, py, 0);
     return 0;
 }
 
 # Draw patch with optional COLORMAP shading (shade=0 for full bright)
-fn st_draw_patch_shaded(buf, px, py, shade) {
+fn st_draw_patch_shaded(buf, px, py, shade): i64 {
     var pw = read_le16(buf);
     var ph = read_le16(buf + 2);
     for (var col = 0; col < pw; col += 1) {
@@ -102,7 +102,7 @@ fn st_draw_patch_shaded(buf, px, py, shade) {
     return 0;
 }
 
-fn st_draw_number(num, px, py) {
+fn st_draw_number(num, px, py): i64 {
     if (num < 0) { num = 0; }
     if (num > 999) { num = 999; }
     var hundreds = num / 100;
@@ -118,13 +118,13 @@ fn st_draw_number(num, px, py) {
     return 0;
 }
 
-fn st_draw_percent(num, px, py) {
+fn st_draw_percent(num, px, py): i64 {
     st_draw_number(num, px, py);
     if (st_percent >= 0) { st_draw_patch(st_percent, px + 42, py); }
     return 0;
 }
 
-fn st_draw_small_num(digit, px, py) {
+fn st_draw_small_num(digit, px, py): i64 {
     if (digit < 0) { return 0; }
     if (digit > 9) { return 0; }
     var lump = load64(st_ynums + digit * 8);
@@ -138,7 +138,7 @@ fn st_draw_small_num(digit, px, py) {
 }
 
 # Grey (subdued) small number using STGNUM
-fn st_draw_grey_num(digit, px, py) {
+fn st_draw_grey_num(digit, px, py): i64 {
     if (digit < 0) { return 0; }
     if (digit > 9) { return 0; }
     var gname = alloc(8);
@@ -150,7 +150,7 @@ fn st_draw_grey_num(digit, px, py) {
     return 0;
 }
 
-fn st_draw_small_number(num, px, py) {
+fn st_draw_small_number(num, px, py): i64 {
     if (num < 0) { num = 0; }
     if (num > 999) { num = 999; }
     var hundreds = num / 100;
@@ -167,7 +167,7 @@ fn st_draw_small_number(num, px, py) {
 }
 
 # Grey version for ammo totals
-fn st_draw_grey_number(num, px, py) {
+fn st_draw_grey_number(num, px, py): i64 {
     if (num < 0) { num = 0; }
     if (num > 999) { num = 999; }
     var hundreds = num / 100;
@@ -185,7 +185,7 @@ fn st_draw_grey_number(num, px, py) {
 
 var face_patch_buf = 0;
 
-fn status_face_color() {
+fn status_face_color(): i64 {
     if (player_health > 80) { return 0; }
     if (player_health > 60) { return 1; }
     if (player_health > 40) { return 2; }
@@ -193,7 +193,7 @@ fn status_face_color() {
     return 4;
 }
 
-fn status_draw_face(px, py) {
+fn status_draw_face(px, py): i64 {
     if (face_patch_buf == 0) { face_patch_buf = alloc(4096); }
     var face_name = alloc(8);
     var hl = status_face_color();
@@ -214,7 +214,7 @@ fn status_draw_face(px, py) {
     return 0;
 }
 
-fn status_render() {
+fn status_render(): i64 {
     # Layer 1: Black background for face cutout area
     framebuf_fill_rect(143, STBAR_Y, 35, 32, 0);
 

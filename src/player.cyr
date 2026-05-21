@@ -57,7 +57,7 @@ enum KeyBit {
 # Player initialization
 # ================================================================
 
-fn player_init() {
+fn player_init(): i64 {
     player_x = player_start_x();
     player_y = player_start_y();
     player_z = 0;
@@ -87,7 +87,7 @@ fn player_init() {
 # Walk the BSP tree to find the subsector containing the player,
 # then get the sector from the first seg's linedef/sidedef.
 
-fn player_find_sector() {
+fn player_find_sector(): i64 {
     if (map_num_nodes == 0) { return 0; }
 
     var node_idx = map_num_nodes - 1;
@@ -122,7 +122,7 @@ fn player_find_sector() {
 # ================================================================
 # Uses BLOCKMAP when available for O(1) cell lookup, falls back to brute-force.
 
-fn player_check_position(nx, ny) {
+fn player_check_position(nx, ny): i64 {
     var radius = PLAYER_RADIUS;
 
     # Use BLOCKMAP if loaded
@@ -180,7 +180,7 @@ fn player_check_position(nx, ny) {
 }
 
 # Check a single linedef for collision. Returns 1 if OK, 0 if blocked.
-fn player_check_linedef(nx, ny, radius, i) {
+fn player_check_linedef(nx, ny, radius, i): i64 {
     var flags = map_linedef_flags(i);
 
     if ((flags & ML_BLOCKING) == 0) {
@@ -269,7 +269,7 @@ fn player_check_linedef(nx, ny, radius, i) {
 # Blue armor (<=200): absorbs 1/2 of damage
 # Armor decreases by absorbed amount. Remaining goes to health.
 
-fn player_take_damage(dmg) {
+fn player_take_damage(dmg): i64 {
     if (dmg <= 0) { return 0; }
     if (player_armor > 0) {
         # Blue armor absorbs 1/2, green absorbs 1/3
@@ -289,7 +289,7 @@ fn player_take_damage(dmg) {
 # ================================================================
 # Returns the player's ammo count for current weapon. -1 = no ammo needed.
 # 1=fist, 2=pistol, 3=shotgun, 4=chaingun, 5=rocket, 6=chainsaw, 7=plasma
-fn player_current_ammo() {
+fn player_current_ammo(): i64 {
     switch (player_weapon) {
         case 1: { return -1; }
         case 2: { return player_ammo_bullets; }
@@ -303,7 +303,7 @@ fn player_current_ammo() {
 }
 
 # Try to fire: check ammo, deduct if available. Returns 1 if ok, 0 if empty.
-fn player_try_fire() {
+fn player_try_fire(): i64 {
     switch (player_weapon) {
         case 1: { return 1; }
         case 6: { return 1; }
@@ -340,7 +340,7 @@ fn player_try_fire() {
 # Hitscan: trace ray from player, damage first monster hit
 # ================================================================
 
-fn player_hitscan() {
+fn player_hitscan(): i64 {
     var range = 2048 << 16;
     # Fist/chainsaw: melee range
     if (player_weapon == 1) { range = 64 << 16; }
@@ -395,7 +395,7 @@ fn player_hitscan() {
 # Player movement (called each tick)
 # ================================================================
 
-fn player_tick() {
+fn player_tick(): i64 {
     var speed = PLAYER_WALK_SPEED;
     var turn_speed = PLAYER_TURN_SPEED;
 

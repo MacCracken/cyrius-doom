@@ -72,7 +72,7 @@ enum MapMisc {
     THING_PLAYER1 = 1;
 }
 
-fn map_alloc() {
+fn map_alloc(): i64 {
     map_vertexes = alloc(MAP_MAX_VERTEXES * MAP_VERTEX_SIZE);
     map_linedefs = alloc(MAP_MAX_LINEDEFS * MAP_LINEDEF_SIZE);
     map_sidedefs = alloc(MAP_MAX_SIDEDEFS * MAP_SIDEDEF_SIZE);
@@ -85,46 +85,46 @@ fn map_alloc() {
 }
 
 # Accessors
-fn map_vertex_x(idx) { return load64(map_vertexes + idx * MAP_VERTEX_SIZE); }
-fn map_vertex_y(idx) { return load64(map_vertexes + idx * MAP_VERTEX_SIZE + 8); }
+fn map_vertex_x(idx): i64 { return load64(map_vertexes + idx * MAP_VERTEX_SIZE); }
+fn map_vertex_y(idx): i64 { return load64(map_vertexes + idx * MAP_VERTEX_SIZE + 8); }
 
-fn map_linedef_v1(idx) { return load64(map_linedefs + idx * MAP_LINEDEF_SIZE); }
-fn map_linedef_v2(idx) { return load64(map_linedefs + idx * MAP_LINEDEF_SIZE + 8); }
-fn map_linedef_flags(idx) { return load64(map_linedefs + idx * MAP_LINEDEF_SIZE + 16); }
-fn map_linedef_side_right(idx) { return load64(map_linedefs + idx * MAP_LINEDEF_SIZE + 40); }
-fn map_linedef_side_left(idx) { return load64(map_linedefs + idx * MAP_LINEDEF_SIZE + 48); }
+fn map_linedef_v1(idx): i64 { return load64(map_linedefs + idx * MAP_LINEDEF_SIZE); }
+fn map_linedef_v2(idx): i64 { return load64(map_linedefs + idx * MAP_LINEDEF_SIZE + 8); }
+fn map_linedef_flags(idx): i64 { return load64(map_linedefs + idx * MAP_LINEDEF_SIZE + 16); }
+fn map_linedef_side_right(idx): i64 { return load64(map_linedefs + idx * MAP_LINEDEF_SIZE + 40); }
+fn map_linedef_side_left(idx): i64 { return load64(map_linedefs + idx * MAP_LINEDEF_SIZE + 48); }
 
-fn map_sidedef_xoff(idx) { return load64(map_sidedefs + idx * MAP_SIDEDEF_SIZE); }
-fn map_sidedef_yoff(idx) { return load64(map_sidedefs + idx * MAP_SIDEDEF_SIZE + 8); }
-fn map_sidedef_sector(idx) { return load64(map_sidedefs + idx * MAP_SIDEDEF_SIZE + 40); }
+fn map_sidedef_xoff(idx): i64 { return load64(map_sidedefs + idx * MAP_SIDEDEF_SIZE); }
+fn map_sidedef_yoff(idx): i64 { return load64(map_sidedefs + idx * MAP_SIDEDEF_SIZE + 8); }
+fn map_sidedef_sector(idx): i64 { return load64(map_sidedefs + idx * MAP_SIDEDEF_SIZE + 40); }
 
-fn map_sector_floorh(idx) { return load64(map_sectors + idx * MAP_SECTOR_SIZE); }
-fn map_sector_ceilh(idx) { return load64(map_sectors + idx * MAP_SECTOR_SIZE + 8); }
-fn map_sector_floor_tex(idx) { return map_sectors + idx * MAP_SECTOR_SIZE + 16; }
-fn map_sector_ceil_tex(idx) { return map_sectors + idx * MAP_SECTOR_SIZE + 24; }
-fn map_sector_light(idx) { return load64(map_sectors + idx * MAP_SECTOR_SIZE + 32); }
-fn map_seg_v1(idx) { return load64(map_segs + idx * MAP_SEG_SIZE); }
-fn map_seg_v2(idx) { return load64(map_segs + idx * MAP_SEG_SIZE + 8); }
-fn map_seg_linedef(idx) { return load64(map_segs + idx * MAP_SEG_SIZE + 24); }
-fn map_seg_side(idx) { return load64(map_segs + idx * MAP_SEG_SIZE + 32); }
-fn map_seg_offset(idx) { return load64(map_segs + idx * MAP_SEG_SIZE + 40); }
+fn map_sector_floorh(idx): i64 { return load64(map_sectors + idx * MAP_SECTOR_SIZE); }
+fn map_sector_ceilh(idx): i64 { return load64(map_sectors + idx * MAP_SECTOR_SIZE + 8); }
+fn map_sector_floor_tex(idx): i64 { return map_sectors + idx * MAP_SECTOR_SIZE + 16; }
+fn map_sector_ceil_tex(idx): i64 { return map_sectors + idx * MAP_SECTOR_SIZE + 24; }
+fn map_sector_light(idx): i64 { return load64(map_sectors + idx * MAP_SECTOR_SIZE + 32); }
+fn map_seg_v1(idx): i64 { return load64(map_segs + idx * MAP_SEG_SIZE); }
+fn map_seg_v2(idx): i64 { return load64(map_segs + idx * MAP_SEG_SIZE + 8); }
+fn map_seg_linedef(idx): i64 { return load64(map_segs + idx * MAP_SEG_SIZE + 24); }
+fn map_seg_side(idx): i64 { return load64(map_segs + idx * MAP_SEG_SIZE + 32); }
+fn map_seg_offset(idx): i64 { return load64(map_segs + idx * MAP_SEG_SIZE + 40); }
 
-fn map_ssector_count(idx) { return load64(map_ssectors + idx * MAP_SSECTOR_SIZE); }
-fn map_ssector_first(idx) { return load64(map_ssectors + idx * MAP_SSECTOR_SIZE + 8); }
+fn map_ssector_count(idx): i64 { return load64(map_ssectors + idx * MAP_SSECTOR_SIZE); }
+fn map_ssector_first(idx): i64 { return load64(map_ssectors + idx * MAP_SSECTOR_SIZE + 8); }
 
 # Node accessors migrated to the bsp library in 0.26.0 —
 # `bsp_node_{x,y,dx,dy,child_r,child_l}(map_nodes, idx)` replaces these.
 # MAP_NODE_SIZE is kept for map_alloc() and the loader loop below; the
 # layout matches bsp's BSP_NODE_SIZE (112 bytes, same field offsets).
 
-fn map_thing_x(idx) { return load64(map_things + idx * MAP_THING_SIZE); }
-fn map_thing_y(idx) { return load64(map_things + idx * MAP_THING_SIZE + 8); }
-fn map_thing_angle(idx) { return load64(map_things + idx * MAP_THING_SIZE + 16); }
-fn map_thing_type(idx) { return load64(map_things + idx * MAP_THING_SIZE + 24); }
+fn map_thing_x(idx): i64 { return load64(map_things + idx * MAP_THING_SIZE); }
+fn map_thing_y(idx): i64 { return load64(map_things + idx * MAP_THING_SIZE + 8); }
+fn map_thing_angle(idx): i64 { return load64(map_things + idx * MAP_THING_SIZE + 16); }
+fn map_thing_type(idx): i64 { return load64(map_things + idx * MAP_THING_SIZE + 24); }
 # Subsector flag helpers migrated to the bsp library in 0.26.0 —
 # use `bsp_is_subsector(child)` / `bsp_subsector_idx(child)` instead.
 
-fn sign_extend_16(val) {
+fn sign_extend_16(val): i64 {
     var lo = val & 0xFFFF;
     if (lo >= 0x8000) {
         return lo - 0x10000;
@@ -133,7 +133,7 @@ fn sign_extend_16(val) {
 }
 
 # Load a map from the WAD
-fn map_load(map_name) {
+fn map_load(map_name): i64 {
     map_alloc();
 
     var marker = wad_find_lump(map_name);
@@ -321,7 +321,7 @@ fn map_load(map_name) {
 # Map validation: bounds-check all cross-references (CVE hardening)
 # ================================================================
 
-fn map_validate() {
+fn map_validate(): i64 {
     # Validate linedef vertex indices and sidedef references
     for (var i = 0; i < map_num_linedefs; i += 1) {
         var base = map_linedefs + i * MAP_LINEDEF_SIZE;
@@ -384,7 +384,7 @@ fn map_validate() {
 # Player start: packed into one heap block [0]=x [8]=y [16]=angle
 var player_start = 0;
 
-fn map_find_player_start() {
+fn map_find_player_start(): i64 {
     if (player_start == 0) { player_start = alloc(24); }
     for (var i = 0; i < map_num_things; i += 1) {
         if (map_thing_type(i) == THING_PLAYER1) {
@@ -400,14 +400,14 @@ fn map_find_player_start() {
     return -1;
 }
 
-fn player_start_x() { return load64(player_start); }
-fn player_start_y() { return load64(player_start + 8); }
-fn player_start_angle() { return load64(player_start + 16); }
+fn player_start_x(): i64 { return load64(player_start); }
+fn player_start_y(): i64 { return load64(player_start + 8); }
+fn player_start_angle(): i64 { return load64(player_start + 16); }
 
 # Point-on-side migrated to bsp library in 0.26.0 —
 # use `bsp_point_on_side(map_nodes, node_idx, x, y)`.
 
-fn map_print_stats() {
+fn map_print_stats(): i64 {
     syscall(1, 1, "map: V=", 7); fmt_int(map_num_vertexes);
     syscall(1, 1, " L=", 3); fmt_int(map_num_linedefs);
     syscall(1, 1, " SD=", 4); fmt_int(map_num_sidedefs);

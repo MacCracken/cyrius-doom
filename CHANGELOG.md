@@ -5,6 +5,63 @@ All notable changes to cyrius-doom will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.27.2] - 2026-05-21
+
+Type-annotation sweep across doom's full public-fn surface —
+adopts the v5.11.x annotation arc (parse-only `: i64` return-type
+annotation, zero codegen change) on every fn in `src/*.cyr`,
+matching the shape of vani's 0.9.3 internal sweep and bsp's
+1.2.x planned cut. 269 single-line fn signatures + 1 multi-line
+(`render_store_masked`) bumped to carry an explicit `: i64`
+return tag. Documents return contracts inline; sets up
+0.27.3's `Result<T, E>` adoption to retrofit error-bearing
+returns without further signature churn at the call sites.
+
+### Changed
+
+- **`: i64` return annotations across all 20 modules in
+  `src/*.cyr`** — 270 fn signatures total. Includes
+  `render_transform_vertex` (multi-return tuple), which the
+  annotation accepts as parse-only metadata since cycc 6.0.1
+  treats `: i64` as a documentation hint without enforcing it
+  against tuple-shaped returns. Highest-value boundaries
+  (`wad` / `map` / `render` / `texture`) carry annotations
+  same as every other module — no tiered rollout was needed
+  because the sweep is mechanical and parse-only.
+- **`src/main.cyr`** — banner string `cyrius-doom v0.27.1` →
+  `cyrius-doom v0.27.2`. `load_map()` and `doom_main()` both
+  annotated as `: i64` (the actual return values: 0 / -1 for
+  load_map; doom_main exits via `syscall(60, …)` so its return
+  is conventionally i64).
+
+### Verified
+
+- **Binary byte-identical**: 585,224 → 585,224 B. Confirms the
+  annotation pass produces zero codegen delta. Matches vani
+  0.9.3's "ABI-identical" claim under the same v5.11.x arc.
+- `cyrius build src/main.cyr build/doom`: 585,224 B (982
+  unreachable fns / 292,798 B NOPed — same as 0.27.1).
+- `cyrius deps --verify`: 5 verified, 0 failed.
+- `cyrius test tests/doom.tcyr` (WAD-free): 37/37 passed.
+- `./build/test_doom wad/DOOM1.WAD` (full): 73/73 passed.
+- `./build/doom wad/DOOM1.WAD --ppm`: E1M1 + automap +
+  intermission PPMs 192,015 B each; map summary unchanged.
+- Bench (`scripts/bench-history.sh`): `render_frame` 2.114 ms
+  / `+sprites` 2.127 ms / `fixed_mul` 6 ns / `texture_get_column`
+  730 ns / `pcache_get_hit` 7 ns — all within run-to-run
+  variance of the 0.27.1 row (2.146 / 2.141 / 7 / 761 / 8).
+  Annotations do not move frame time, as predicted.
+
+### Known issues (unchanged from 0.27.0 / 0.27.1)
+
+Both upstream-cycc workarounds still apply. Tracked under
+v0.27.5 upstream-fix cleanup:
+
+- `cyrius.lock` written empty by `cyrius deps` — hand-populated
+  via `sha256sum`.
+- `lib/yukti.cyr:39: duplicate fn 'sys_stat' (last definition
+  wins)` — codegen-identical.
+
 ## [0.27.1] - 2026-05-21
 
 bsp 1.1.3 + vani 0.9.4 dep-tag re-pin — the half of the 0.27.0

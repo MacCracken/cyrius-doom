@@ -20,7 +20,7 @@ var sprite_visible = 0;
 
 # Per-column clip heights from wall rendering (reuse clip_top/clip_bottom)
 
-fn sprite_init() {
+fn sprite_init(): i64 {
     sprite_s_start = wad_find_lump("S_START");
     sprite_s_end = wad_find_lump("S_END");
     sprite_order = alloc(128 * 8);
@@ -34,14 +34,14 @@ fn sprite_init() {
 var spr_lookup = 0;
 var spr_lookup_count = 0;
 
-fn sprite_add_lookup(ttype, name) {
+fn sprite_add_lookup(ttype, name): i64 {
     store64(spr_lookup + spr_lookup_count * 16, ttype);
     store64(spr_lookup + spr_lookup_count * 16 + 8, name);
     spr_lookup_count += 1;
     return 0;
 }
 
-fn sprite_build_lookup() {
+fn sprite_build_lookup(): i64 {
     spr_lookup = alloc(64 * 16);
     spr_lookup_count = 0;
     sprite_add_lookup(3004, "POSS");
@@ -86,7 +86,7 @@ fn sprite_build_lookup() {
 # Reusable prefix buffer (avoid alloc per call)
 var _spr_prefix = 0;
 
-fn sprite_find_lump(thing_type) {
+fn sprite_find_lump(thing_type): i64 {
     if (_spr_prefix == 0) { _spr_prefix = alloc(8); }
     var prefix = _spr_prefix;
     store64(prefix, 0);
@@ -117,13 +117,13 @@ fn sprite_find_lump(thing_type) {
 
 # Find sprite lump with rotation based on viewer angle
 # rotation: 1-8, where 1=front, 5=back
-fn sprite_find_rotated(thing_type, rotation) {
+fn sprite_find_rotated(thing_type, rotation): i64 {
     return sprite_find_frame(thing_type, rotation, 0);
 }
 
 # Find sprite lump for a thing type with specific frame and rotation
 # frame: 0=A, 1=B, 2=C, ...
-fn sprite_find_frame(thing_type, rotation, frame) {
+fn sprite_find_frame(thing_type, rotation, frame): i64 {
     if (_spr_prefix == 0) { _spr_prefix = alloc(8); }
     var prefix = _spr_prefix;
     store64(prefix, 0);
@@ -165,7 +165,7 @@ fn sprite_find_frame(thing_type, rotation, frame) {
 
 # Calculate sprite rotation (1-8) from viewer angle and thing angle
 # DOOM rotation: 1=facing viewer, 3=left side, 5=back, 7=right side
-fn sprite_calc_rotation(thing_x, thing_y, thing_angle) {
+fn sprite_calc_rotation(thing_x, thing_y, thing_angle): i64 {
     var ang_to_thing = fixed_atan2(thing_y - view_y, thing_x - view_x);
     var rel = angle_sub(ang_to_thing, thing_angle);
     # Map 0..1023 to 1..8
@@ -178,7 +178,7 @@ fn sprite_calc_rotation(thing_x, thing_y, thing_angle) {
 }
 
 # Render all visible sprites for the current frame
-fn sprite_render_all() {
+fn sprite_render_all(): i64 {
     sprite_visible = 0;
 
     # Collect visible things with distance (from runtime things array)

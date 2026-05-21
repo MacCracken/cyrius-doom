@@ -16,23 +16,23 @@ var wad_numlumps = 0;
 var wad_dir = 0;
 var wad_lump_buf = 0;
 
-fn wad_alloc() {
+fn wad_alloc(): i64 {
     wad_dir = alloc(WAD_MAX_LUMPS * WAD_DIR_ENTRY_SIZE);
     wad_lump_buf = alloc(WAD_LUMP_BUF_SIZE);
     return 0;
 }
 
 # Little-endian readers
-fn read_le16(buf) {
+fn read_le16(buf): i64 {
     return load8(buf) | (load8(buf + 1) << 8);
 }
 
-fn read_le32(buf) {
+fn read_le32(buf): i64 {
     return load8(buf) | (load8(buf + 1) << 8) | (load8(buf + 2) << 16) | (load8(buf + 3) << 24);
 }
 
 # Open a WAD file. Returns 0 on success, -1 on error.
-fn wad_open(path) {
+fn wad_open(path): i64 {
     wad_alloc();
 
     wad_fd = file_open(path, 0, 0);
@@ -89,13 +89,13 @@ fn wad_open(path) {
     return 0;
 }
 
-fn wad_close() {
+fn wad_close(): i64 {
     if (wad_fd >= 0) { file_close(wad_fd); wad_fd = -1; }
     return 0;
 }
 
 # Compare WAD lump name (8 bytes, uppercase, null-padded) with a string
-fn wad_name_eq(lump_name_ptr, name) {
+fn wad_name_eq(lump_name_ptr, name): i64 {
     var nlen = strlen(name);
     if (nlen > 8) { return 0; }
     for (var i = 0; i < 8; i += 1) {
@@ -111,27 +111,27 @@ fn wad_name_eq(lump_name_ptr, name) {
     return 1;
 }
 
-fn wad_find_lump(name) {
+fn wad_find_lump(name): i64 {
     for (var i = 0; i < wad_numlumps; i += 1) {
         if (wad_name_eq(wad_dir + i * WAD_DIR_ENTRY_SIZE + 16, name) == 1) { return i; }
     }
     return -1;
 }
 
-fn wad_find_lump_after(name, after) {
+fn wad_find_lump_after(name, after): i64 {
     for (var i = after + 1; i < wad_numlumps; i += 1) {
         if (wad_name_eq(wad_dir + i * WAD_DIR_ENTRY_SIZE + 16, name) == 1) { return i; }
     }
     return -1;
 }
 
-fn wad_lump_size(lump_index) {
+fn wad_lump_size(lump_index): i64 {
     if (lump_index < 0) { return 0; }
     if (lump_index >= wad_numlumps) { return 0; }
     return load64(wad_dir + lump_index * WAD_DIR_ENTRY_SIZE + 8);
 }
 
-fn wad_read_lump(lump_index) {
+fn wad_read_lump(lump_index): i64 {
     if (lump_index < 0) { return 0; }
     if (lump_index >= wad_numlumps) { return 0; }
 
@@ -151,7 +151,7 @@ fn wad_read_lump(lump_index) {
     return wad_lump_buf;
 }
 
-fn wad_read_lump_into(lump_index, buf, bufsize) {
+fn wad_read_lump_into(lump_index, buf, bufsize): i64 {
     if (lump_index < 0) { return 0; }
     if (lump_index >= wad_numlumps) { return 0; }
 

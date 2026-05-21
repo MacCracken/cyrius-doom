@@ -16,29 +16,29 @@ var automap_scale = 0;
 var automap_cx = 0;
 var automap_cy = 0;
 
-fn automap_init() {
+fn automap_init(): i64 {
     automap_active = 0;
     automap_scale = 2048;
     return 0;
 }
 
-fn automap_toggle() {
+fn automap_toggle(): i64 {
     if (automap_active == 0) { automap_active = 1; }
     else { automap_active = 0; }
     return 0;
 }
 
 # Transform world coords to screen coords
-fn am_screen_x(wx) {
+fn am_screen_x(wx): i64 {
     return HALF_WIDTH + asr(fixed_mul(wx - automap_cx, automap_scale), 16);
 }
 
-fn am_screen_y(wy) {
+fn am_screen_y(wy): i64 {
     return HALF_HEIGHT - asr(fixed_mul(wy - automap_cy, automap_scale), 16);
 }
 
 # Draw a line using Bresenham's algorithm
-fn am_draw_line(x1, y1, x2, y2, color) {
+fn am_draw_line(x1, y1, x2, y2, color): i64 {
     var dx = x2 - x1;
     var dy = y2 - y1;
     if (dx < 0) { dx = -dx; }
@@ -71,7 +71,7 @@ fn am_draw_line(x1, y1, x2, y2, color) {
 }
 
 # Draw player arrow
-fn am_draw_player() {
+fn am_draw_player(): i64 {
     var px = am_screen_x(player_x);
     var py = am_screen_y(player_y);
 
@@ -101,7 +101,7 @@ fn am_draw_player() {
 }
 
 # Draw the full automap
-fn automap_render() {
+fn automap_render(): i64 {
     if (automap_active == 0) { return 0; }
 
     # Center on player

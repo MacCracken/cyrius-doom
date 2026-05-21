@@ -37,7 +37,7 @@ var flat_names = 0;
 var flat_count = 0;
 
 # Simple 8-char name hash for fast lookup
-fn tex_name_hash(name_ptr) {
+fn tex_name_hash(name_ptr): i64 {
     var h = 0;
     for (var i = 0; i < 8; i += 1) {
         var c = load8(name_ptr + i);
@@ -49,7 +49,7 @@ fn tex_name_hash(name_ptr) {
     return h;
 }
 
-fn texture_init() {
+fn texture_init(): i64 {
     tex_table = alloc(TEX_MAX * TEX_ENTRY_SIZE);
     patch_lumps = alloc(PATCH_MAX * 8);
     pcache_init();
@@ -143,7 +143,7 @@ enum PatchCache {
 var pcache = 0;
 var pcache_next = 0;
 
-fn pcache_init() {
+fn pcache_init(): i64 {
     pcache = alloc(PCACHE_SLOTS * PCACHE_SLOT_SIZE);
     pcache_next = 0;
     for (var i = 0; i < PCACHE_SLOTS; i += 1) {
@@ -153,7 +153,7 @@ fn pcache_init() {
     return 0;
 }
 
-fn pcache_get(lump_idx) {
+fn pcache_get(lump_idx): i64 {
     # Check if already cached
     for (var i = 0; i < PCACHE_SLOTS; i += 1) {
         if (load64(pcache + i * PCACHE_SLOT_SIZE) == lump_idx) {
@@ -173,12 +173,12 @@ fn pcache_get(lump_idx) {
 }
 
 # Get cached patch data size (call after pcache_get returns pdata)
-fn pcache_data_size(pdata) {
+fn pcache_data_size(pdata): i64 {
     return load64(pdata - 8);
 }
 
 # Find texture index by name (8-char, null-padded)
-fn texture_find(name) {
+fn texture_find(name): i64 {
     var h = tex_name_hash(name);
     for (var i = 0; i < tex_count; i += 1) {
         if (load64(tex_table + i * TEX_ENTRY_SIZE) == h) {
@@ -188,13 +188,13 @@ fn texture_find(name) {
     return -1;
 }
 
-fn texture_height(idx) { return load64(tex_table + idx * TEX_ENTRY_SIZE + 16); }
+fn texture_height(idx): i64 { return load64(tex_table + idx * TEX_ENTRY_SIZE + 16); }
 
 # Get a column of pixels from a texture
 # Returns pointer to column data (palette indices), writes height to out_height
 # tex_idx = texture index, col = column number (wrapped by texture width)
 # dest = buffer to write column pixels into (caller provides, must be >= tex_height)
-fn texture_get_column(tex_idx, col, dest) {
+fn texture_get_column(tex_idx, col, dest): i64 {
     if (tex_idx < 0) { return 0; }
     if (tex_idx >= tex_count) { return 0; }
 
@@ -293,7 +293,7 @@ var anim_flat_buf = 0;
 # Group 0: NUKAGE1/2/3 (3 frames)
 var anim_nukage = 0;
 
-fn texture_init_anim() {
+fn texture_init_anim(): i64 {
     anim_flat_buf = alloc(FLAT_SIZE);
 
     # Find NUKAGE flats by name hash
@@ -305,7 +305,7 @@ fn texture_init_anim() {
 }
 
 # Find flat by exact name string (not hash of raw WAD bytes)
-fn flat_find_name(name) {
+fn flat_find_name(name): i64 {
     var h = tex_name_hash(name);
     for (var i = 0; i < flat_count; i += 1) {
         if (load64(flat_names + i * 8) == h) { return i; }
@@ -314,7 +314,7 @@ fn flat_find_name(name) {
 }
 
 # Rotate pixel data for a 3-frame animation group
-fn anim_rotate_3(group) {
+fn anim_rotate_3(group): i64 {
     var i0 = load64(group);
     var i1 = load64(group + 8);
     var i2 = load64(group + 16);
@@ -338,7 +338,7 @@ fn anim_rotate_3(group) {
 var anim_sladrip = 0;
 var anim_tex_buf = 0;
 
-fn texture_init_wall_anim() {
+fn texture_init_wall_anim(): i64 {
     anim_tex_buf = alloc(TEX_ENTRY_SIZE);
     anim_sladrip = alloc(24);
     store64(anim_sladrip, texture_find_name("SLADRIP1"));
@@ -347,12 +347,12 @@ fn texture_init_wall_anim() {
     return 0;
 }
 
-fn texture_find_name(name) {
+fn texture_find_name(name): i64 {
     return texture_find(name);
 }
 
 # Rotate wall texture table entries for a 3-frame group
-fn anim_rotate_tex_3(group) {
+fn anim_rotate_tex_3(group): i64 {
     var i0 = load64(group);
     var i1 = load64(group + 8);
     var i2 = load64(group + 16);
@@ -370,7 +370,7 @@ fn anim_rotate_tex_3(group) {
     return 0;
 }
 
-fn texture_animate() {
+fn texture_animate(): i64 {
     anim_tick_counter += 1;
     if (anim_tick_counter < 8) { return 0; }
     anim_tick_counter = 0;
@@ -381,7 +381,7 @@ fn texture_animate() {
 }
 
 # Find flat index by name hash
-fn flat_find(name) {
+fn flat_find(name): i64 {
     var h = tex_name_hash(name);
     for (var i = 0; i < flat_count; i += 1) {
         if (load64(flat_names + i * 8) == h) { return i; }
@@ -390,7 +390,7 @@ fn flat_find(name) {
 }
 
 # Get flat pixel at (x, y) — both wrapped to 0..63
-fn flat_get_pixel(flat_idx, x, y) {
+fn flat_get_pixel(flat_idx, x, y): i64 {
     if (flat_idx < 0) { return 0; }
     x &= 63;
     y &= 63;

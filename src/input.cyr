@@ -34,15 +34,15 @@ enum InputBit {
 }
 
 # Convenience accessors (read-only, derived from input_flags)
-fn input_forward() { return (input_flags & INP_FORWARD) != 0; }
-fn input_backward() { return (input_flags & INP_BACKWARD) != 0; }
-fn input_turn_left() { return (input_flags & INP_TURN_LEFT) != 0; }
-fn input_turn_right() { return (input_flags & INP_TURN_RIGHT) != 0; }
-fn input_strafe_left() { return (input_flags & INP_STRAFE_LEFT) != 0; }
-fn input_strafe_right() { return (input_flags & INP_STRAFE_RIGHT) != 0; }
-fn input_run() { return (input_flags & INP_RUN) != 0; }
-fn input_fire() { return (input_flags & INP_FIRE) != 0; }
-fn input_use() { return (input_flags & INP_USE) != 0; }
+fn input_forward(): i64 { return (input_flags & INP_FORWARD) != 0; }
+fn input_backward(): i64 { return (input_flags & INP_BACKWARD) != 0; }
+fn input_turn_left(): i64 { return (input_flags & INP_TURN_LEFT) != 0; }
+fn input_turn_right(): i64 { return (input_flags & INP_TURN_RIGHT) != 0; }
+fn input_strafe_left(): i64 { return (input_flags & INP_STRAFE_LEFT) != 0; }
+fn input_strafe_right(): i64 { return (input_flags & INP_STRAFE_RIGHT) != 0; }
+fn input_run(): i64 { return (input_flags & INP_RUN) != 0; }
+fn input_fire(): i64 { return (input_flags & INP_FIRE) != 0; }
+fn input_use(): i64 { return (input_flags & INP_USE) != 0; }
 
 enum KeyCode {
     KEY_ESC = 27;
@@ -86,7 +86,7 @@ enum TermConst {
 # c_cc[VMIN] = 16 + 6 = 22
 # c_cc[VTIME] = 16 + 5 = 21
 
-fn input_enable_raw_mode() {
+fn input_enable_raw_mode(): i64 {
     # Save original termios
     syscall(16, 0, TCGETS, &orig_termios);
 
@@ -118,7 +118,7 @@ fn input_enable_raw_mode() {
     return 0;
 }
 
-fn input_disable_raw_mode() {
+fn input_disable_raw_mode(): i64 {
     if (raw_mode_active == 1) {
         syscall(16, 0, TCSETS, &orig_termios);
         raw_mode_active = 0;
@@ -130,7 +130,7 @@ fn input_disable_raw_mode() {
 # Input initialization
 # ================================================================
 
-fn input_init() {
+fn input_init(): i64 {
     key_state = alloc(2048);
     for (var i = 0; i < 256; i += 1) {
         store64(key_state + i * 8, 0);
@@ -142,7 +142,7 @@ fn input_init() {
     return 0;
 }
 
-fn input_shutdown() {
+fn input_shutdown(): i64 {
     input_disable_raw_mode();
     return 0;
 }
@@ -153,7 +153,7 @@ fn input_shutdown() {
 # Called once per tick. Reads all available bytes from stdin,
 # decodes escape sequences, updates key state and action flags.
 
-fn input_poll() {
+fn input_poll(): i64 {
     input_flags = 0;
 
     var buf[32];
