@@ -6,10 +6,44 @@
 
 - **Type**: Standalone game binary / kernel demo
 - **License**: GPL-3.0-only (clean-room implementation)
-- **Language**: Cyrius (native, compiled via cc5 5.7.48)
-- **Version**: SemVer, version file at `VERSION`
-- **Binary size**: 565,856 B (20 modules + vani-core); 565,856 → ~260 KB recovery gated on Cyrius phase O3 real DCE. Renders at ~3.9 ms/frame.
-- **Status**: v0.26.2 — Cyrius 5.5.2 → 5.7.48 (CI dep-resolve unblock; vani 0.9.0 requires 5.7.48 stdlib surface), vani 0.3.0 → 0.9.1 **core profile** (`dist/vani-core.cyr`, 22 `audio_*` symbols vs 106 in full bundle, drop-in via `modules` swap — proposal authored, accepted, archived at `docs/proposals/archive/vani-audio-core-profile.md`). Manifest hygiene: `cyrius.toml` / `cyrb.toml` synced to `cyrius.cyml`; orphan `lib/vani.cyr` symlink removed; lockfile clean (5/5). BSP 1.1.2. `render.cyr` / `player.cyr` / `sprite.cyr` call `bsp_is_subsector` / `bsp_point_on_side` / `bsp_node_child_{r,l}`. E1M6 map-cap fix (MAP_MAX_SSECTORS 512→1024 from 0.24.6). Security hardened. Full gameplay loop, DOOM-accurate lighting, masked midtextures, animated walls/flats/sprites, WAD-native HUD + menus + intermission, ALSA audio, weapon switching + bob, doors/lifts, automap, level transitions (E1M1–E1M9 all rendering). CVE audit: 5 findings fixed. **vani is transitional**: replaces retiring cyrius stdlib `audio` (5.8.0); will itself be replaced by **dhvani** once that port lands. **Next: v0.25.0 DOOM Black Book Audit deferred; v0.27.0 "performance pass" held against Cyrius O4 linear-scan regalloc landing (2–3× inner-loop win per Poletto–Sarkar).**
+- **Language**: Cyrius (native, compiled via cycc 6.0.1)
+- **Version**: SemVer, single source of truth at `VERSION`
+  (referenced via `version = "${file:VERSION}"` in `cyrius.cyml`)
+- **Binary size**: 585,320 B (20 modules + vani-core + bsp);
+  585,320 → ~260 KB recovery gated on Cyrius phase O3 real DCE.
+  Renders at ~3.9 ms/frame.
+- **Status**: v0.27.0 — Cyrius 5.7.48 → 6.0.1 lift opens the
+  0.27.x **language-adoption arc** (was "perf pass held against O4
+  regalloc"; perf-pass re-targets to 0.29.x as O4 slipped to
+  cyrius v6.4.x). 0.27.0 covers: cyrius pin bump (picks up v5.8.x
+  sum-types / `Result<T,E>` / `?` / exhaustive-match, v5.11.x
+  annotation arc, v6.0.0 `cyrc → cybs` + `cc5 → cycc` rename,
+  v6.0.1 stdlib-path hotfixes); vani 0.9.1 → 0.9.3 (annotation
+  pass — parse-only, ABI-identical); manifest modernization
+  (`cyrius.toml` + `cyrb.toml` retired, single `cyrius.cyml`
+  with `${file:VERSION}` template — matches patra/vani/sakshi/
+  mihi); CI lifted to patra-style installer (pre-flight HTTP
+  gate; version-pinned install layout); `cyrius deps --verify`
+  guarded on populated lockfile (workaround for known cycc 6.0.1
+  lockfile-writer regression). Binary 565,856 → 585,320 B
+  (+19,464 B honest growth-tax from v5.11.x annotation rt-table
+  + v5.8.x sum-type emit). BSP 1.1.2 (0.27.1 bumps to 1.1.3
+  once user publishes upstream tag). E1M6 map-cap fix
+  (MAP_MAX_SSECTORS 512→1024 from 0.24.6). Security hardened.
+  Full gameplay loop, DOOM-accurate lighting, masked midtextures,
+  animated walls/flats/sprites, WAD-native HUD + menus +
+  intermission, ALSA audio, weapon switching + bob, doors/lifts,
+  automap, level transitions (E1M1–E1M9 all rendering). CVE
+  audit: 5 findings fixed. **vani is transitional**: replaces
+  retiring cyrius stdlib `audio` (5.8.0); will itself be replaced
+  by **dhvani** once that port lands. **Next**: 0.27.1 dep-tag
+  re-pin (bsp 1.1.3 + vani 0.9.4 — blocked on upstream tags);
+  0.27.2 `: i64` annotation sweep on public surface; 0.27.3
+  `Result<T,E>` adoption in `wad.cyr` / `texture.cyr` /
+  `render.cyr` error paths; 0.27.4 `lib/test.cyr` table-driven
+  refactor. **0.28.x** = DOOM Black Book Audit (was 0.25.0,
+  re-anchored). **0.29.x** = performance pass against Cyrius
+  O4 regalloc.
 - **Genesis repo**: [agnosticos](https://github.com/MacCracken/agnosticos)
 - **Philosophy**: [AGNOS Philosophy](https://github.com/MacCracken/agnosticos/blob/main/docs/philosophy.md)
 - **Standards**: [First-Party Standards](https://github.com/MacCracken/agnosticos/blob/main/docs/development/applications/first-party-standards.md)
@@ -18,7 +52,7 @@
 
 AGNOS kernel (initrd demo), kiran (game engine reference), vidya (field notes / language research)
 
-**Composes**: bsp (spatial geometry, git dep tag 1.1.2, vendored as `lib/bsp.cyr`), sakshi (tracing 0.9.0)
+**Composes**: bsp (spatial geometry, git dep tag 1.1.2 — 0.27.1 pins 1.1.3; vendored as `lib/bsp.cyr`), vani (audio, git dep tag 0.9.3 — 0.27.1 pins 0.9.4; `dist/vani-core.cyr` profile, 22 `audio_*` symbols), sakshi (tracing, via cyrius stdlib)
 
 ## References
 
@@ -90,7 +124,7 @@ src/
 5. Binary size check — track growth per feature
 6. Review — performance (22ms frame budget), correctness (compare PPM to expected), memory (heap usage)
 7. Documentation — CHANGELOG, roadmap, vidya field notes for novel findings
-8. Version check — VERSION, cyrius.toml, main.cyr banner all in sync
+8. Version check — VERSION (single source of truth — `cyrius.cyml` reads it via `${file:VERSION}`), `src/main.cyr` banner in sync
 
 ### Task Sizing
 
@@ -157,7 +191,7 @@ sh scripts/run.sh
 ```
 Root files (required):
   README.md, CHANGELOG.md, CLAUDE.md, CONTRIBUTING.md, SECURITY.md,
-  CODE_OF_CONDUCT.md, LICENSE, VERSION, cyrius.toml
+  CODE_OF_CONDUCT.md, LICENSE, VERSION, cyrius.cyml
 
 docs/ (required):
   architecture/overview.md — rendering pipeline, memory layout
@@ -174,4 +208,4 @@ fuzz/:
 
 ## CHANGELOG Format
 
-Follow [Keep a Changelog](https://keepachangelog.com/). Performance claims MUST include benchmark numbers (frame time, binary size). Every version bump updates VERSION + cyrius.toml + cyrius.toml + main.cyr banner.
+Follow [Keep a Changelog](https://keepachangelog.com/). Performance claims MUST include benchmark numbers (frame time, binary size). Every version bump updates VERSION (single source of truth — `cyrius.cyml` resolves it via `${file:VERSION}`) + `src/main.cyr` banner.

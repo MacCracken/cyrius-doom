@@ -5,6 +5,123 @@ All notable changes to cyrius-doom will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.27.0] - 2026-05-21
+
+Cyrius 6.0.1 lift + manifest modernization. Opens the 0.27.x
+patch arc — held against the Cyrius O4 linear-scan regalloc
+landing for the "performance pass" was the original 0.27.0 thesis,
+but the v6.0.0 cycle-open (cybs/cycc rename) + the v5.8.x sum-type
+/ `Result<T,E>` / `?` / exhaustive-match infrastructure that's
+now landed in stdlib makes a `language-adoption` arc the higher-
+value 0.27.x sequence. O4 perf-pass re-targets to 0.28.x once
+the upstream regalloc ships. The 0.27.x patches now sequence as:
+0.27.0 cyrius lift + manifest, 0.27.1 bsp/vani dep-tag re-pin
+(post-publish), 0.27.2 type annotations on public surface, 0.27.3
+`Result<T,E>` adoption in `wad.cyr` / `render.cyr` error paths,
+0.27.4 `lib/test.cyr` table-driven test refactor.
+
+### Changed
+
+- **Cyrius 5.7.48 → 6.0.1**. Covers the v5.8.x language arc
+  (`Result<T,E>` carve-out into `lib/result.cyr` at v5.8.28,
+  sum-type syntax / `enum Foo { Bar(T); }` at v5.8.21,
+  `?` operator + exhaustive-match warnings at v5.8.21-25), the
+  v5.9.x stdlib enrichment, the v5.11.x annotation arc
+  (`fn foo(): i64` return types — parse-only, zero-codegen-change),
+  v5.11.59 DCE-aware undef-fn reachability filter (cleaner
+  compiler warnings), v5.11.60 `_exec3` argv/envp byte-contract
+  fix in `lib/process.cyr`, v5.11.65 CVE-05 tok_names mangle-path
+  overflow fix in the compiler itself, v6.0.0 two-binary rename
+  ceremony (`cyrc → cybs`, `cc5 → cycc`; ~2,100 occurrences
+  across cyrius repo), and v6.0.1 stdlib-resolution path hotfixes
+  (the rename-skip off-by-one that shipped `ud2/ud2/nop` sentinels
+  to UEFI consumers — fixed same-day).
+- **Binary growth**: 565,856 → 585,320 B (**+19,464 B, +3.4 %**)
+  on cycc 6.0.1. Honest growth-tax from the v5.11.x annotation
+  rt-table widening + v5.8.x sum-type emit. Cyrius's own
+  v6.0.x byte-array-literal-peephole + dead-code careful sweep
+  are expected to recover a portion; the long-deferred O3 real
+  DCE recovery to ~260 KB still gates on upstream. Frame time
+  unchanged (~3.9 ms/frame on E1M1).
+- **Manifest hygiene** (matches patra/vani/sakshi/mihi
+  convention):
+  - **`cyrius.toml` + `cyrb.toml` deleted.** `cyrius.cyml` is
+    now the single manifest, matching every other modern
+    first-party lib. The legacy `.toml` shims existed during
+    the 5.x cyml transition; v6.0.0 closed that transition.
+  - **`version = "${file:VERSION}"` template** in `cyrius.cyml`
+    — version single-source-of-truth at `VERSION`. CI's
+    consistency check now resolves the template (same pattern
+    patra/vani CI use).
+- **`[deps.vani]` 0.9.1 → 0.9.3** — picks up vani's stdlib
+  annotation pass (`: i64` return-type annotations on every
+  public fn in vani's `src/*.cyr` — parse-only, ABI-identical).
+  Vendored `dist/vani-core.cyr` still 800 lines, same 22
+  `audio_*` symbols, header bumped 0.9.1 → 0.9.3.
+- **CI workflows refreshed**:
+  - Adopted patra's pre-flight HTTP check on the Cyrius release
+    asset — surfaces a clear error when the cyml pin is bumped
+    ahead of the published release (catches the failure pattern
+    documented in patra v1.9.0 CI fix).
+  - Version-pinned toolchain install layout
+    (`~/.cyrius/versions/$V/{bin,lib}/`) — required by cycc
+    6.0.1's stdlib resolver, matches every other modern repo.
+  - `${file:VERSION}` template resolution in the
+    version-consistency check.
+  - `cyrius deps --verify` gated on a populated lockfile
+    (cycc 6.0.1 has a known regression where `cyrius deps`
+    writes an empty `cyrius.lock` for some manifest shapes
+    incl. ours — workaround documented inline, drops when the
+    upstream fix lands).
+  - `cyrius.toml` removed from the required-docs check.
+- **`cyrius.lock` re-anchored** for the new vani 0.9.3 dist
+  hash (`9891f720…` vs prior `aaa8fba9…`). bsp 1.1.2 dist
+  hash unchanged.
+- **`src/main.cyr` banner** bumped 0.26.2 → 0.27.0.
+
+### Known issues (downstream)
+
+- `warning:lib/yukti.cyr:39: duplicate fn 'sys_stat' (last
+  definition wins)` — cycc 6.0.1's bundled
+  `lib/syscalls_x86_64_linux.cyr` defines `sys_stat(path, buf):
+  i64`; vani's transitively-bundled yukti 2.2.4 dist defines
+  `sys_stat(path, buf)` without the annotation. The two
+  implementations are byte-identical at the codegen layer
+  (yukti's wins). Drops when yukti re-bundles with the cyrius
+  stdlib sys_stat dropped from its own surface — out of scope
+  for cyrius-doom.
+- `warning: cyrius.lock: 0 deps locked` — cycc 6.0.1
+  lockfile-writer regression (acknowledged upstream, fix
+  pending). Workaround: this repo's `cyrius.lock` is populated
+  by hand (`sha256sum lib/{vani-core,bsp,yukti,patra,sakshi}.cyr`)
+  so `cyrius deps --verify` still succeeds locally; CI gates
+  the verify step on a populated lock so it doesn't trivially
+  pass against a freshly-empty resolver write.
+
+### Verified
+
+- `cyrius deps --verify`: 5 verified, 0 failed.
+- `cyrius build src/main.cyr build/doom`: 585,320 B (CYRIUS_DCE=1
+  identical, 987 unreachable fns / 290,955 B NOPed).
+- `cyrius test tests/doom.tcyr`: 37/37 passed (WAD-free subset).
+- `./build/doom wad/DOOM1.WAD --ppm`: E1M1 + automap + intermission
+  PPMs all written; map summary `V=467 L=475 SD=648 S=85 SG=732
+  SS=237 N=236 T=138` matches 0.26.2.
+- `bsp 1.1.3` (pinned in `[deps.bsp]` once published): 79/79
+  tests, 13/13 benches sub-μs, 25K fuzz iters across 3 harnesses
+  — same gates, growth-tax of +18,144 B in standalone bsp binary
+  (76,496 → 94,640 B) from cyrius 6.0.1.
+
+### Pending (queued for 0.27.1)
+
+- **`[deps.bsp]` 1.1.2 → 1.1.3** + **`[deps.vani]` 0.9.3 → 0.9.4**
+  — both upstream tags carry only the cyrius pin bump (5.5.2 →
+  6.0.1 for bsp; 5.11.4 → 6.0.1 for vani) and CI-yml rename
+  (`cc5_aarch64` → `cycc_aarch64`). The bundle content for
+  `dist/bsp.cyr` and `dist/vani-core.cyr` is byte-identical to
+  the current 1.1.2 / 0.9.3 pin (only the `Version:` header
+  differs). 0.27.1 rolls forward once the user tags + publishes.
+
 ## [0.26.2] - 2026-05-01
 
 Toolchain + audio-stack hygiene cut. Unblocks CI (vani 0.9.x

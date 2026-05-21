@@ -1,18 +1,28 @@
 # cyrius-doom Development Roadmap
 
-> **v0.26.2** — 565,856 B (cc5 5.7.48 + vani 0.9.1 `core` profile;
-> +305 KB vs 0.26.1, gated on Cyrius phase O3 real DCE for recovery),
-> 20 modules + vendored `lib/bsp.cyr` (bsp 1.1.2) + vendored
-> `lib/vani-core.cyr` (vani 0.9.1, `dist/vani-core.cyr` single-module
-> bundle, 22 `audio_*` symbols). Full gameplay loop, DOOM-accurate
-> lighting, 9/9 shareware maps render via bsp library traversal,
-> security hardened (CVE audit: 5/5 fixed). Manifest hygiene:
-> `cyrius.toml` / `cyrb.toml` synced to `cyrius.cyml`, lockfile clean
-> at 5 deps. CI unblocked (5.5.2 → 5.7.48 toolchain bump, vani 0.9.x
-> requires 5.7.48 stdlib surface). vani is **transitional** — will be
-> replaced by dhvani once the Rust→Cyrius port lands. CI runs the
-> WAD-free test subset + DCE on release builds. 73/73 cyrius-doom tests,
-> 79/79 bsp tests, 76K fuzz iters total. fmt + lint clean.
+> **v0.27.0** — 585,320 B (cycc 6.0.1 + vani 0.9.3 `core` profile
+> + bsp 1.1.2; +19,464 B vs 0.26.2 — honest growth-tax from the
+> v5.11.x annotation rt-table + v5.8.x sum-type emit; long-term
+> recovery to ~260 KB still gated on Cyrius O3 real DCE). 20
+> modules + vendored `lib/bsp.cyr` + vendored `lib/vani-core.cyr`
+> (29 KB single-module bundle, 22 `audio_*` symbols). Full
+> gameplay loop, DOOM-accurate lighting, 9/9 shareware maps
+> render via bsp library traversal, security hardened (CVE
+> audit: 5/5 fixed). Manifest modernized: single `cyrius.cyml`
+> with `version = "${file:VERSION}"`; legacy `cyrius.toml` +
+> `cyrb.toml` retired (matches patra/vani/sakshi/mihi). CI
+> lifted to patra-style toolchain installer (pre-flight HTTP
+> gate; version-pinned install layout); `cyrius deps --verify`
+> guarded on populated lockfile pending the upstream cycc 6.0.1
+> lockfile-writer regression fix. vani is **transitional** —
+> will be replaced by dhvani once the Rust→Cyrius port lands.
+> CI runs the WAD-free 37-assert test subset + DCE on release
+> builds. 73/73 cyrius-doom tests, 79/79 bsp tests, 76K fuzz
+> iters total. fmt + lint clean. **Next**: 0.27.1 dep-tag re-pin
+> (bsp 1.1.3 + vani 0.9.4, blocked on upstream tags), then
+> 0.27.2-4 type-annotation + Result-adoption + test-refactor
+> sweep. 0.28.x = Black Book audit; 0.29.x = perf pass gated
+> on Cyrius O4.
 
 ## Completed
 
@@ -50,6 +60,7 @@
 | v0.26.0 | bsp real dep: `cyrius.cyml` migration + `[deps.bsp] @ 1.1.1`, `render_bsp_node` uses bsp primitives, DCE in release CI, test job in CI, `scripts/bench-history.sh` modernized |
 | v0.26.1 | Cyrius 5.5.2 + bsp 1.1.2 (enum-constant fold, −7,296 B / −2.7 %). No source changes. |
 | v0.26.2 | Cyrius 5.5.2 → 5.7.48 (CI dep-resolve unblock); vani 0.3.0 → 0.9.1 `core` profile (`dist/vani-core.cyr`, 22 `audio_*` symbols vs 106 in full bundle); `lib/` gitignored + untracked (was a mix of real stdlib copies + dangling local-path symlinks); `patra` dropped from stdlib (vani's `[deps.patra]` provides it); CI aligned with vani / yukti (toolchain via `cyrius.cyml`, `cyrius.lock` presence gate, `cyrius deps --verify`, version-consistency check); audio-core proposal authored, accepted in vani 0.9.1, archived. Binary 565,840 B (full recovery to ~260 KB gated on Cyrius O3). |
+| v0.27.0 | Cyrius 5.7.48 → 6.0.1 lift (covers v5.8.x sum-types / `Result<T,E>` / `?` / exhaustive-match, v5.11.x annotation arc, v6.0.0 `cyrc → cybs` + `cc5 → cycc` rename, v6.0.1 stdlib-path hotfixes); vani 0.9.1 → 0.9.3 (annotation pass, ABI-identical); `cyrius.toml` + `cyrb.toml` retired (single `cyrius.cyml`); `${file:VERSION}` template; CI lifted to patra-style installer + pre-flight HTTP gate + lockfile-guarded verify. Binary 585,320 B (+19,464 B growth-tax). |
 
 ## v0.24.0 — Security Hardening (CVE Audit Fixes)
 
@@ -63,22 +74,170 @@
 
 See: `docs/audit/2026-04-13-security-cve-audit.md`
 
-## v0.27.0 — Performance pass (held against Cyrius O4 regalloc)
+## v0.27.x — Language-adoption arc
 
-Deliberate hold. Cyrius's parallel compiler-optimization track (O1–O6
-in `cyrius/docs/development/roadmap.md` §"v5.4.x Queue") has three
-phases that directly move cyrius-doom's hot paths. Hand-optimizing
-`fx_mul` / `asr` / column loops today would fight the codegen once
-O4's linear-scan register allocator lands and delivers its projected
-2–3× on hot inner loops.
+**Theme** — absorb the v5.8.x → v6.0.1 language gains (sum types,
+`Result<T, E>`, `?` operator, exhaustive match, parse-only `: i64`
+return annotations) and the modern manifest convention (single
+`cyrius.cyml`, `${file:VERSION}` template) into doom's actual code +
+toolchain. The original 0.27.0 thesis was the "performance pass held
+against Cyrius O4 regalloc," but O4 has slipped to a v6.4.x slot in
+cyrius's roadmap and the v5.8.x language arc is now mature in stdlib
+— making *adoption* the higher-value 0.27.x sequence. The perf-pass
+re-targets to **v0.29.x** (or whatever ships closest to O4 cycle).
+Black Book audit (was v0.25.0) re-anchors as **v0.28.x**, sequenced
+after the language arc lands so audit deltas are written against the
+modernized code, not against code we're about to rewrite.
+
+### v0.27.0 — Cyrius 6.0.1 lift + manifest hygiene (2026-05-21) — DONE
+
+See CHANGELOG entry. Bumps: cyrius 5.7.48 → 6.0.1; vani 0.9.1 →
+0.9.3; drops `cyrius.toml` + `cyrb.toml` (single `cyrius.cyml`);
+`version = "${file:VERSION}"` template; CI lifted to patra-style
+toolchain installer + pre-flight HTTP gate; CI `--verify` step
+guarded on a populated lockfile (cycc 6.0.1 lockfile-writer
+regression). Build green at 585,320 B (+19,464 B v5.11.x annotation
+rt-table + v5.8.x sum-type-emit growth-tax); 37/37 WAD-free tests;
+E1M1 PPM smoke matches 0.26.2 byte counts.
+
+### v0.27.1 — bsp 1.1.3 + vani 0.9.4 dep-tag re-pin
+
+Pure dep-tag bumps to the freshly-cyrius-6.0.1-pinned upstream
+tags. Both bundles' contents are byte-identical to current
+(0.27.0) pin save for the `Version:` header line — same shape as
+v0.26.1's Cyrius pin-only patch. Ships when bsp 1.1.3 + vani
+0.9.4 are tagged + pushed.
+
+| # | Item | Status |
+|---|------|--------|
+| 1 | `[deps.bsp]` 1.1.2 → **1.1.3** | Blocked on upstream tag |
+| 2 | `[deps.vani]` 0.9.3 → **0.9.4** | Blocked on upstream tag |
+| 3 | Refresh `cyrius.lock` hashes (3 of 5: bsp, vani-core, possibly yukti/patra if vani 0.9.4 rolled them) | Pending |
+| 4 | Re-bench frame time vs 0.27.0 baseline (expected: variance-level) | Pending |
+
+### v0.27.2 — Type annotations on public surface
+
+Mechanical sweep adopting the v5.11.x annotation arc on doom's
+own code — same shape as vani 0.9.3's "every public fn in
+`src/*.cyr` carries a `: i64` return-type annotation" cut.
+Parse-only, zero codegen change. Documents return contracts
+inline; sets up for v0.27.3 to introduce `Result`-returning
+variants on the same fns.
+
+| # | Item | Source modules | Detail |
+|---|------|----------------|--------|
+| 1 | `: i64` return annotations across `src/*.cyr` | all 17 modules | Parse-only, ABI-identical |
+| 2 | Public-surface type-annotation pass | `wad`, `map`, `render`, `texture` | Highest-value boundaries first |
+| 3 | Verify `bench-history.csv` shows variance-level deltas only | benches | Annotations should not move frame time |
+
+### v0.27.3 — `Result<T, E>` adoption in WAD/render error paths
+
+Adopt the v5.8.28 `lib/result.cyr` carve-out at the IO/parse
+boundary where doom currently returns hand-coded error sentinels
+(`-1`, `0` for null pointer, etc.). Highest-value targets:
+`wad_open` / `wad_lump_read` (file-IO failure), `texture_load`
+/ `patch_load` (lump-shape validation), `map_load`
+(index-bounds validation already in place — Result wraps the
+existing checks). `?` operator collapses cascaded error checks.
+
+| # | Item | Module | Detail |
+|---|------|--------|--------|
+| 1 | `wad_open` returns `Result<WadHandle, WadError>` | wad.cyr | Replace `0`-on-fail with typed `Err` |
+| 2 | `wad_lump_read` returns `Result<usize, WadError>` | wad.cyr | Replace `-1`-on-fail; bytes-read on Ok |
+| 3 | `texture_composite` returns `Result<u8*, TextureError>` | texture.cyr | Replace null-on-fail; covers patch-cache load failure |
+| 4 | `?` operator in `r_init` / `main` / `doom_main` call paths | render.cyr, main.cyr | Cascading unwrap; one Err short-circuits to a logged exit |
+| 5 | Exhaustive-match on `WadError` / `TextureError` at the main-loop boundary | main.cyr | Compiler-enforced — no silent fall-through |
+
+### v0.27.4 — `lib/test.cyr` table-driven test refactor
+
+Adopt the v5.7.43 `test_each(cases, fn)` stdlib helper. Current
+`tests/doom.tcyr` is ~73 asserts of hand-rolled per-case
+assertion calls; table-driven cuts the boilerplate and makes it
+easy to add new cases for the same property. Targets:
+fixed-point arithmetic (asr / fx_mul / fx_div), trig tables,
+angle math.
+
+| # | Item | Detail |
+|---|------|--------|
+| 1 | Add `"test"` to `cyrius.cyml` stdlib | One-line manifest |
+| 2 | Convert asr / fixed-point asserts → `test_each` | ~20 asserts collapsed |
+| 3 | Convert trig-table asserts → `test_each` | ~12 asserts collapsed |
+| 4 | Extend test corpus once boilerplate drops | Add 20+ cases per group |
+
+### Watch (not yet 0.27.x slot material)
+
+- **`lib/random.cyr`** (v5.9.x stdlib addition) — deterministic
+  per-DOOM-tick PRNG. Doom's monster AI is already deterministic
+  per the original game; not adopted unless RNG is wanted for
+  intermission/menu polish.
+- **`#io` effect annotations** (v5.11.x) — would document the
+  io-side-effect set of `wad_lump_read` / `framebuf_present` /
+  `audio_write`. No semantic change. Defer until Cyrius pins
+  the annotation surface as stable.
+- **mabda 3.0 fold / bayan-ganita carve** (v6.0.x planned) —
+  doom uses no JSON/TOML, so this is a no-op for us.
+
+## v0.29.x — Performance pass (held against Cyrius O4 regalloc)
+
+Re-targeted from 0.27.0. Cyrius's compiler-optimization track has
+three phases that directly move cyrius-doom's hot paths.
+Hand-optimizing `fx_mul` / `asr` / column loops today would fight
+the codegen once O4's linear-scan register allocator lands and
+delivers its projected 2–3× on hot inner loops.
 
 | # | Item | Status | Detail |
 |---|------|--------|--------|
 | 1 | Wait for **Cyrius O2** (peephole: strength reduction, flag reuse, LEA combining, aarch64 `madd`/`msub`) | Upstream | Small runtime wins on math-dense loops. Free bump once shipped. |
-| 2 | Wait for **Cyrius O3** (IR-driven DCE + const prop + dead-store elim) | Upstream | Today we NOP 49 KB of dead code (same file size). O3 strips it for real — binary genuinely shrinks. |
-| 3 | Wait for **Cyrius O4** (linear-scan regalloc, Poletto–Sarkar) | Upstream | The single biggest win. `render_frame` projection: 2.5 ms → ≤1 ms. Column renderer, BSP walk, patch cache all benefit. |
+| 2 | Wait for **Cyrius O3** (IR-driven DCE + const prop + dead-store elim) | Upstream | Today we NOP 290 KB of dead code (same file size). O3 strips it for real — binary genuinely shrinks. |
+| 3 | Wait for **Cyrius O4** (linear-scan regalloc, Poletto–Sarkar; v6.4.x per cyrius roadmap) | Upstream | The single biggest win. `render_frame` projection: 3.9 ms → ≤1.5 ms. Column renderer, BSP walk, patch cache all benefit. |
 | 4 | Re-bench hot paths on O2/O3/O4-enabled toolchain | Pending | `bench-history.csv` row per upstream phase landing, with A/B before/after numbers to confirm the compiler wins stick. |
 | 5 | Revisit manual patterns only after O4 | Pending | At that point any remaining 5–10 % wins from column-loop restructure are worth chasing; before then, no. |
+
+## v0.28.x — DOOM Black Book Audit
+
+Was v0.25.0; re-anchored here so audit deltas are written against
+the modernized 0.27.x code rather than against code we'd rewrite
+in the language-adoption arc. Scope: chapter-by-chapter
+verification against Fabien Sanglard's _Game Engine Black Book:
+DOOM_ + the Unofficial DOOM Specs, with reference PPMs from
+chocolate-doom (the closest-to-original-DOOM modern engine) as
+ground truth for visual comparisons.
+
+### v0.28.0 — Rendering pipeline audit
+
+| # | Item | Reference | Detail |
+|---|------|-----------|--------|
+| 1 | Visplane span generation | Black Book ch. 9 (R_DrawPlanes) | Spans match shape + count vs reference on E1M1/M3/M5 |
+| 2 | Column rendering | Black Book ch. 8 (R_DrawColumn) | Texture-coord stepping, light scale, COLORMAP lookup parity |
+| 3 | Sky rendering | Black Book ch. 8 (R_DrawSkyColumn) | Sky never lit; column wraps at 256 |
+| 4 | Masked midtexture clipping | Black Book ch. 10 | `silhouette` masking against floor/ceiling clips |
+| 5 | Sprite-to-wall clipping | Black Book ch. 11 (R_DrawMaskedColumn) | Sprite spans clipped against `mfloorclip` / `mceilingclip` arrays |
+
+### v0.28.1 — BSP + collision audit
+
+| # | Item | Reference | Detail |
+|---|------|-----------|--------|
+| 1 | BSP traversal invariants | Black Book ch. 7 + bsp lib | `bsp_point_on_side` parity with reference; front-to-back walk order |
+| 2 | Subsector containment | Black Book ch. 7 | Every point in a subsector returns that subsector |
+| 3 | Wall-slide collision | Black Book ch. 12 | Player slide against angled walls matches reference geometry |
+| 4 | Blockmap query correctness | Unofficial Specs §4.7 | BLOCKMAP cell-list parity on E1M6 stress map |
+
+### v0.28.2 — Game state audit
+
+| # | Item | Reference | Detail |
+|---|------|-----------|--------|
+| 1 | `R_DrawPSprite` weapon-sprite coords | Black Book ch. 11 | Weapon bob `psprite_x` / `psprite_y` matches reference frames |
+| 2 | Brightness / lighting tuning | Black Book ch. 8 (COLORMAP) | A/B screenshot diff vs chocolate-doom, per-light-level |
+| 3 | Episode-end intermission | Unofficial Specs §1.10 | E1M8 boss kill → text screen → bunny scroll |
+| 4 | Visplane budget under stress | Unofficial Specs §10.4 | E1M9 + max-difficulty thing count: no visplane overflow |
+
+### v0.28.3 — Security audit refresh (post-Result adoption)
+
+| # | Item | Detail |
+|---|------|--------|
+| 1 | Re-walk the v0.24.0 CVE checklist | All 5 CVE items checked under 0.27.3 `Result`-wrapped paths |
+| 2 | Fuzz-corpus refresh | Add ADT-discriminator-aware mutators for the new `Result<T, E>` shape |
+| 3 | Audit doc | `docs/audit/2026-XX-XX-v0.28-black-book.md` written as a single artifact, sectioned per 0.28.x patch |
 
 ## v0.26.2 — Cyrius 5.7.48 + vani 0.9.1 `core` profile (2026-05-01) — DONE
 
@@ -151,15 +310,12 @@ Manifest migrated to `cyrius.cyml` with `[deps.bsp] @ 1.1.1`.
 (identical 112-byte node block). Release CI runs `CYRIUS_DCE=1`;
 cyrius-doom CI now runs the WAD-free 37-assert test subset.
 
-## v0.25.0 — DOOM Black Book Audit (2026-04-15) — deferred behind 0.26.0
+## v0.25.0 — DOOM Black Book Audit (2026-04-15) — deferred → re-anchored as v0.28.x
 
-| # | Item | Status | Detail |
-|---|------|--------|--------|
-| 1 | Chapter-by-chapter verification | Not started | Walk through book with code side-by-side |
-| 2 | R_DrawPSprite psprite coords | Not started | Verify weapon positioning matches source exactly |
-| 3 | Brightness tuning | Not started | Compare screenshots vs original DOOM |
-| 4 | Episode complete screen | Not started | E1M8 boss kill → text screen / bunny scroll |
-| 5 | Visplane correctness | Not started | Verify span generation matches R_DrawPlanes |
+Original deferral was behind 0.26.0. Re-anchored as the v0.28.x
+arc above so audit work lands against the 0.27.x-modernized code
+rather than against the pre-language-adoption surface. Original
+scope (5 items) expanded into the four 0.28.x patches.
 
 ## v1.0.0 — Ship
 
