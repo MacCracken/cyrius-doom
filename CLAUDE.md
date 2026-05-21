@@ -9,39 +9,44 @@
 - **Language**: Cyrius (native, compiled via cycc 6.0.1)
 - **Version**: SemVer, single source of truth at `VERSION`
   (referenced via `version = "${file:VERSION}"` in `cyrius.cyml`)
-- **Binary size**: 585,320 B (20 modules + vani-core + bsp);
-  585,320 → ~260 KB recovery gated on Cyrius phase O3 real DCE.
-  Renders at ~3.9 ms/frame.
-- **Status**: v0.27.0 — Cyrius 5.7.48 → 6.0.1 lift opens the
-  0.27.x **language-adoption arc** (was "perf pass held against O4
-  regalloc"; perf-pass re-targets to 0.29.x as O4 slipped to
-  cyrius v6.4.x). 0.27.0 covers: cyrius pin bump (picks up v5.8.x
-  sum-types / `Result<T,E>` / `?` / exhaustive-match, v5.11.x
-  annotation arc, v6.0.0 `cyrc → cybs` + `cc5 → cycc` rename,
-  v6.0.1 stdlib-path hotfixes); vani 0.9.1 → 0.9.3 (annotation
-  pass — parse-only, ABI-identical); manifest modernization
-  (`cyrius.toml` + `cyrb.toml` retired, single `cyrius.cyml`
-  with `${file:VERSION}` template — matches patra/vani/sakshi/
-  mihi); CI lifted to patra-style installer (pre-flight HTTP
-  gate; version-pinned install layout); `cyrius deps --verify`
-  guarded on populated lockfile (workaround for known cycc 6.0.1
-  lockfile-writer regression). Binary 565,856 → 585,320 B
-  (+19,464 B honest growth-tax from v5.11.x annotation rt-table
-  + v5.8.x sum-type emit). BSP 1.1.2 (0.27.1 bumps to 1.1.3
-  once user publishes upstream tag). E1M6 map-cap fix
-  (MAP_MAX_SSECTORS 512→1024 from 0.24.6). Security hardened.
-  Full gameplay loop, DOOM-accurate lighting, masked midtextures,
-  animated walls/flats/sprites, WAD-native HUD + menus +
-  intermission, ALSA audio, weapon switching + bob, doors/lifts,
-  automap, level transitions (E1M1–E1M9 all rendering). CVE
-  audit: 5 findings fixed. **vani is transitional**: replaces
-  retiring cyrius stdlib `audio` (5.8.0); will itself be replaced
-  by **dhvani** once that port lands. **Next**: 0.27.1 dep-tag
-  re-pin (bsp 1.1.3 + vani 0.9.4 — blocked on upstream tags);
-  0.27.2 `: i64` annotation sweep on public surface; 0.27.3
-  `Result<T,E>` adoption in `wad.cyr` / `texture.cyr` /
-  `render.cyr` error paths; 0.27.4 `lib/test.cyr` table-driven
-  refactor. **0.28.x** = DOOM Black Book Audit (was 0.25.0,
+- **Binary size**: 585,224 B (20 modules + vani-core + bsp);
+  585,224 → ~260 KB recovery gated on Cyrius phase O3 real DCE.
+  `render_frame` 2.146 ms (bench-history 2026-05-21).
+- **Status**: v0.27.1 — bsp 1.1.3 + vani 0.9.4 dep-tag re-pin
+  to the freshly-published upstream tags (both bundles
+  byte-identical to 0.27.0 pins save for `Version:` header).
+  Closes out 0.27.0's "queued for 0.27.1" item. Binary 585,320
+  → 585,224 B (−96 B, `Version:` header byte-swap; not a real
+  shrink). `cyrius.lock` re-anchored on the new bundle hashes
+  (5/5 rotated as vani 0.9.4's transitive resolution refreshed
+  yukti / patra / sakshi too).
+- v0.27.0 (prior cut) covered the Cyrius 5.7.48 → 6.0.1 lift
+  (v5.8.x sum-types / `Result<T,E>` / `?` / exhaustive-match;
+  v5.11.x annotation arc; v6.0.0 `cyrc → cybs` + `cc5 → cycc`
+  rename; v6.0.1 stdlib-path hotfixes), vani 0.9.1 → 0.9.3
+  annotation pass, manifest modernization (`cyrius.toml` +
+  `cyrb.toml` retired, single `cyrius.cyml` with
+  `${file:VERSION}` template — matches patra/vani/sakshi/mihi),
+  and CI lift to the patra-style installer (pre-flight HTTP
+  gate, version-pinned install layout, `cyrius deps --verify`
+  guarded on populated lockfile pending the cycc 6.0.1
+  lockfile-writer regression fix). Honest growth-tax 565,856
+  → 585,320 B from v5.11.x annotation rt-table + v5.8.x
+  sum-type emit. E1M6 map-cap fix (MAP_MAX_SSECTORS 512→1024
+  from 0.24.6). Security hardened. Full gameplay loop,
+  DOOM-accurate lighting, masked midtextures, animated walls/
+  flats/sprites, WAD-native HUD + menus + intermission, ALSA
+  audio, weapon switching + bob, doors/lifts, automap, level
+  transitions (E1M1–E1M9 all rendering). CVE audit: 5 findings
+  fixed. **vani is transitional**: replaces retiring cyrius
+  stdlib `audio` (5.8.0); will itself be replaced by **dhvani**
+  once that port lands. **Next**: 0.27.2 `: i64` annotation
+  sweep on doom's own public-fn surface (parse-only,
+  ABI-identical); 0.27.3 `Result<T,E>` adoption in `wad.cyr` /
+  `texture.cyr` / `render.cyr` error paths; 0.27.4
+  `lib/test.cyr` table-driven refactor; 0.27.5 upstream-fix
+  cleanup (drop lockfile workaround) once cycc publishes the
+  fix. **0.28.x** = DOOM Black Book Audit (was 0.25.0,
   re-anchored). **0.29.x** = performance pass against Cyrius
   O4 regalloc.
 - **Genesis repo**: [agnosticos](https://github.com/MacCracken/agnosticos)
@@ -52,7 +57,7 @@
 
 AGNOS kernel (initrd demo), kiran (game engine reference), vidya (field notes / language research)
 
-**Composes**: bsp (spatial geometry, git dep tag 1.1.2 — 0.27.1 pins 1.1.3; vendored as `lib/bsp.cyr`), vani (audio, git dep tag 0.9.3 — 0.27.1 pins 0.9.4; `dist/vani-core.cyr` profile, 22 `audio_*` symbols), sakshi (tracing, via cyrius stdlib)
+**Composes**: bsp (spatial geometry, git dep tag 1.1.3; vendored as `lib/bsp.cyr`), vani (audio, git dep tag 0.9.4; `dist/vani-core.cyr` profile, 22 `audio_*` symbols), sakshi (tracing, via cyrius stdlib)
 
 ## References
 

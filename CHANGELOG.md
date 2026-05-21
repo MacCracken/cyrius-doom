@@ -5,6 +5,76 @@ All notable changes to cyrius-doom will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.27.1] - 2026-05-21
+
+bsp 1.1.3 + vani 0.9.4 dep-tag re-pin — the half of the 0.27.0
+cut that was held against upstream-publish. No source changes
+in `src/*.cyr` beyond the version comments in `src/main.cyr`'s
+header and the banner string; both upstream tags ship bundle
+content byte-identical to their predecessor save for the
+`Version:` header line. Same shape as v0.26.1's Cyrius pin-only
+patch.
+
+### Changed
+
+- **`[deps.bsp]` 1.1.2 → 1.1.3** — picks up bsp's cyrius
+  toolchain pin bump (5.5.2 → 6.0.1), `${file:VERSION}`
+  template, `cyrius.toml` + `.cyrius-toolchain` retirement,
+  and CI lift to the patra-style installer. `dist/bsp.cyr`
+  bundle content is byte-identical save for the `Version:`
+  header (1.1.2 → 1.1.3).
+- **`[deps.vani]` 0.9.3 → 0.9.4** — picks up vani's cyrius
+  pin bump (5.11.4 → 6.0.1), yukti 2.2.2 → 2.2.4, patra
+  1.9.3 → 1.9.5, and `cc5_aarch64 → cycc_aarch64` CI rename.
+  `dist/vani-core.cyr` bundle content is byte-identical save
+  for the `Version:` header.
+- **`src/main.cyr`** — vendored-dep version comments bumped
+  (`bsp @ 1.1.1` → `bsp @ 1.1.3`, `vani @ 0.9.1` → `vani @
+  0.9.4`); these two comments had lagged through 0.27.0).
+  Banner string `cyrius-doom v0.27.0` → `cyrius-doom v0.27.1`.
+- **`cyrius.lock`** — re-anchored to the new bundle hashes:
+  `lib/vani-core.cyr` `9891f720… → 74000d17…`, `lib/bsp.cyr`
+  `… → 8ae89a9e…`. Yukti / patra / sakshi hashes also rotate
+  as vani's transitive dep tree resolved fresh.
+- **Binary size**: 585,320 → **585,224 B (−96 B)**. The delta
+  is the `Version:` header swap in the two bundles
+  (`# Version: 0.9.3` → `# Version: 0.9.4`, `# Version: 1.1.2`
+  → `# Version: 1.1.3`). Variance-level, not a real shrink —
+  recovery to ~260 KB remains gated on Cyrius O3 real DCE.
+
+### Verified
+
+- `cyrius deps`: 5 resolved (after hand-populating `cyrius.lock`
+  via `sha256sum`, same cycc 6.0.1 lockfile-writer workaround
+  documented under 0.27.0 Known issues).
+- `cyrius deps --verify`: 5 verified, 0 failed.
+- `cyrius build src/main.cyr build/doom`: 585,224 B (982
+  unreachable fns / 292,798 B NOPed).
+- `cyrius test tests/doom.tcyr` (WAD-free): 37/37 passed.
+- `./build/test_doom wad/DOOM1.WAD` (full): 73/73 passed.
+- `./build/doom wad/DOOM1.WAD --ppm`: E1M1 + automap +
+  intermission PPMs all written at the expected 192,015 B
+  each; map summary `V=467 L=475 SD=648 S=85 SG=732 SS=237
+  N=236 T=138` matches 0.27.0 / 0.26.2.
+- Bench (`scripts/bench-history.sh`): `render_frame` 2.146 ms,
+  `render_frame+sprites` 2.141 ms, `fixed_mul` 7 ns,
+  `texture_get_column` 761 ns, `pcache_get_hit` 8 ns — all
+  within run-to-run variance of 0.27.0's pre-publish numbers.
+
+### Known issues (carried over from 0.27.0)
+
+Both upstream-cycc workarounds documented under 0.27.0 still
+apply unchanged in 0.27.1:
+
+- `cyrius.lock` written empty by `cyrius deps` — workaround:
+  hand-populate via `sha256sum lib/{vani-core,bsp,yukti,patra,
+  sakshi}.cyr > cyrius.lock`. CI's `--verify` step stays
+  gated on a populated lockfile.
+- `lib/yukti.cyr:39: duplicate fn 'sys_stat' (last definition
+  wins)` — codegen-identical, drops when yukti drops the
+  duplicate from its dist. Pending tracked under 0.27.5
+  upstream-fix cleanup.
+
 ## [0.27.0] - 2026-05-21
 
 Cyrius 6.0.1 lift + manifest modernization. Opens the 0.27.x

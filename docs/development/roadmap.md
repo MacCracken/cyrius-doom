@@ -1,15 +1,15 @@
 # cyrius-doom Development Roadmap
 
-> **v0.27.0** — 585,320 B (cycc 6.0.1 + vani 0.9.3 `core` profile
-> + bsp 1.1.2; +19,464 B vs 0.26.2 — honest growth-tax from the
-> v5.11.x annotation rt-table + v5.8.x sum-type emit; long-term
-> recovery to ~260 KB still gated on Cyrius O3 real DCE). 20
-> modules + vendored `lib/bsp.cyr` + vendored `lib/vani-core.cyr`
-> (29 KB single-module bundle, 22 `audio_*` symbols). Full
-> gameplay loop, DOOM-accurate lighting, 9/9 shareware maps
-> render via bsp library traversal, security hardened (CVE
-> audit: 5/5 fixed). Manifest modernized: single `cyrius.cyml`
-> with `version = "${file:VERSION}"`; legacy `cyrius.toml` +
+> **v0.27.1** — 585,224 B (cycc 6.0.1 + vani 0.9.4 `core` profile
+> + bsp 1.1.3; −96 B vs 0.27.0 — `Version:` header byte-swap in
+> the two upstream bundles, not a real shrink; long-term recovery
+> to ~260 KB still gated on Cyrius O3 real DCE). 20 modules +
+> vendored `lib/bsp.cyr` + vendored `lib/vani-core.cyr` (29 KB
+> single-module bundle, 22 `audio_*` symbols). Full gameplay
+> loop, DOOM-accurate lighting, 9/9 shareware maps render via
+> bsp library traversal, security hardened (CVE audit: 5/5
+> fixed). Manifest modernized: single `cyrius.cyml` with
+> `version = "${file:VERSION}"`; legacy `cyrius.toml` +
 > `cyrb.toml` retired (matches patra/vani/sakshi/mihi). CI
 > lifted to patra-style toolchain installer (pre-flight HTTP
 > gate; version-pinned install layout); `cyrius deps --verify`
@@ -18,10 +18,13 @@
 > will be replaced by dhvani once the Rust→Cyrius port lands.
 > CI runs the WAD-free 37-assert test subset + DCE on release
 > builds. 73/73 cyrius-doom tests, 79/79 bsp tests, 76K fuzz
-> iters total. fmt + lint clean. **Next**: 0.27.1 dep-tag re-pin
-> (bsp 1.1.3 + vani 0.9.4, blocked on upstream tags), then
-> 0.27.2-4 type-annotation + Result-adoption + test-refactor
-> sweep. 0.28.x = Black Book audit; 0.29.x = perf pass gated
+> iters total. fmt + lint clean. Bench row (0.27.1):
+> `render_frame` 2.146 ms / `+sprites` 2.141 ms — variance-level
+> vs 0.27.0 pre-publish numbers, as predicted for a byte-stable
+> bundle bump. **Next**: 0.27.2 type-annotation sweep on doom's
+> own public-fn surface; then 0.27.3 `Result<T,E>` adoption in
+> wad/render error paths; 0.27.4 `lib/test.cyr` table-driven
+> refactor. 0.28.x = Black Book audit; 0.29.x = perf pass gated
 > on Cyrius O4.
 
 ## Completed
@@ -61,6 +64,7 @@
 | v0.26.1 | Cyrius 5.5.2 + bsp 1.1.2 (enum-constant fold, −7,296 B / −2.7 %). No source changes. |
 | v0.26.2 | Cyrius 5.5.2 → 5.7.48 (CI dep-resolve unblock); vani 0.3.0 → 0.9.1 `core` profile (`dist/vani-core.cyr`, 22 `audio_*` symbols vs 106 in full bundle); `lib/` gitignored + untracked (was a mix of real stdlib copies + dangling local-path symlinks); `patra` dropped from stdlib (vani's `[deps.patra]` provides it); CI aligned with vani / yukti (toolchain via `cyrius.cyml`, `cyrius.lock` presence gate, `cyrius deps --verify`, version-consistency check); audio-core proposal authored, accepted in vani 0.9.1, archived. Binary 565,840 B (full recovery to ~260 KB gated on Cyrius O3). |
 | v0.27.0 | Cyrius 5.7.48 → 6.0.1 lift (covers v5.8.x sum-types / `Result<T,E>` / `?` / exhaustive-match, v5.11.x annotation arc, v6.0.0 `cyrc → cybs` + `cc5 → cycc` rename, v6.0.1 stdlib-path hotfixes); vani 0.9.1 → 0.9.3 (annotation pass, ABI-identical); `cyrius.toml` + `cyrb.toml` retired (single `cyrius.cyml`); `${file:VERSION}` template; CI lifted to patra-style installer + pre-flight HTTP gate + lockfile-guarded verify. Binary 585,320 B (+19,464 B growth-tax). |
+| v0.27.1 | Dep-tag re-pin to upstream-published bsp 1.1.3 + vani 0.9.4. Bundle content byte-identical save for `Version:` header. Binary 585,320 → 585,224 B (−96 B). `render_frame` 2.146 ms (variance-level). |
 
 ## v0.24.0 — Security Hardening (CVE Audit Fixes)
 
@@ -130,20 +134,19 @@ E1M1 PPM smoke matches 0.26.2 byte counts.
   Codegen-identical, warning-only. Drops when yukti drops the
   duplicate from its dist.
 
-### v0.27.1 — bsp 1.1.3 + vani 0.9.4 dep-tag re-pin
+### v0.27.1 — bsp 1.1.3 + vani 0.9.4 dep-tag re-pin (2026-05-21) — DONE
 
 Pure dep-tag bumps to the freshly-cyrius-6.0.1-pinned upstream
 tags. Both bundles' contents are byte-identical to current
 (0.27.0) pin save for the `Version:` header line — same shape as
-v0.26.1's Cyrius pin-only patch. Ships when bsp 1.1.3 + vani
-0.9.4 are tagged + pushed.
+v0.26.1's Cyrius pin-only patch. See CHANGELOG entry.
 
 | # | Item | Status |
 |---|------|--------|
-| 1 | `[deps.bsp]` 1.1.2 → **1.1.3** | Blocked on upstream tag |
-| 2 | `[deps.vani]` 0.9.3 → **0.9.4** | Blocked on upstream tag |
-| 3 | Refresh `cyrius.lock` hashes (3 of 5: bsp, vani-core, possibly yukti/patra if vani 0.9.4 rolled them) | Pending |
-| 4 | Re-bench frame time vs 0.27.0 baseline (expected: variance-level) | Pending |
+| 1 | `[deps.bsp]` 1.1.2 → **1.1.3** | Done |
+| 2 | `[deps.vani]` 0.9.3 → **0.9.4** | Done |
+| 3 | Refresh `cyrius.lock` hashes (5 of 5 rotated — bsp, vani-core, plus yukti / patra / sakshi which got re-resolved through vani's transitive tree) | Done |
+| 4 | Re-bench frame time vs 0.27.0 baseline (expected: variance-level) | Done — `render_frame` 2.146 ms / `+sprites` 2.141 ms; binary 585,320 → 585,224 B (−96 B, `Version:` header swap) |
 
 ### v0.27.2 — Type annotations on public surface
 
