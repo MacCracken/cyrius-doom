@@ -100,6 +100,36 @@ regression). Build green at 585,320 B (+19,464 B v5.11.x annotation
 rt-table + v5.8.x sum-type-emit growth-tax); 37/37 WAD-free tests;
 E1M1 PPM smoke matches 0.26.2 byte counts.
 
+**Co-shipped upstream (out-of-band, gated on user publish):**
+- **bsp 1.1.3** — prepared at `/home/macro/Repos/bsp` (unstaged on
+  `main`, ssh remote). Cyrius pin 5.5.2 → 6.0.1, `${file:VERSION}`
+  template, `cyrius.toml` retired, `.cyrius-toolchain` retired,
+  CI lifted to patra-style installer (was pinned at 5.5.0 in the
+  legacy `.cyrius-toolchain` — would have installed wrong cyrius).
+  CHANGELOG `[1.1.3]` entry + new `docs/development/roadmap.md`
+  with 1.2.x language-adoption arc. Gates: 79/79 tests, 13/13
+  benches sub-μs, 25K fuzz iters, build 76,496 → 94,640 B
+  (+18,144 B growth-tax).
+- **vani 0.9.4** — already prepared upstream in vani's working
+  tree (commit `7b44e0d`, not yet tagged). Cyrius pin 5.11.4 →
+  6.0.1, yukti 2.2.2 → 2.2.4, patra 1.9.3 → 1.9.5, CI yml
+  `cc5_aarch64` → `cycc_aarch64`. dist content byte-identical
+  save for `Version:` header.
+- **Suggested publish order**: bsp 1.1.3 → vani 0.9.4 → cyrius-doom
+  0.27.0 (so dep-resolution succeeds at each step).
+
+**Known cycc 6.0.1 issues + workarounds** (drop when upstream fixes):
+- `cyrius deps` writes empty `cyrius.lock` for our manifest shape.
+  Workaround: hand-populate via `sha256sum lib/{vani-core,bsp,
+  yukti,patra,sakshi}.cyr > cyrius.lock`. CI's `--verify` step
+  is guarded on a populated lock — drop the guard when upstream
+  fixes.
+- `lib/yukti.cyr:39: duplicate fn 'sys_stat' (last definition
+  wins)` — cycc 6.0.1 stdlib now defines `sys_stat`; vani's
+  transitively-bundled yukti 2.2.4 also defines it (unannotated).
+  Codegen-identical, warning-only. Drops when yukti drops the
+  duplicate from its dist.
+
 ### v0.27.1 — bsp 1.1.3 + vani 0.9.4 dep-tag re-pin
 
 Pure dep-tag bumps to the freshly-cyrius-6.0.1-pinned upstream
@@ -163,6 +193,18 @@ angle math.
 | 2 | Convert asr / fixed-point asserts → `test_each` | ~20 asserts collapsed |
 | 3 | Convert trig-table asserts → `test_each` | ~12 asserts collapsed |
 | 4 | Extend test corpus once boilerplate drops | Add 20+ cases per group |
+
+### v0.27.5 — Upstream-fix cleanup (gated on cycc fixes)
+
+Lands when cyrius ships the lockfile-writer fix + yukti drops its
+duplicate sys_stat. Pure cleanup — no new doom features.
+
+| # | Item | Status | Detail |
+|---|------|--------|--------|
+| 1 | Drop CI `--verify` lockfile-presence guard | Blocked on cycc lockfile fix | Restore `cyrius deps --verify` as unconditional gate |
+| 2 | Drop hand-populated `cyrius.lock` workflow | Blocked on cycc lockfile fix | Let `cyrius deps --lock` write canonical hashes |
+| 3 | Re-resolve deps to drop yukti `sys_stat` dup-fn warning | Blocked on yukti re-bundle | Bump vani → re-resolves transitive yukti |
+| 4 | Update CHANGELOG / CLAUDE.md "Known issues" section | Pending | Strike the two workaround blocks once both fixes land |
 
 ### Watch (not yet 0.27.x slot material)
 
