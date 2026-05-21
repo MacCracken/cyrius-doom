@@ -5,6 +5,103 @@ All notable changes to cyrius-doom will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.27.3] - 2026-05-21
+
+`Result<T, E>` adoption at the WAD IO/parse boundary. Doom's
+public-fn surface has been `: i64`-annotated since 0.27.2;
+0.27.3 builds on that to retrofit typed-error returns where the
+boot path needed them most. Replaces hand-coded `-1` / `0`
+sentinels at the `wad_open` boundary with typed `WadError`
+variants. Introduces the `?` propagation operator + exhaustive
+`match` at the main-loop boundary — the first use of v5.8.x sum
+types in doom's own code.
+
+### Added
+
+- **`enum WadError`** in `wad.cyr` — six variants
+  (`WadOpenFailed` / `WadBadMagic` / `WadIoFailed` /
+  `WadLumpNotFound` / `WadLumpTooBig` / `WadOther`).
+  Wad-prefixed to coexist in the global enum-variant namespace
+  per stdlib convention (matches `IoNotFound` / `JsonParseErr`
+  / etc.).
+- **`wad_read_lump_r(idx)`** — Result-returning parallel to
+  `wad_read_lump`. Returns `Ok(buf_ptr)` on success;
+  `Err(WadLumpNotFound)` for a bad index;
+  `Err(WadIoFailed)` for a short read.
+- **`wad_read_lump_into_r(idx, buf, max)`** — Result-returning
+  parallel to `wad_read_lump_into`. Returns `Ok(bytes_read)`
+  on success; same `Err` set as above.
+- **`boot_init(wad_path)`** in `main.cyr` — Result-returning
+  helper that cascades the boot-path WAD open + PLAYPAL lookup
+  + PLAYPAL read via the `?` propagation operator. Replaces
+  the prior inline `if (... != 0) { sakshi_error(...);
+  syscall(60, 1); }` boilerplate.
+
+### Changed
+
+- **`wad_open(path)`** — in-place migration to
+  `Result<i64, WadError>` (3 call sites total: `main.cyr`,
+  `tests/doom.tcyr`, `benches/doom.bcyr`). Returns `Ok(0)` on
+  success; `Err(WadOpenFailed)` if `file_open` fails;
+  `Err(WadBadMagic)` if the header magic is neither `IWAD`
+  nor `PWAD`; `Err(WadIoFailed)` if the header read is short.
+  Removed inline `sakshi_error` calls — the typed `Err` lets
+  the caller log a more informative message at the boundary
+  via `match`.
+- **`doom_main()`** boot path — `wad_open(argv(1)) != 0`
+  inline check replaced with `var br = boot_init(argv(1)); if
+  (is_err_result(br) == 1) { match load64(br + 8) { ... } }`.
+  The match arm logs the typed cause (`cannot open WAD file`
+  / `not a WAD file` / `WAD I/O failure` / `missing PLAYPAL
+  lump` / `boot init failed`) before exiting with status 1.
+  Compiler-enforced exhaustiveness via the explicit `_ =>`
+  catch-all.
+- **`tests/doom.tcyr`** — `wad_open` check uses `is_ok(...) ==
+  1` rather than the legacy `== 0` int comparison. `alloc_init()`
+  was already on the test entry path before `wad_open`, so the
+  Result allocation runs safely.
+- **`src/main.cyr`** banner bumped 0.27.2 → 0.27.3.
+
+### Deferred
+
+- **`texture.cyr` Result adoption** (roadmap item #3) —
+  deferred to a follow-up cut. The wad-side adoption already
+  demonstrates the full pattern (typed enum + `?` + `match`);
+  texture's call sites in `render.cyr` (`texture_get_column`)
+  are inside the hot render path and the existing `0`-on-fail
+  sentinel is handled gracefully by the renderer, so the
+  migration value is lower than wad-open's. Will revisit
+  alongside the v0.28.x Black Book audit's column-rendering
+  pass.
+
+### Verified
+
+- `cyrius build src/main.cyr build/doom`: 587,752 B (+2,528 B
+  vs 0.27.2's 585,224 B — Result codegen + match jump tables +
+  ?-operator emit. 985 unreachable fns / 291,438 B NOPed).
+- `cyrius deps --verify`: 5 verified, 0 failed.
+- `cyrius test tests/doom.tcyr` (WAD-free): 37/37 passed.
+- `./build/test_doom wad/DOOM1.WAD` (full): 73/73 passed.
+- `./build/doom wad/DOOM1.WAD --ppm`: E1M1 + automap +
+  intermission PPMs at 192,015 B each; map summary unchanged.
+- **Typed-error paths verified** by injecting bad inputs:
+  - `./build/doom /nonexistent.wad` → `[ERROR] cannot open
+    WAD file` (matches `WadOpenFailed` arm).
+  - `./build/doom /etc/hostname` → `[ERROR] not a WAD file`
+    (matches `WadBadMagic` arm — the file opens but has no
+    IWAD/PWAD magic).
+- Bench (`scripts/bench-history.sh`): `render_frame` 2.132 ms /
+  `+sprites` 2.136 ms / `fixed_mul` 6 ns / `texture_get_column`
+  749 ns / `pcache_get_hit` 8 ns — variance-level vs 0.27.2
+  (2.114 / 2.127 / 6 / 730 / 7). Result allocations land at
+  boot only (boot_init's `Ok(0)` + `Ok(pd)`), not on the hot
+  render path — no per-frame allocation pressure.
+
+### Known issues (unchanged from 0.27.0–0.27.2)
+
+Both upstream-cycc workarounds still apply. Tracked under
+v0.27.5 upstream-fix cleanup.
+
 ## [0.27.2] - 2026-05-21
 
 Type-annotation sweep across doom's full public-fn surface —

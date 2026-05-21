@@ -4,10 +4,11 @@
 
 Each entry: one row, headline only. For the full changelog see [`CHANGELOG.md`](../../CHANGELOG.md).
 
-## v0.27.x — Language-adoption arc (in flight, 0.27.0–0.27.2 shipped)
+## v0.27.x — Language-adoption arc (in flight, 0.27.0–0.27.3 shipped)
 
 | Version | Shipped | Milestone |
 |---------|---------|-----------|
+| v0.27.3 | 2026-05-21 | `Result<T, E>` adoption at the WAD IO/parse boundary: `WadError` typed-error enum, `wad_open` returns Result in-place, `wad_read_lump_r` / `wad_read_lump_into_r` parallels, `?` + exhaustive `match` in `doom_main` boot path. Binary 585,224 → 587,752 B (+2,528 B Result/match codegen tax). `render_frame` 2.132 ms (variance-level). First use of v5.8.x sum types in doom's own code. |
 | v0.27.2 | 2026-05-21 | `: i64` return-type annotation sweep across all 20 modules (270 fn sigs). Parse-only, ABI-identical binary (585,224 B). `render_frame` 2.114 ms. |
 | v0.27.1 | 2026-05-21 | Dep-tag re-pin to upstream-published bsp 1.1.3 + vani 0.9.4. Bundle content byte-identical save for `Version:` header. Binary 585,320 → 585,224 B (−96 B). |
 | v0.27.0 | 2026-05-21 | Cyrius 5.7.48 → 6.0.1 lift (sum-types / `Result<T,E>` / `?` / exhaustive-match infrastructure landed; cybs/cycc rename); vani 0.9.1 → 0.9.3 annotation pass; `cyrius.toml` + `cyrb.toml` retired (single `cyrius.cyml` + `${file:VERSION}` template); CI lifted to patra-style installer + pre-flight HTTP gate + lockfile-guarded verify. Binary 565,856 → 585,320 B (+19,464 B annotation rt-table + sum-type-emit growth-tax). |

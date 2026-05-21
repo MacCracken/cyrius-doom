@@ -1,6 +1,6 @@
 # Documentation Health — cyrius-doom
 
-> **Last refresh**: 2026-05-21 (v0.27.2 — initial scaffold; created during the post-0.27.2 doc-split sweep that extracted volatile state from CLAUDE.md → `state.md` and the Completed table from `roadmap.md` → `completed-phases.md`). | **Refresh cadence**: opportunistic — update the affected row when the underlying doc is touched. No periodic sweep cron.
+> **Last refresh**: 2026-05-21 (v0.27.3 — `Result<T, E>` adoption shipped; state.md / completed-phases.md / roadmap.md / CHANGELOG.md rows touched). Prior refresh: 2026-05-21 v0.27.2 initial scaffold. | **Refresh cadence**: opportunistic — update the affected row when the underlying doc is touched. No periodic sweep cron.
 >
 > **Scope**: this repo only (`cyrius-doom`) — the entire `docs/` tree plus root-level docs (README, CHANGELOG, CLAUDE.md, CONTRIBUTING, SECURITY, CODE_OF_CONDUCT). VERSION is tracked as a structural artifact, not a doc.
 >
@@ -32,7 +32,7 @@ This is a **ledger**, not a one-time audit. Rewrite-in-place as docs change.
 | File | Last touched | Status | Action |
 |---|---|---|---|
 | `README.md` | 2026-04-30 | ✅ Fresh | Top-level project README. Verify in passing at next minor closeout — pre-dates the v0.27.x cycle but content is durable. |
-| `CHANGELOG.md` | 2026-05-21 | ✅ Fresh | **Source of truth per CLAUDE.md.** Through v0.27.2. Refreshed every release. |
+| `CHANGELOG.md` | 2026-05-21 | ✅ Fresh | **Source of truth per CLAUDE.md.** Through v0.27.3 (Result/`?`/match adoption at WAD boundary). Refreshed every release. |
 | `CLAUDE.md` | 2026-05-21 | ✅ Fresh | **Just trimmed (2026-05-21) to durable content only** — Status section + Composes line moved to `state.md`. Pointer block in place. Project-identity / Goal / Process / Rules / Cyrius Conventions all durable. |
 | `CONTRIBUTING.md` | 2026-04-30 | ✅ Fresh | Verify in passing at next minor closeout — durable content. |
 | `SECURITY.md` | 2026-04-30 | ✅ Fresh | Public reporting policy. Durable; pre-dates v0.27.x but no surface change. |
@@ -65,9 +65,9 @@ No numbered architecture notes yet — the convention is `NNN-kebab-case-title.m
 
 | File | Last touched | Status | Action |
 |---|---|---|---|
-| `state.md` | 2026-05-21 | ✅ Fresh | **Rotates every release.** New at v0.27.2 doc-split; carries current version (0.27.2), dep pins (bsp 1.1.3, vani 0.9.4), binary metrics, in-flight slot map (0.27.3 → 0.27.5 → 0.28.x → 0.29.x → v1.0), known-issue workarounds. Bumped at every release. |
-| `roadmap.md` | 2026-05-21 | ✅ Fresh | **Rewritten 2026-05-21** as forward-facing only — slot map + per-arc detail for 0.27.3 / 0.27.4 / 0.27.5 / 0.28.x / 0.29.x / v1.0 / Future. Completed table extracted to `completed-phases.md`. Volatile-state lede replaced with pointer block. |
-| `completed-phases.md` | 2026-05-21 | ✅ Fresh | **New 2026-05-21** — chronological one-line index of shipped versions (v0.1.0 → v0.27.2). Per-version detail lives in CHANGELOG; this file is the index. Update at every release by moving the shipped row in from `state.md`'s slot map. |
+| `state.md` | 2026-05-21 | ✅ Fresh | **Rotates every release.** Through v0.27.3 — refreshed with new binary metric (587,752 B, +2,528 B Result tax), v0.27.3 slot moved to shipped, Architecture surface gained a Result-adoption bullet. New scheme: 0.27.4 (next) → 0.27.5 (gated) → 0.28.x → 0.29.x → v1.0. |
+| `roadmap.md` | 2026-05-21 | ✅ Fresh | **Updated 2026-05-21** at v0.27.3 ship — 0.27.3 row removed from forward-list (moved to completed-phases); texture-side migration added to Watch section as deferred follow-up tied to v0.28.0. Slot map now leads with 0.27.4 → 0.27.5 → 0.28.x → 0.29.x → v1.0. |
+| `completed-phases.md` | 2026-05-21 | ✅ Fresh | **Updated 2026-05-21** at v0.27.3 ship — v0.27.3 row appended (top of v0.27.x table). Chronological one-line index of shipped versions (v0.1.0 → v0.27.3). Per-version detail in CHANGELOG; this file is the index. |
 | `roadmap-crossover.md` | 2026-04-30 | 🟠 Read-through | AgentWorld / secureyeoman crossover doc — spatial threat visualization via the DOOM engine. Not touched during the v0.27.x cycle; status against current secureyeoman scope not verified. Read-through at next minor closeout. |
 
 ---

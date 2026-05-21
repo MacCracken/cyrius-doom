@@ -12,8 +12,7 @@
 
 | Slot | Theme | Status |
 |---|---|---|
-| **v0.27.3** | `Result<T, E>` adoption in IO/parse error paths | next |
-| **v0.27.4** | `lib/test.cyr` table-driven test refactor | queued |
+| **v0.27.4** | `lib/test.cyr` table-driven test refactor | next |
 | **v0.27.5** | Upstream-fix cleanup (drop cycc 6.0.1 lockfile workaround) | gated on upstream |
 | **v0.28.x** | DOOM Black Book audit (5 patches) | next minor — written against post-0.27.x modernized code |
 | **v0.29.x** | Performance pass | gated on Cyrius O4 linear-scan regalloc (v6.4.x cyrius slot) |
@@ -26,18 +25,6 @@ The current arc (**v0.27.x — language-adoption**) was re-anchored from the ori
 ## v0.27.x — Language-adoption arc
 
 Absorb the v5.8.x → v6.0.1 Cyrius language gains (sum types, `Result<T, E>`, `?` operator, exhaustive match, parse-only `: i64` return annotations) and the modern manifest convention into doom's actual code + toolchain. Shipped through 0.27.2 (see `completed-phases.md`).
-
-### v0.27.3 — `Result<T, E>` adoption in WAD/render error paths
-
-Adopt the v5.8.28 `lib/result.cyr` carve-out at the IO/parse boundary where doom currently returns hand-coded error sentinels (`-1`, `0` for null pointer, etc.). Public-fn surface is `: i64`-annotated as of 0.27.2 — retrofits land cleanly without further signature churn at call sites.
-
-| # | Item | Module | Detail |
-|---|------|--------|--------|
-| 1 | `wad_open` returns `Result<WadHandle, WadError>` | `wad.cyr` | Replace `0`-on-fail with typed `Err` |
-| 2 | `wad_lump_read` returns `Result<usize, WadError>` | `wad.cyr` | Replace `-1`-on-fail; bytes-read on `Ok` |
-| 3 | `texture_composite` returns `Result<u8*, TextureError>` | `texture.cyr` | Replace null-on-fail; covers patch-cache load failure |
-| 4 | `?` operator in `r_init` / `main` / `doom_main` cascade paths | `render.cyr`, `main.cyr` | Cascading unwrap; one `Err` short-circuits to a logged exit |
-| 5 | Exhaustive-match on `WadError` / `TextureError` at the main-loop boundary | `main.cyr` | Compiler-enforced — no silent fall-through |
 
 ### v0.27.4 — `lib/test.cyr` table-driven test refactor
 
@@ -63,6 +50,7 @@ Lands when cyrius ships the lockfile-writer fix + yukti drops its duplicate `sys
 
 ### Watch (not yet 0.27.x slot material)
 
+- **`texture.cyr` Result adoption** — `texture_get_column` + `texture_composite` migration deferred from v0.27.3 (the wad-side adoption already demonstrated the full `Result` + `?` + `match` pattern; texture's hot render-path call sites are gracefully handled by the existing `0`-on-fail sentinel). Revisit alongside v0.28.0's column-rendering audit — typed errors at the texture boundary will help debug visplane / column-step issues caught by the Black Book audit's PPM diffs vs chocolate-doom.
 - **`lib/random.cyr`** (v5.9.x stdlib addition) — deterministic per-DOOM-tick PRNG. Doom's monster AI is already deterministic per the original game; not adopted unless RNG is wanted for intermission/menu polish.
 - **`#io` effect annotations** (v5.11.x) — would document the io-side-effect set of `wad_lump_read` / `framebuf_present` / `audio_write`. No semantic change. Defer until Cyrius pins the annotation surface as stable.
 - **mabda 3.0 fold / bayan-ganita carve** (v6.0.x cyrius planned) — doom uses no JSON/TOML, no-op for us.

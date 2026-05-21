@@ -3,12 +3,31 @@
 #
 # WAD = "Where's All the Data"
 # All integers in WAD are little-endian 32-bit.
+#
+# v0.27.3 — adopted `Result<T, WadError>` at the IO/parse boundary.
+# `wad_open` now returns Result in-place (3 call sites total). The
+# `_r`-suffixed variants of `wad_read_lump` / `wad_read_lump_into`
+# return Result; the unsuffixed legacy fns are preserved as thin
+# shims for the 20+ existing call sites that propagate via null.
 
 # WAD file descriptor
 enum WadConst {
     WAD_DIR_ENTRY_SIZE = 24;
     WAD_MAX_LUMPS = 2048;
     WAD_LUMP_BUF_SIZE = 65536;
+}
+
+# Typed errors for the WAD IO/parse boundary.
+# Variant names are Wad-prefixed to coexist in the global
+# enum-variant namespace (matches stdlib convention — `IoNotFound`
+# / `JsonParseErr` / etc.).
+enum WadError {
+    WadOpenFailed;     # file_open() failed (missing / unreadable)
+    WadBadMagic;       # header magic not IWAD / PWAD
+    WadIoFailed;       # short read or seek error
+    WadLumpNotFound;   # lump_index out of range
+    WadLumpTooBig;     # requested size exceeds buffer
+    WadOther;          # catch-all (used by legacy shims)
 }
 
 var wad_fd = -1;
@@ -31,14 +50,16 @@ fn read_le32(buf): i64 {
     return load8(buf) | (load8(buf + 1) << 8) | (load8(buf + 2) << 16) | (load8(buf + 3) << 24);
 }
 
-# Open a WAD file. Returns 0 on success, -1 on error.
+# Open a WAD file. Returns `Result<i64, WadError>` —
+# `Ok(0)` on success, typed `Err` on failure.
+# Call sites must inspect the Result (see main.cyr's `boot_init`
+# for the canonical `?` + `match` pattern).
 fn wad_open(path): i64 {
     wad_alloc();
 
     wad_fd = file_open(path, 0, 0);
     if (wad_fd < 0) {
-        sakshi_error("cannot open WAD file", 20);
-        return -1;
+        return Err(WadOpenFailed);
     }
 
     var hdr[12];
@@ -46,7 +67,7 @@ fn wad_open(path): i64 {
     if (n != 12) {
         file_close(wad_fd);
         wad_fd = -1;
-        return -1;
+        return Err(WadIoFailed);
     }
 
     # Check magic: "IWAD" or "PWAD"
@@ -61,10 +82,9 @@ fn wad_open(path): i64 {
     }
 
     if (valid == 0) {
-        sakshi_error("not a WAD file", 14);
         file_close(wad_fd);
         wad_fd = -1;
-        return -1;
+        return Err(WadBadMagic);
     }
 
     wad_numlumps = read_le32(&hdr + 4);
@@ -86,7 +106,7 @@ fn wad_open(path): i64 {
         store64(entry + 16, load64(&raw + 8));
     }
 
-    return 0;
+    return Ok(0);
 }
 
 fn wad_close(): i64 {
@@ -165,5 +185,53 @@ fn wad_read_lump_into(lump_index, buf, bufsize): i64 {
     memset(buf, 0, size);
     syscall(8, wad_fd, offset, 0);
     return file_read(wad_fd, buf, size);
+}
+
+# ── Result-returning IO/parse boundary (v0.27.3) ─────────────────
+# `_r` parallels of the read fns. Same semantics as the legacy
+# shapes above; failure modes surface as typed `WadError` variants
+# instead of `0` / `-1` sentinels. Suitable for cascading via `?`
+# in Result-returning callers (see `boot_init` in main.cyr).
+
+# Read a lump into the shared wad_lump_buf.
+# Returns Ok(buf_ptr) on success; Err(WadLumpNotFound) for a bad
+# index; Err(WadIoFailed) for a short read.
+fn wad_read_lump_r(lump_index): i64 {
+    if (lump_index < 0) { return Err(WadLumpNotFound); }
+    if (lump_index >= wad_numlumps) { return Err(WadLumpNotFound); }
+
+    var entry = wad_dir + lump_index * WAD_DIR_ENTRY_SIZE;
+    var offset = load64(entry);
+    var size = load64(entry + 8);
+
+    if (size > WAD_LUMP_BUF_SIZE) { size = WAD_LUMP_BUF_SIZE; }
+    if (size == 0) { return Ok(wad_lump_buf); }
+
+    memset(wad_lump_buf, 0, size);
+    syscall(8, wad_fd, offset, 0);
+    var n = file_read(wad_fd, wad_lump_buf, size);
+    if (n < 0) { return Err(WadIoFailed); }
+    if (n != size) { sakshi_warn("partial lump read", 18); }
+    return Ok(wad_lump_buf);
+}
+
+# Read a lump into a caller-supplied buffer.
+# Returns Ok(bytes_read) on success; Err(WadLumpNotFound) for a
+# bad index; Err(WadIoFailed) for a read error.
+fn wad_read_lump_into_r(lump_index, buf, bufsize): i64 {
+    if (lump_index < 0) { return Err(WadLumpNotFound); }
+    if (lump_index >= wad_numlumps) { return Err(WadLumpNotFound); }
+
+    var entry = wad_dir + lump_index * WAD_DIR_ENTRY_SIZE;
+    var offset = load64(entry);
+    var size = load64(entry + 8);
+    if (size > bufsize) { size = bufsize; }
+    if (size == 0) { return Ok(0); }
+
+    memset(buf, 0, size);
+    syscall(8, wad_fd, offset, 0);
+    var n = file_read(wad_fd, buf, size);
+    if (n < 0) { return Err(WadIoFailed); }
+    return Ok(n);
 }
 

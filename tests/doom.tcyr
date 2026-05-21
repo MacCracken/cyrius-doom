@@ -135,7 +135,9 @@ fn main() {
 
     var has_wad = 0;
     if (argc() > 1) {
-        if (wad_open(argv(1)) == 0) { has_wad = 1; }
+        # v0.27.3 — wad_open now returns Result<i64, WadError>;
+        # check the Ok tag instead of the legacy 0-on-success int.
+        if (is_ok(wad_open(argv(1))) == 1) { has_wad = 1; }
     }
 
     if (has_wad == 1) {
