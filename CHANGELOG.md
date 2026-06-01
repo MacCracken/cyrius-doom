@@ -5,6 +5,38 @@ All notable changes to cyrius-doom will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.27.4] - 2026-06-01
+
+Framebuffer geometry fix. The live `/dev/fb0` output path assumed
+the panel was exactly 320×200×32 with a 1280-byte scanline pitch
+and dumped a tightly-packed RGBA block at offset 0. On any real
+display this tiled the frame horizontally and collapsed it into
+the top ~20–33 px band. The `--ppm` path (self-describing) was
+unaffected, so headless smoke never caught it. `framebuf_init`
+now queries the real geometry and `framebuf_flip` integer-scales,
+centers, and blits at the true pitch/bpp.
+
+### Fixed
+
+- **`framebuf.cyr` — real panel geometry.** `framebuf_init` now
+  issues `FBIOGET_VSCREENINFO` (0x4600) + `FBIOGET_FSCREENINFO`
+  (0x4602) ioctls to read `xres` / `yres` / `bits_per_pixel` /
+  `line_length`, with defensive fallbacks if the driver reports
+  nothing. Computes the largest integer scale that fits both axes
+  and the centering letterbox offsets once at init.
+- **`framebuf_flip` — correct blit.** New `framebuf_blit` helper
+  integer-scales the 320×200 indexed frame into a full-screen
+  scratch buffer honoring the physical pitch and bpp (32bpp
+  XRGB8888 fast path via `store32`; 16bpp RGB565 fallback), then
+  writes just the active band in one `write()`. Letterbox bars are
+  blacked once at init and never rewritten.
+
+### Removed
+
+- **Dead `rgb_buf`** (256 KB) — the old flip's intermediate RGBA
+  buffer. The PPM path reads `screen_buf` + `palette` directly and
+  the new blit reads from `screen_buf`, so the intermediate is gone.
+
 ## [0.27.3] - 2026-05-21
 
 `Result<T, E>` adoption at the WAD IO/parse boundary. Doom's

@@ -4,10 +4,11 @@
 
 Each entry: one row, headline only. For the full changelog see [`CHANGELOG.md`](../../CHANGELOG.md).
 
-## v0.27.x — Language-adoption arc (in flight, 0.27.0–0.27.3 shipped)
+## v0.27.x — Language-adoption arc (in flight, 0.27.0–0.27.4 shipped)
 
 | Version | Shipped | Milestone |
 |---------|---------|-----------|
+| v0.27.4 | 2026-06-01 | Framebuffer geometry fix. The live `/dev/fb0` path assumed a 320×200×32 panel with a 1280-byte pitch and dumped a packed RGBA block at offset 0 — on real displays it tiled horizontally and collapsed into the top ~20–33 px band (`--ppm` path self-describing, so headless smoke never caught it). `framebuf_init` now reads real `xres`/`yres`/`bits_per_pixel`/`line_length` via `FBIOGET_VSCREENINFO` (0x4600) + `FBIOGET_FSCREENINFO` (0x4602); `framebuf_flip` integer-scales + center-blits at the true pitch/bpp (32bpp `store32` fast path, 16bpp RGB565 fallback), writing one active band per frame. Dead `rgb_buf` (256 KB) dropped. Binary 587,752 → 590,696 B (+2,944 B). Render path untouched. |
 | v0.27.3 | 2026-05-21 | `Result<T, E>` adoption at the WAD IO/parse boundary: `WadError` typed-error enum, `wad_open` returns Result in-place, `wad_read_lump_r` / `wad_read_lump_into_r` parallels, `?` + exhaustive `match` in `doom_main` boot path. Binary 585,224 → 587,752 B (+2,528 B Result/match codegen tax). `render_frame` 2.132 ms (variance-level). First use of v5.8.x sum types in doom's own code. |
 | v0.27.2 | 2026-05-21 | `: i64` return-type annotation sweep across all 20 modules (270 fn sigs). Parse-only, ABI-identical binary (585,224 B). `render_frame` 2.114 ms. |
 | v0.27.1 | 2026-05-21 | Dep-tag re-pin to upstream-published bsp 1.1.3 + vani 0.9.4. Bundle content byte-identical save for `Version:` header. Binary 585,320 → 585,224 B (−96 B). |

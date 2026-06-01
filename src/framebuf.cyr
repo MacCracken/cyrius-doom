@@ -9,23 +9,95 @@ enum Screen {
     SCREEN_SIZE = 64000;
 }
 
+# Linux framebuffer ioctls + struct field offsets.
+# We must query the real panel geometry — the physical scanline
+# pitch (line_length) is almost never SCREEN_WIDTH*bpp/8, and the
+# resolution is almost never 320x200. Blitting a tightly-packed
+# 320-wide block straight to /dev/fb0 tiles horizontally and
+# collapses into the top band of a real display (the v0.27.3 bug).
+enum FbIoctl {
+    SYS_IOCTL              = 16;
+    SYS_LSEEK              = 8;
+    FBIOGET_VSCREENINFO    = 0x4600;   # fb_var_screeninfo
+    FBIOGET_FSCREENINFO    = 0x4602;   # fb_fix_screeninfo
+    # fb_var_screeninfo field offsets (u32 each)
+    VINFO_XRES             = 0;
+    VINFO_YRES             = 4;
+    VINFO_BPP              = 24;
+    # fb_fix_screeninfo field offsets
+    FINFO_LINE_LENGTH      = 48;       # u32 pitch in bytes
+    FB_VINFO_SIZE          = 160;      # >= sizeof(fb_var_screeninfo)
+    FB_FINFO_SIZE          = 80;       # >= sizeof(fb_fix_screeninfo)
+}
+
 # Heap pointers (allocated in framebuf_init)
 var screen_buf = 0;
-var rgb_buf = 0;
 var palette = 0;
 
 var fb_fd = -1;
 var pipe_fd = -1;
 
+# Real panel geometry (filled by framebuf_init via ioctl).
+var fb_xres   = 0;
+var fb_yres   = 0;
+var fb_bpp    = 0;
+var fb_pitch  = 0;        # physical scanline stride in bytes
+var fb_buf    = 0;        # full-screen scratch (pitch * yres), one write/frame
+
+# Integer-scaled, centered blit placement (computed once at init).
+var fb_scale  = 1;
+var fb_xoff   = 0;        # left letterbox, pixels
+var fb_yoff   = 0;        # top letterbox, rows
+
 fn framebuf_init(): i64 {
     screen_buf = alloc(64000);
-    rgb_buf = alloc(256000);
     if (palette == 0) { palette = alloc(768); }
 
     fb_fd = file_open("/dev/fb0", 2, 0);
     if (fb_fd < 0) {
         fb_fd = -1;
+        return 0;
     }
+
+    # Query the real panel geometry. Without this we'd assume
+    # 320x200x32 with a 1280-byte pitch and tile garbage across
+    # the top of the screen.
+    var vinfo = alloc(FB_VINFO_SIZE);
+    var finfo = alloc(FB_FINFO_SIZE);
+    memset(vinfo, 0, FB_VINFO_SIZE);
+    memset(finfo, 0, FB_FINFO_SIZE);
+
+    var rv = syscall(SYS_IOCTL, fb_fd, FBIOGET_VSCREENINFO, vinfo);
+    var rf = syscall(SYS_IOCTL, fb_fd, FBIOGET_FSCREENINFO, finfo);
+    if (rv < 0) { rv = 0; }
+    if (rf < 0) { rf = 0; }
+
+    fb_xres  = load32(vinfo + VINFO_XRES);
+    fb_yres  = load32(vinfo + VINFO_YRES);
+    fb_bpp   = load32(vinfo + VINFO_BPP);
+    fb_pitch = load32(finfo + FINFO_LINE_LENGTH);
+
+    # Defend against a driver that reports nothing useful.
+    if (fb_xres <= 0) { fb_xres = SCREEN_WIDTH; }
+    if (fb_yres <= 0) { fb_yres = SCREEN_HEIGHT; }
+    if (fb_bpp  <= 0) { fb_bpp  = 32; }
+    if (fb_pitch < fb_xres * (fb_bpp / 8)) { fb_pitch = fb_xres * (fb_bpp / 8); }
+
+    # Largest integer scale that fits both axes (>= 1).
+    var sx = fb_xres / SCREEN_WIDTH;
+    var sy = fb_yres / SCREEN_HEIGHT;
+    fb_scale = sx;
+    if (sy < fb_scale) { fb_scale = sy; }
+    if (fb_scale < 1)  { fb_scale = 1; }
+
+    fb_xoff = (fb_xres - SCREEN_WIDTH  * fb_scale) / 2;
+    fb_yoff = (fb_yres - SCREEN_HEIGHT * fb_scale) / 2;
+    if (fb_xoff < 0) { fb_xoff = 0; }
+    if (fb_yoff < 0) { fb_yoff = 0; }
+
+    # Full-screen scratch: blit once into RAM, one write() to vram.
+    fb_buf = alloc(fb_pitch * fb_yres);
+    memset(fb_buf, 0, fb_pitch * fb_yres);
     return 0;
 }
 
@@ -94,23 +166,56 @@ fn framebuf_fill_rect(x, y, w, h, color): i64 {
     return 0;
 }
 
-fn framebuf_flip(): i64 {
-    for (var i = 0; i < SCREEN_SIZE; i += 1) {
-        var ci = load8(screen_buf + i);
-        var pal_off = ci * 3;
-        var r = load8(palette + pal_off);
-        var g = load8(palette + pal_off + 1);
-        var b = load8(palette + pal_off + 2);
-        var rgb_off = i * 4;
-        store8(rgb_buf + rgb_off, b);
-        store8(rgb_buf + rgb_off + 1, g);
-        store8(rgb_buf + rgb_off + 2, r);
-        store8(rgb_buf + rgb_off + 3, 255);
+# Integer-scale + center-blit the 320x200 indexed frame into the
+# real panel, honoring its pitch and bpp. One write() of just the
+# active band per frame; the letterbox bars are blacked once at init.
+fn framebuf_blit(): i64 {
+    var bpp_bytes = fb_bpp / 8;
+    var row_bytes = SCREEN_WIDTH * fb_scale * bpp_bytes;
+    for (var sy = 0; sy < SCREEN_HEIGHT; sy += 1) {
+        var src_row  = screen_buf + sy * SCREEN_WIDTH;
+        var dy0      = fb_yoff + sy * fb_scale;
+        var first    = fb_buf + dy0 * fb_pitch + fb_xoff * bpp_bytes;
+        var dx       = first;
+        for (var sx = 0; sx < SCREEN_WIDTH; sx += 1) {
+            var po = load8(src_row + sx) * 3;
+            var r  = load8(palette + po);
+            var g  = load8(palette + po + 1);
+            var b  = load8(palette + po + 2);
+            if (fb_bpp == 16) {
+                # RGB565, little-endian. Palette bytes are 0..255,
+                # so the >> here are logical-correct (asr not needed).
+                var p16 = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
+                for (var rx = 0; rx < fb_scale; rx += 1) {
+                    store8(dx, p16 & 0xFF);
+                    store8(dx + 1, (p16 >> 8) & 0xFF);
+                    dx += 2;
+                }
+            } else {
+                # 32bpp XRGB8888, little-endian byte order B,G,R,X.
+                var p32 = 0xFF000000 | (r << 16) | (g << 8) | b;
+                for (var rx = 0; rx < fb_scale; rx += 1) {
+                    store32(dx, p32);
+                    dx += bpp_bytes;
+                }
+            }
+        }
+        # Replicate the just-built row to fill the scale block.
+        for (var ry = 1; ry < fb_scale; ry += 1) {
+            memcpy(fb_buf + (dy0 + ry) * fb_pitch + fb_xoff * bpp_bytes,
+                   first, row_bytes);
+        }
     }
+    return 0;
+}
 
+fn framebuf_flip(): i64 {
     if (fb_fd >= 0) {
-        syscall(8, fb_fd, 0, 0);
-        file_write(fb_fd, rgb_buf, SCREEN_SIZE * 4);
+        framebuf_blit();
+        var rows = SCREEN_HEIGHT * fb_scale;
+        if (fb_yoff + rows > fb_yres) { rows = fb_yres - fb_yoff; }
+        syscall(SYS_LSEEK, fb_fd, fb_yoff * fb_pitch, 0);
+        file_write(fb_fd, fb_buf + fb_yoff * fb_pitch, rows * fb_pitch);
     } else {
         # No framebuffer — write PPM for viewer bridge
         framebuf_write_ppm("/tmp/doom_frame.ppm");

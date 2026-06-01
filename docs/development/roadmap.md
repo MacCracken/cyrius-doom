@@ -12,7 +12,7 @@
 
 | Slot | Theme | Status |
 |---|---|---|
-| **v0.27.4** | `lib/test.cyr` table-driven test refactor | next |
+| **v0.27.x** | `lib/test.cyr` table-driven test refactor | next (deferred by the 0.27.4 fb hotfix) |
 | **v0.27.5** | Upstream-fix cleanup (drop cycc 6.0.1 lockfile workaround) | gated on upstream |
 | **v0.28.x** | DOOM Black Book audit (5 patches) | next minor — written against post-0.27.x modernized code |
 | **v0.29.x** | Performance pass | gated on Cyrius O4 linear-scan regalloc (v6.4.x cyrius slot) |
@@ -26,7 +26,11 @@ The current arc (**v0.27.x — language-adoption**) was re-anchored from the ori
 
 Absorb the v5.8.x → v6.0.1 Cyrius language gains (sum types, `Result<T, E>`, `?` operator, exhaustive match, parse-only `: i64` return annotations) and the modern manifest convention into doom's actual code + toolchain. Shipped through 0.27.2 (see `completed-phases.md`).
 
-### v0.27.4 — `lib/test.cyr` table-driven test refactor
+### v0.27.x — `lib/test.cyr` table-driven test refactor
+
+> Was slotted v0.27.4; deferred when the framebuffer geometry hotfix
+> (top-band tiling on real displays) claimed 0.27.4. Re-slots into the
+> next free 0.27.x.
 
 Adopt the v5.7.43 `test_each(cases, fn)` stdlib helper. Current `tests/doom.tcyr` is ~73 asserts of hand-rolled per-case calls; table-driven cuts boilerplate and makes adding new cases cheap.
 
