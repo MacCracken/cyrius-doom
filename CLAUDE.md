@@ -10,7 +10,7 @@
 
 - **Type**: Standalone game binary / kernel demo
 - **License**: GPL-3.0-only (clean-room implementation from documented specs)
-- **Language**: Cyrius (toolchain pinned in `cyrius.cyml [package].cyrius` — `cycc 6.0.1` at the time of writing; canonical pin is the file)
+- **Language**: Cyrius (toolchain pinned in `cyrius.cyml [package].cyrius` — `cycc 6.0.29` at the time of writing; canonical pin is the file)
 - **Version**: `VERSION` at project root is the source of truth (referenced via `version = "${file:VERSION}"` in `cyrius.cyml`). Do not inline the number here.
 - **Genesis repo**: [agnosticos](https://github.com/MacCracken/agnosticos)
 - **Standards**: [First-Party Standards](https://github.com/MacCracken/agnosticos/blob/main/docs/development/planning/first-party-standards.md) · [First-Party Documentation](https://github.com/MacCracken/agnosticos/blob/main/docs/development/planning/first-party-documentation.md)
@@ -145,7 +145,7 @@ Dep pins (bsp / vani versions) and 20-modules-vs-libs counts live in [`state.md`
 4. **PPM smoke** — `./build/doom wad/DOOM1.WAD --ppm`; verify map summary matches state.md and PPMs are 192,015 B each.
 5. **Fuzz** — `fuzz_wad` + `fuzz_fixed` if the change touches parser or fixed-point.
 6. **Bench** — `sh scripts/bench-history.sh` for any change to the render path; verify variance-level deltas only unless a perf claim is being made.
-7. **Lockfile** — `sha256sum lib/{vani-core,bsp,yukti,patra,sakshi}.cyr > cyrius.lock` and `cyrius deps --verify` (workaround for the cycc 6.0.1 lockfile-writer regression; tracked under v0.27.5).
+7. **Lockfile** — `cyrius deps` (writes the canonical lock) then `cyrius deps --verify`. The cycc 6.0.1 lockfile-writer regression that forced the `sha256sum` hand-population was resolved in 0.27.5 by pinning 6.0.29; the lock is the resolver's own 27-entry output again.
 8. **Documentation** — CHANGELOG entry, state.md refresh, roadmap forward-list update, doc-health row touched if a doc was edited.
 9. **Version check** — `VERSION` (single source of truth), `src/main.cyr` banner, CHANGELOG header all in sync.
 
@@ -191,7 +191,7 @@ Dep pins (bsp / vani versions) and 20-modules-vs-libs counts live in [`state.md`
 
 - **Toolchain pin**: `cyrius = "X.Y.Z"` in `cyrius.cyml [package]`. No separate `.cyrius-toolchain`. CI + release both read this; no hardcoded versions in YAML.
 - **Patra-style installer**: pre-flight HTTP check on the cyrius release asset; version-pinned install layout (`~/.cyrius/versions/$V/{bin,lib}/`).
-- **`cyrius.lock` workaround** (cycc 6.0.1 regression): repo's lockfile is hand-populated via `sha256sum`; CI gates the `--verify` step on a populated lockfile so it doesn't trivially pass against an empty resolver write. Drops at v0.27.5.
+- **`cyrius.lock`**: committed canonical lock (resolver's own `cyrius deps` output, 27 entries). CI checks it's present, resolves, then runs `cyrius deps --verify` as an unconditional supply-chain gate. The cycc 6.0.1 lockfile-writer regression (empty lock → `sha256sum` hand-population + a guarded verify) was resolved in 0.27.5 by the 6.0.29 pin.
 - **Dead-code elimination**: release workflow runs `CYRIUS_DCE=1`. Binary size tracked.
 - **CI test job**: WAD-free 37-assert subset (full 73-assert suite needs a WAD; not exercised in CI by design).
 - **Bench history**: `bench-history.csv` appended via `scripts/bench-history.sh`; compare row-over-row.

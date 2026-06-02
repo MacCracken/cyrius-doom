@@ -5,6 +5,44 @@ All notable changes to cyrius-doom will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.27.5] - 2026-06-01
+
+Post-playtest movement fixes plus the toolchain/lockfile cleanup
+(pulled forward from the v0.27.6 gated slot, now that cycc's
+lockfile-writer regression is fixed upstream). Two real movement
+bugs: inverted strafe, and a guard that silently dropped any
+cardinal-axis move.
+
+### Fixed
+
+- **`player.cyr` — strafe direction inverted.** With forward =
+  `(cos θ, sin θ)` and turn-left incrementing the angle (CCW),
+  strafe-left is facing rotated +90° = `(-sin, +cos)` and
+  strafe-right is −90° = `(+sin, -cos)`. The two blocks had the
+  signs reversed, so `A` strafed right and `D` left. Swapped to
+  match. `W`/`S` and arrow turning were already correct.
+- **`player.cyr` — cardinal-axis moves dropped.** The movement
+  apply block was gated on `move_x != 0 && move_y != 0` (nested
+  ifs), so any move landing on an axis — pure forward/back or
+  strafe while facing due N/S/E/W — never updated position. Now
+  gated on `move_x != 0 || move_y != 0`; the full diagonal move is
+  tried first, then X-only / Y-only wall slide.
+
+### Changed
+
+- **Toolchain pin `6.0.1` → `6.0.29`** in `cyrius.cyml`. Clears
+  the per-build pin-drift warning and gives CI a toolchain whose
+  `cyrius deps` lockfile writer works.
+- **`cyrius.lock` now canonical (27 entries)** written by
+  `cyrius deps`, replacing the hand-populated 5-entry `sha256sum`
+  workaround. CI's empty-lock guard is dropped — `cyrius deps
+  --verify` is an unconditional gate again. Resolves known-issue
+  #1. (yukti `sys_stat` dup-fn, #2, stays — gated on a yukti
+  rebundle; did not fire under 6.0.29 but left tracked.)
+
+Binary 590,696 → 590,824 B (+128 B, the cardinal-axis move
+restructure; strafe swap was size-neutral).
+
 ## [0.27.4] - 2026-06-01
 
 Framebuffer geometry fix. The live `/dev/fb0` output path assumed

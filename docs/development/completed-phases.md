@@ -4,10 +4,11 @@
 
 Each entry: one row, headline only. For the full changelog see [`CHANGELOG.md`](../../CHANGELOG.md).
 
-## v0.27.x — Language-adoption arc (in flight, 0.27.0–0.27.4 shipped)
+## v0.27.x — Language-adoption arc (in flight, 0.27.0–0.27.5 shipped)
 
 | Version | Shipped | Milestone |
 |---------|---------|-----------|
+| v0.27.5 | 2026-06-01 | Post-playtest movement fixes + toolchain/lockfile cleanup. (1) WASD strafe inverted — `player_tick` strafe-left/right vectors swapped, `A` strafed right / `D` left; corrected to strafe-left = facing+90° = `(-sin,+cos)`, strafe-right = `(+sin,-cos)`. (2) Cardinal-axis moves dropped — the apply block was gated on `move_x != 0 && move_y != 0`, so pure forward/back or strafe while facing due N/S/E/W never updated position; regated on `\|\|`. (3) Toolchain pin 6.0.1 → 6.0.29 (clears pin-drift warning); `cyrius.lock` now the resolver's canonical 27-entry output, `sha256sum` hand-population + CI empty-lock guard dropped, `cyrius deps --verify` unconditional (resolves known-issue #1, pulled forward from v0.27.6). Binary 590,696 → 590,824 B (+128 B move restructure). |
 | v0.27.4 | 2026-06-01 | Framebuffer geometry fix. The live `/dev/fb0` path assumed a 320×200×32 panel with a 1280-byte pitch and dumped a packed RGBA block at offset 0 — on real displays it tiled horizontally and collapsed into the top ~20–33 px band (`--ppm` path self-describing, so headless smoke never caught it). `framebuf_init` now reads real `xres`/`yres`/`bits_per_pixel`/`line_length` via `FBIOGET_VSCREENINFO` (0x4600) + `FBIOGET_FSCREENINFO` (0x4602); `framebuf_flip` integer-scales + center-blits at the true pitch/bpp (32bpp `store32` fast path, 16bpp RGB565 fallback), writing one active band per frame. Dead `rgb_buf` (256 KB) dropped. Binary 587,752 → 590,696 B (+2,944 B). Render path untouched. |
 | v0.27.3 | 2026-05-21 | `Result<T, E>` adoption at the WAD IO/parse boundary: `WadError` typed-error enum, `wad_open` returns Result in-place, `wad_read_lump_r` / `wad_read_lump_into_r` parallels, `?` + exhaustive `match` in `doom_main` boot path. Binary 585,224 → 587,752 B (+2,528 B Result/match codegen tax). `render_frame` 2.132 ms (variance-level). First use of v5.8.x sum types in doom's own code. |
 | v0.27.2 | 2026-05-21 | `: i64` return-type annotation sweep across all 20 modules (270 fn sigs). Parse-only, ABI-identical binary (585,224 B). `render_frame` 2.114 ms. |

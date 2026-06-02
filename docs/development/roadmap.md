@@ -13,7 +13,7 @@
 | Slot | Theme | Status |
 |---|---|---|
 | **v0.27.x** | `lib/test.cyr` table-driven test refactor | next (deferred by the 0.27.4 fb hotfix) |
-| **v0.27.5** | Upstream-fix cleanup (drop cycc 6.0.1 lockfile workaround) | gated on upstream |
+| **v0.27.6** | yukti `sys_stat` dup-fn cleanup (lockfile half shipped in 0.27.5) | gated on yukti rebundle |
 | **v0.28.x** | DOOM Black Book audit (5 patches) | next minor — written against post-0.27.x modernized code |
 | **v0.29.x** | Performance pass | gated on Cyrius O4 linear-scan regalloc (v6.4.x cyrius slot) |
 | **v1.0.0** | Ship: full E1 + multiple display backends + AGNOS integration | future |
@@ -41,16 +41,13 @@ Adopt the v5.7.43 `test_each(cases, fn)` stdlib helper. Current `tests/doom.tcyr
 | 3 | Convert trig-table asserts → `test_each` | ~12 asserts collapsed |
 | 4 | Extend test corpus once boilerplate drops | Add 20+ cases per group |
 
-### v0.27.5 — Upstream-fix cleanup
+### v0.27.6 — yukti `sys_stat` dup-fn cleanup
 
-Lands when cyrius ships the lockfile-writer fix + yukti drops its duplicate `sys_stat`. Pure cleanup — no new doom features. See [`state.md` Known issues](state.md#known-issues-workarounds-in-place) for the workarounds being removed.
+The lockfile half of this slot shipped early in **0.27.5** (toolchain pin → 6.0.29 resolved the cycc lockfile-writer regression: canonical 27-entry lock, CI empty-lock guard dropped, `cyrius deps --verify` unconditional). What remains is the yukti dup-fn warning. Pure cleanup — no new doom features.
 
 | # | Item | Gated on |
 |---|------|----------|
-| 1 | Drop CI `--verify` lockfile-presence guard; restore `cyrius deps --verify` as unconditional gate | cycc lockfile-writer fix |
-| 2 | Drop hand-populated `cyrius.lock` workflow; let `cyrius deps --lock` write canonical hashes | cycc lockfile-writer fix |
-| 3 | Re-resolve deps to drop yukti `sys_stat` dup-fn warning | yukti re-bundle |
-| 4 | Strike the two workaround blocks from CHANGELOG / `state.md` Known issues | both of the above |
+| 1 | Re-resolve deps to drop the yukti `sys_stat` dup-fn warning; strike known-issue #2 | yukti re-bundle (note: did not fire under 6.0.29 — re-confirm whether already moot) |
 
 ### Watch (not yet 0.27.x slot material)
 

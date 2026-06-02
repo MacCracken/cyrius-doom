@@ -65,18 +65,11 @@ jobs:
         run: cyrius deps
 
       - name: Verify dep hashes
-        # cyrius 6.0.1 has a known regression where `cyrius deps` writes
-        # an empty cyrius.lock for some manifest shapes (incl. ours). The
-        # workaround: only run --verify if the committed lock has entries,
-        # so a populated lock still enforces integrity but an empty one
-        # doesn't trivially-pass against a freshly-empty resolver write.
-        # Drop this guard once the upstream cyrius fix lands.
-        run: |
-          if [ -s cyrius.lock ] && [ "$(wc -l < cyrius.lock)" -gt 0 ]; then
-            cyrius deps --verify
-          else
-            echo "::warning::cyrius.lock is empty (cyrius 6.0.1 lockfile-writer regression) — verify skipped"
-          fi
+        # Unconditional supply-chain gate: the committed cyrius.lock is
+        # verified against the resolved dep hashes. The empty-lock guard
+        # for the cycc 6.0.1 lockfile-writer regression was dropped in
+        # 0.27.5 — the toolchain pin is now 6.0.29, whose writer is fixed.
+        run: cyrius deps --verify
 
       - name: Build
         run: |
@@ -140,18 +133,11 @@ jobs:
         run: cyrius deps
 
       - name: Verify dep hashes
-        # cyrius 6.0.1 has a known regression where `cyrius deps` writes
-        # an empty cyrius.lock for some manifest shapes (incl. ours). The
-        # workaround: only run --verify if the committed lock has entries,
-        # so a populated lock still enforces integrity but an empty one
-        # doesn't trivially-pass against a freshly-empty resolver write.
-        # Drop this guard once the upstream cyrius fix lands.
-        run: |
-          if [ -s cyrius.lock ] && [ "$(wc -l < cyrius.lock)" -gt 0 ]; then
-            cyrius deps --verify
-          else
-            echo "::warning::cyrius.lock is empty (cyrius 6.0.1 lockfile-writer regression) — verify skipped"
-          fi
+        # Unconditional supply-chain gate: the committed cyrius.lock is
+        # verified against the resolved dep hashes. The empty-lock guard
+        # for the cycc 6.0.1 lockfile-writer regression was dropped in
+        # 0.27.5 — the toolchain pin is now 6.0.29, whose writer is fixed.
+        run: cyrius deps --verify
 
       - name: Run tests (WAD-free assertions)
         run: |

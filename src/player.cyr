@@ -429,42 +429,41 @@ fn player_tick(): i64 {
         move_y -= fixed_mul(fwd_sin, speed);
     }
 
-    # Strafing (perpendicular to facing direction)
+    # Strafing (perpendicular to facing). Left is facing rotated +90°
+    # = (-sin, +cos); right is -90° = (+sin, -cos). These were inverted
+    # before 0.27.5, so A/D strafed the wrong way.
     if (input_strafe_left() == 1) {
-        move_x += fixed_mul(fwd_sin, PLAYER_STRAFE_SPEED);
-        move_y -= fixed_mul(fwd_cos, PLAYER_STRAFE_SPEED);
-    }
-    if (input_strafe_right() == 1) {
         move_x -= fixed_mul(fwd_sin, PLAYER_STRAFE_SPEED);
         move_y += fixed_mul(fwd_cos, PLAYER_STRAFE_SPEED);
+    }
+    if (input_strafe_right() == 1) {
+        move_x += fixed_mul(fwd_sin, PLAYER_STRAFE_SPEED);
+        move_y -= fixed_mul(fwd_cos, PLAYER_STRAFE_SPEED);
     }
 
     # Save old position for walk-over trigger check
     var old_px = player_x;
     var old_py = player_y;
 
-    # Try to move (with collision detection)
-    if (move_x != 0) {
-        if (move_y != 0) {
-            # Try full move
-            var nx = player_x + move_x;
-            var ny = player_y + move_y;
+    # Try to move (with collision detection). Pre-0.27.5 this whole
+    # block was gated on `move_x != 0 && move_y != 0`, so any move that
+    # landed on a cardinal axis (pure forward/back or strafe while
+    # facing due N/S/E/W) was silently dropped. Gate on either axis.
+    if (move_x != 0 || move_y != 0) {
+        # Try the full diagonal move first.
+        var nx = player_x + move_x;
+        var ny = player_y + move_y;
 
-            if (player_check_position(nx, ny) == 1) {
-                player_x = nx;
-                player_y = ny;
+        if (player_check_position(nx, ny) == 1) {
+            player_x = nx;
+            player_y = ny;
+        } else {
+            # Wall sliding: try X-only, then Y-only.
+            if (move_x != 0 && player_check_position(player_x + move_x, player_y) == 1) {
+                player_x = player_x + move_x;
             } else {
-                # Wall sliding: try X-only, then Y-only
-                nx = player_x + move_x;
-                ny = player_y;
-                if (player_check_position(nx, ny) == 1) {
-                    player_x = nx;
-                } else {
-                    nx = player_x;
-                    ny = player_y + move_y;
-                    if (player_check_position(nx, ny) == 1) {
-                        player_y = ny;
-                    }
+                if (move_y != 0 && player_check_position(player_x, player_y + move_y) == 1) {
+                    player_y = player_y + move_y;
                 }
             }
         }
