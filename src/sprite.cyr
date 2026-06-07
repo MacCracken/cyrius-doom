@@ -247,6 +247,7 @@ fn sprite_render_all(): i64 {
         if (psz > 16384) { continue; }
         wad_read_lump_into(lump, spr_patch_buf, psz);
         var pdata = spr_patch_buf;
+        var pend = pdata + psz;
         if (psz == 0) { continue; }
 
         var pw = read_le16(pdata);
@@ -329,16 +330,21 @@ fn sprite_render_all(): i64 {
             var src_col = c * pw / sprite_w;
             if (src_col >= pw) { src_col = pw - 1; }
 
-            # Get column offset from patch
+            # Bound the column directory + post walk (mirrors texture_get_column).
+            # Same missing C2 hardening as the weapon decoder. (0.28.0 F02)
+            if (8 + src_col * 4 + 4 > psz) { continue; }
             var col_off = read_le32(pdata + 8 + src_col * 4);
+            if (col_off >= psz) { continue; }
             var post_ptr = pdata + col_off;
 
             # Read posts
             var safety = 0;
             while (safety < 128) {
+                if (post_ptr + 1 >= pend) { break; }
                 var topdelta = load8(post_ptr);
                 if (topdelta == 255) { break; }
                 var length = load8(post_ptr + 1);
+                if (post_ptr + 4 + length > pend) { break; }
                 var pixels = post_ptr + 3;
 
                 for (var py = 0; py < length; py += 1) {

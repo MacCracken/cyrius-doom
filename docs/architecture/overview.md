@@ -21,7 +21,7 @@ All large buffers heap-allocated via `alloc()` (bump allocator, 1MB from brk).
 | Buffer | Size | Purpose |
 |--------|------|---------|
 | screen_buf | 64KB | 320x200 × 8-bit palette indexed |
-| rgb_buf | 256KB | 320x200 × 32-bit BGRA for /dev/fb0 |
+| fb_buf | ~pitch×yres | full-screen scratch for the integer-scaled, centered /dev/fb0 blit, sized to the real panel (replaced the fixed 256KB rgb_buf in v0.27.4) |
 | palette | 768B | 256 × RGB from WAD PLAYPAL |
 | colormap | 8.5KB | 34 × 256 light-to-palette mapping |
 | sine_table | 8KB | 1024 × i64 trig values |
@@ -77,20 +77,13 @@ while (running) {
 }
 ```
 
-## Performance (v0.11.0)
+## Performance
 
-| Metric | Value |
-|--------|-------|
-| Frame render (walls + flats) | 2.2ms |
-| Frame + sprites | 2.9ms |
-| Tick budget (35Hz) | 28.6ms |
-| Headroom | 90% |
-| fixed_mul | 410ns |
-| sin lookup | 414ns |
-| texture_get_column | 1μs |
-| pcache hit | 462ns |
-| Binary size | 107KB |
-| Compile time | 79ms |
+Live numbers (binary size, frame time, hot-math timings) live in
+[`../development/state.md`](../development/state.md) and the per-release
+[`bench-history.csv`](../../bench-history.csv) — not duplicated here, where they
+rot. As of v0.28.0: `render_frame` ~1.78 ms / `+sprites` ~1.78 ms against the
+22 ms @ 35 Hz tick budget (~12× headroom), binary 592,456 B (cycc 6.0.83).
 
 ## WAD File Access
 

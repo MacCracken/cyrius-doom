@@ -26,6 +26,7 @@ enum TexConst {
 # Texture table: name_hash(8) width(8) height(8) lump_data_ptr(8) = 32 bytes each
 var tex_table = 0;
 var tex_count = 0;
+var tex_def_end = 0;
 
 # Patch names -> lump indices
 var patch_lumps = 0;
@@ -82,14 +83,22 @@ fn texture_init(): i64 {
     if (t1_idx < 0) { return 0; }
 
     var t1_size = wad_lump_size(t1_idx);
+    if (t1_size < 4) { return 0; }
     var t1_data = alloc(t1_size);
     wad_read_lump_into(t1_idx, t1_data, t1_size);
+    # Upper bound for patch-ref reads in texture_get_column (malformed-WAD
+    # hardening — completes the C2 patch attack surface). (0.28.0 F19)
+    tex_def_end = t1_data + t1_size;
 
     var num_tex = read_le32(t1_data);
     if (num_tex > TEX_MAX) { num_tex = TEX_MAX; }
 
     for (var i = 0; i < num_tex; i += 1) {
+        # Bound the offset directory read and the 22-byte texture header.
+        # A malformed offset leaves a zeroed tex_table entry (tw==0 guards it).
+        if (4 + i * 4 + 4 > t1_size) { break; }
         var off = read_le32(t1_data + 4 + i * 4);
+        if (off + 22 > t1_size) { continue; }
         var tex = t1_data + off;
 
         var entry = tex_table + i * TEX_ENTRY_SIZE;
@@ -219,6 +228,8 @@ fn texture_get_column(tex_idx, col, dest): i64 {
     # Composite patches into the column
     for (var pi = 0; pi < num_patches; pi += 1) {
         var pref = tex_def + 22 + pi * 10;
+        # Bound each 10-byte patch ref to the TEXTURE1 lump extent. (0.28.0 F19)
+        if (pref + 10 > tex_def_end) { break; }
         var ox = read_le16(pref);
         if (ox >= 0x8000) { ox -= 0x10000; }
         var oy = read_le16(pref + 2);

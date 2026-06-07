@@ -1,6 +1,6 @@
 # cyrius-doom — Current State
 
-> **Last refresh**: 2026-06-01 (v0.27.5 — movement fixes: inverted WASD strafe + cardinal-axis moves silently dropped in `player_tick`; plus toolchain pin → 6.0.29 and the lockfile-workaround cleanup pulled forward) | **Refresh cadence**: every release (ideally bumped by the release post-hook).
+> **Last refresh**: 2026-06-07 (v0.28.0 — graphics review/hardening/audit/performance: patch-decoder bounds propagation (weapon/sprite/HUD+menu/TEXTURE1), visplane heap-OOB-write fix + visible E1M1 corruption fix, flat-fill inline (~15% render_frame), weapon-lump cache, dead-code delete; toolchain pin → 6.0.83) | **Refresh cadence**: every release (ideally bumped by the release post-hook).
 >
 > CLAUDE.md is preferences / process / procedures (durable). This file is **state** (volatile — binary sizes, version, in-flight slots, dep tags, gates). Anything that rots within a minor lives here. See [first-party-documentation § CLAUDE.md](https://github.com/MacCracken/agnosticos/blob/main/docs/development/planning/first-party-documentation.md#claudemd).
 
@@ -8,11 +8,11 @@
 
 ## Current version
 
-**[`VERSION`](../../VERSION)** = `0.27.5` (single source of truth — `cyrius.cyml` reads it via `${file:VERSION}`).
+**[`VERSION`](../../VERSION)** = `0.28.0` (single source of truth — `cyrius.cyml` reads it via `${file:VERSION}`).
 
 | Surface | Pin |
 |---|---|
-| Cyrius toolchain | `cycc 6.0.29` (in `cyrius.cyml`) |
+| Cyrius toolchain | `cycc 6.0.83` (in `cyrius.cyml`) |
 | `[deps.bsp]` | `1.1.3` (git tag) |
 | `[deps.vani]` | `0.9.4` (git tag, `core` profile — `dist/vani-core.cyr`, 22 `audio_*` symbols) |
 | stdlib | `string`, `alloc`, `fmt`, `vec`, `str`, `io`, `fs`, `args`, `syscalls`, `hashmap`, `tagged`, `fnptr`, `freelist`, `process`, `sakshi` |
@@ -21,22 +21,24 @@
 
 | Metric | Value |
 |---|---|
-| `build/doom` | **590,824 B** (+128 B vs 0.27.4 — cardinal-axis move guard restructure in `player_tick`) |
-| Unreachable fns (NOP-sled today, real shrink under O3) | 985 / 291,100 B |
+| `build/doom` | **592,456 B** (+1,632 B vs 0.27.5 — patch-decoder bounds checks, net of the `render_flat_span` deletion) |
+| Unreachable fns (NOP-sled today, real shrink under O3) | 985 / 293,833 B |
 | Recovery target under Cyrius O3 real DCE | ~260 KB |
-| Frame time | `render_frame` 2.132 ms / `+sprites` 2.136 ms (bench-history 2026-05-21, 0.27.3) |
-| Hot math | `fixed_mul` 6 ns / `asr` 4 ns / `pcache_get_hit` 8 ns |
+| Frame time | `render_frame` ~1.78 ms / `+sprites` ~1.78 ms (bench-history 2026-06-07, 0.28.0, cycc 6.0.83 — was ~2.10 ms; F11 flat-fill inline) |
+| Hot math | `fixed_mul` 6 ns / `asr` 4 ns / `texture_get_column` ~685 ns / `pcache_get_hit` 7 ns |
 
-Frame-time budget: 22 ms per tick @ 35 Hz. Current: ~10× headroom.
+Frame-time budget: 22 ms per tick @ 35 Hz. Current: ~12× headroom.
 
-## Gates (last green, 2026-06-01)
+## Gates (last green, 2026-06-07)
 
 | Gate | Result |
 |---|---|
 | `cyrius deps --verify` | 27 verified, 0 failed (canonical lock, unconditional gate) |
-| `cyrius build src/main.cyr build/doom` | OK, 590,824 B (no pin-drift warning) |
+| `cyrius build src/main.cyr build/doom` | OK, 592,456 B (built on the pinned 6.0.83 binary; local default wrapper is 6.0.84 → benign drift note) |
 | `cyrius test tests/doom.tcyr` (WAD-free, CI subset) | 37/37 |
 | `./build/test_doom wad/DOOM1.WAD` (full) | 73/73 |
+| `fuzz_wad` / `fuzz_fixed` | 1k / 50k iters clean |
+| PPM-diff vs 0.27.5 | 11/12 frames byte-identical; E1M1 game differs only by the intended 11-px F17 corruption fix |
 | `./build/doom wad/DOOM1.WAD --ppm` | E1M1 + automap + intermission PPMs at 192,015 B each; map summary `V=467 L=475 SD=648 S=85 SG=732 SS=237 N=236 T=138` |
 | bsp 1.1.3 standalone (upstream) | 79/79 tests, 13/13 benches sub-μs, 25K fuzz iters |
 | Lint / fmt | clean across all 20 src modules + vendored libs |
@@ -53,7 +55,7 @@ Frame-time budget: 22 ms per tick @ 35 Hz. Current: ~10× headroom.
 
 ## In-flight slot map
 
-Current arc: **v0.27.x language-adoption** (was perf-pass; perf-pass re-targeted to v0.29.x since Cyrius O4 slipped to v6.4.x).
+Current arc: **v0.28.x graphics** (review/hardening/parity/performance). The v0.27.x language-adoption arc is complete; the perf micro-pass remains re-targeted to v0.29.x (gated on Cyrius O4 regalloc, v6.4.x).
 
 | Slot | Status | What |
 |---|---|---|
@@ -63,16 +65,26 @@ Current arc: **v0.27.x language-adoption** (was perf-pass; perf-pass re-targeted
 | **v0.27.3** | shipped 2026-05-21 | `Result<T, E>` adoption at the WAD IO/parse boundary: `WadError` enum, `wad_open` returns Result, `wad_read_lump_r` parallels, `?` + exhaustive `match` in `doom_main` boot path |
 | **v0.27.4** | shipped 2026-06-01 | Framebuffer geometry fix — `framebuf_init` queries real `/dev/fb0` `xres`/`yres`/`bpp`/`line_length` via `FBIOGET_{V,F}SCREENINFO`; `framebuf_flip` integer-scales + center-blits at true pitch/bpp. Fixes top-band tiling on real displays. Dead `rgb_buf` dropped |
 | **v0.27.5** | shipped 2026-06-01 | Movement fixes — (1) WASD strafe vectors inverted in `player_tick` (`A`/`D` swapped), (2) cardinal-axis moves dropped by a `&&` guard, now `\|\|`. Plus toolchain pin → 6.0.29 + lockfile cleanup (canonical 27-entry lock, CI guard dropped, known-issue #1 resolved) pulled forward from v0.27.6 |
-| **v0.27.6** | gated | yukti `sys_stat` dup-fn cleanup — drop the duplicate-fn warning once yukti re-bundles without `sys_stat` (did not fire under 6.0.29; re-confirm). Gated on a yukti rebundle |
-| **v0.27.x** | deferred | `lib/test.cyr` table-driven test refactor (`test_each` helper, ~32 asserts collapsed) — bumped by the 0.27.4/0.27.5 hotfixes |
+| **v0.27.6** | gated | yukti `sys_stat` dup-fn cleanup — drop the duplicate-fn warning once yukti re-bundles without `sys_stat`. Did not fire under 6.0.29 or 6.0.83; likely moot. Gated on a yukti rebundle |
+| **v0.28.0** | shipped 2026-06-07 | Graphics review/hardening/audit/performance. Patch-decoder bounds propagation (weapon/sprite/HUD+menu — F01/F02/F03 — and TEXTURE1 — F19), visplane heap-OOB-**write** fix + visible E1M1 corruption fix (F17), dead `render_flat_span` delete (F16), flat-fill inline ~15% `render_frame` (F11), weapon-lump cache (F14). Toolchain pin → 6.0.83. 8 of 20 verified findings shipped; rest re-slotted across 0.28.x. Audit: `docs/audit/2026-06-07-v0.28-graphics-hardening.md` |
 
-After 0.27.x: **v0.28.x** Black Book audit (was 0.25.0, re-anchored — written against the modernized post-language-arc code). Then **v0.29.x** performance pass against Cyrius O4 regalloc.
+### Forward 0.28.x slots (the previously-roadmapped Black Book audit re-slots behind this graphics arc)
+
+| Slot | Theme |
+|---|---|
+| **v0.28.1** | Visplane pool rewrite (F08) — keystone Black Book parity; subsumes F13. Rides the `lib/test.cyr` `test_each` refactor (was 0.27.x) |
+| **v0.28.2** | Sprite/masked-seg depth-aware clipping (F07 per-drawseg silhouettes → F05b → F05 clip_solid) |
+| **v0.28.3** | Sky + wall-mapping parity (F09 horizon anchoring) |
+| **v0.28.4** | Structural perf (F12 sidedef/sector index cache, F15 thing-sector cache) — bench-gated |
+| **v0.28.5–.7** | The original Black Book sub-audits re-slotted: BSP+collision (.5), game-state (.6), security-refresh (.7, partly discharged early by F01/F02/F03/F19/F17) |
+
+After 0.28.x: **v0.29.x** O4 micro-perf pass + deep renderer fidelity (F06 native-scale midtex, F22 perspective-correct U/depth). See [`roadmap.md`](roadmap.md).
 
 ## Known issues (workarounds in place)
 
 | # | Issue | Workaround |
 |---|---|---|
-| 2 | `lib/yukti.cyr:39: duplicate fn 'sys_stat' (last definition wins)` — stdlib defines `sys_stat` and vani's transitively-bundled yukti also defines it (unannotated). | Codegen-identical, warning-only. Did not fire under cycc 6.0.29 (worth re-confirming), but kept tracked until yukti drops `sys_stat` from its dist surface. Gated on a yukti rebundle. |
+| 2 | `lib/yukti.cyr:39: duplicate fn 'sys_stat' (last definition wins)` — stdlib defines `sys_stat` and vani's transitively-bundled yukti also defines it (unannotated). | Codegen-identical, warning-only. Did not fire under cycc 6.0.29 or 6.0.83, but kept tracked until yukti drops `sys_stat` from its dist surface. Gated on a yukti rebundle. |
 
 > Issue #1 (cycc 6.0.1 lockfile-writer regression — empty `cyrius.lock`) was **resolved in 0.27.5**: toolchain pin bumped to 6.0.29, whose `cyrius deps` writes a canonical 27-entry lock. The `sha256sum` hand-population + CI empty-lock guard are gone; `cyrius deps --verify` is unconditional again.
 

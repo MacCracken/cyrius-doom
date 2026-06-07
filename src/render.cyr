@@ -58,6 +58,7 @@ fn render_load_sky(): i64 {
 # Weapon sprite: drawn as screen overlay after all 3D rendering
 var weapon_lump = -1;
 var weapon_patch_buf = 0;
+var weapon_lump_cached = -1;
 var weapon_prefix = 0;
 var weapon_fire_frame = 0;
 var weapon_fire_timer = 0;
@@ -152,8 +153,15 @@ fn render_draw_weapon(light_level): i64 {
     if (weapon_patch_buf == 0) { weapon_patch_buf = alloc(16384); }
 
     var psz = wad_lump_size(weapon_lump);
-    if (psz > 16384) { return 0; }
-    wad_read_lump_into(weapon_lump, weapon_patch_buf, psz);
+    if (psz < 8 || psz > 16384) { return 0; }
+    # Cache the decoded lump: the weapon patch only changes when the firing
+    # frame advances, so the per-frame WAD read was pure waste. Guarded after
+    # the size check so a rejected lump is never cached. (0.28.0 F14)
+    if (weapon_lump != weapon_lump_cached) {
+        wad_read_lump_into(weapon_lump, weapon_patch_buf, psz);
+        weapon_lump_cached = weapon_lump;
+    }
+    var pend = weapon_patch_buf + psz;
 
     var pw = read_le16(weapon_patch_buf);
     var ph = read_le16(weapon_patch_buf + 2);
@@ -177,14 +185,23 @@ fn render_draw_weapon(light_level): i64 {
         if (scr_x < 0) { continue; }
         if (scr_x >= SCREEN_WIDTH) { continue; }
 
+        # Bound the column directory + post walk (mirrors texture_get_column).
+        # The weapon/sprite/HUD patch decoders never got the C2 hardening that
+        # texture_get_column has, so a malformed/short patch lump could read
+        # past weapon_patch_buf. Latent on the trusted IWAD, reachable under
+        # future PWAD support. (0.28.0 F01)
+        if (8 + col * 4 + 4 > psz) { continue; }
         var col_off = read_le32(weapon_patch_buf + 8 + col * 4);
+        if (col_off >= psz) { continue; }
         var post = weapon_patch_buf + col_off;
 
         var safety = 0;
         while (safety < 128) {
+            if (post + 1 >= pend) { break; }
             var td = load8(post);
             if (td == 255) { break; }
             var length = load8(post + 1);
+            if (post + 4 + length > pend) { break; }
             var pixels = post + 3;
 
             for (var py = 0; py < length; py += 1) {
@@ -375,53 +392,6 @@ fn render_init_visplanes(): i64 {
         store64(vp_ceil_flat + y * 8, -1);
         store64(vp_floor_light + y * 8, 16);
         store64(vp_ceil_light + y * 8, 16);
-    }
-    return 0;
-}
-
-# Draw a single floor/ceiling span at screen row y, from x1 to x2
-# flat_idx = flat texture index, floor_h = world floor height
-# light = COLORMAP level
-fn render_flat_span(y, x1, x2, flat_idx, plane_h, light_level): i64 {
-    if (flat_idx < 0) { return 0; }
-    if (x1 > x2) { return 0; }
-
-    # For screen row y, compute the world-space distance
-    # Original DOOM: distance = (plane_height * PROJ_DIST) / (y - HALF_HEIGHT)
-    # For floor: y > HALF_HEIGHT (below center)
-    # For ceiling: y < HALF_HEIGHT (above center)
-    var dy = y - HALF_HEIGHT;
-    if (dy == 0) { return 0; }
-
-    # plane_h is the height difference between eye and plane (fixed-point)
-    var dist = fixed_div(fixed_mul(plane_h, PROJ_DIST), fixed_abs(dy << 16));
-    if (dist <= 0) { return 0; }
-
-    # For each pixel in the span, compute world X,Y
-    for (var x = x1; x <= x2; x += 1) {
-        # Screen-relative X from center
-        var sx = x - HALF_WIDTH;
-
-        # World offset from view position
-        # wx = view_x + (dist * cos - sx_world * sin)
-        # wy = view_y + (dist * sin + sx_world * cos)
-        var sx_world = fixed_div(sx << 16, PROJ_DIST);
-        var step_x = fixed_mul(dist, view_cos) + fixed_mul(fixed_mul(sx_world, dist), view_sin);
-        var step_y = fixed_mul(dist, view_sin) - fixed_mul(fixed_mul(sx_world, dist), view_cos);
-
-        var wx = fixed_to_int(view_x + step_x);
-        var wy = fixed_to_int(view_y + step_y);
-
-        var pal = flat_get_pixel(flat_idx, wx & 63, wy & 63);
-
-        # Distance-based light dimming
-        var dist_dim = fixed_to_int(dist) / 96;
-        if (dist_dim < 0) { dist_dim = 0; }
-        if (dist_dim > 16) { dist_dim = 16; }
-        var lv = light_level + dist_dim;
-        if (lv > 31) { lv = 31; }
-
-        framebuf_pixel(x, y, render_shade(pal, lv));
     }
     return 0;
 }
@@ -683,6 +653,23 @@ fn render_seg(seg_idx): i64 {
         if (ceil_screen < ct) { ceil_screen = ct; }
         if (floor_screen > cb) { floor_screen = cb; }
 
+        # Absolute clamp to the row-loop bounds BEFORE the vp_* loops below
+        # index vp_ceil_*/vp_floor_* (each alloc(200*8)). The relative clamps
+        # above only bound the ct/cb-facing side. A crafted extreme-height
+        # sector at min depth (depth floored to 256) drives the projection past
+        # the array, so the `for cy` / `for fy` loops would store64 out of
+        # bounds — a real heap OOB write reachable via a malformed map
+        # (map_validate bounds indices, not coordinates).
+        # The ceiling loop writes rows [ct, ceil_screen), so ceil_screen must
+        # be <= SCREEN_HEIGHT; the floor loop writes [floor_screen+1, cb], so
+        # floor_screen must be >= -1. Clamping to exactly those bounds leaves
+        # every in-band row write identical, so this is pixel-neutral on
+        # conformant maps (off-by-one tighter bounds dropped legit edge rows). (0.28.0 F17)
+        if (ceil_screen < 0) { ceil_screen = 0; }
+        if (ceil_screen > SCREEN_HEIGHT) { ceil_screen = SCREEN_HEIGHT; }
+        if (floor_screen < -1) { floor_screen = -1; }
+        if (floor_screen > SCREEN_HEIGHT - 1) { floor_screen = SCREEN_HEIGHT - 1; }
+
         # DOOM-accurate wall lighting: scale = PROJ_DIST / depth
         var col_scale = fixed_div(PROJ_DIST, depth);
         var col_light = render_wall_light(lightnum, col_scale);
@@ -896,11 +883,26 @@ fn render_flat_spans(): i64 {
                     var cstep_wx = fixed_mul(fixed_div(cdist, PROJ_DIST), view_sin);
                     var cstep_wy = fixed_mul(fixed_div(cdist, PROJ_DIST), -view_cos);
 
-                    for (var x = cx1; x <= cx2; x += 1) {
-                        var cp = flat_get_pixel(cf, fixed_to_int(cwx) & 63, fixed_to_int(cwy) & 63);
-                        framebuf_pixel(x, y, render_shade(cp, clv));
-                        cwx += cstep_wx;
-                        cwy += cstep_wy;
+                    # Inline the flat fetch and hoist the COLORMAP row out of
+                    # the per-pixel loop. flat_get_pixel re-masked &63 and
+                    # render_shade re-clamped the light every pixel, though clv
+                    # is already 0..31 here — two calls + redundant work per
+                    # pixel on the dominant fill path. Byte-identical. (0.28.0 F11)
+                    if (colormap != 0) {
+                        var crow = colormap + clv * 256;
+                        for (var x = cx1; x <= cx2; x += 1) {
+                            var cp = load8(flat_cache + cf * FLAT_SIZE + (fixed_to_int(cwy) & 63) * 64 + (fixed_to_int(cwx) & 63));
+                            framebuf_pixel(x, y, load8(crow + cp));
+                            cwx += cstep_wx;
+                            cwy += cstep_wy;
+                        }
+                    } else {
+                        for (var x = cx1; x <= cx2; x += 1) {
+                            var cp = load8(flat_cache + cf * FLAT_SIZE + (fixed_to_int(cwy) & 63) * 64 + (fixed_to_int(cwx) & 63));
+                            framebuf_pixel(x, y, cp);
+                            cwx += cstep_wx;
+                            cwy += cstep_wy;
+                        }
                     }
                 }
             }
@@ -925,11 +927,22 @@ fn render_flat_spans(): i64 {
                     var fstep_wx = fixed_mul(fixed_div(fdist, PROJ_DIST), view_sin);
                     var fstep_wy = fixed_mul(fixed_div(fdist, PROJ_DIST), -view_cos);
 
-                    for (var x = fx1; x <= fx2; x += 1) {
-                        var fp = flat_get_pixel(ff, fixed_to_int(fwx) & 63, fixed_to_int(fwy) & 63);
-                        framebuf_pixel(x, y, render_shade(fp, flv));
-                        fwx += fstep_wx;
-                        fwy += fstep_wy;
+                    # Inline flat fetch + hoist COLORMAP row (see ceiling). (0.28.0 F11)
+                    if (colormap != 0) {
+                        var frow = colormap + flv * 256;
+                        for (var x = fx1; x <= fx2; x += 1) {
+                            var fp = load8(flat_cache + ff * FLAT_SIZE + (fixed_to_int(fwy) & 63) * 64 + (fixed_to_int(fwx) & 63));
+                            framebuf_pixel(x, y, load8(frow + fp));
+                            fwx += fstep_wx;
+                            fwy += fstep_wy;
+                        }
+                    } else {
+                        for (var x = fx1; x <= fx2; x += 1) {
+                            var fp = load8(flat_cache + ff * FLAT_SIZE + (fixed_to_int(fwy) & 63) * 64 + (fixed_to_int(fwx) & 63));
+                            framebuf_pixel(x, y, fp);
+                            fwx += fstep_wx;
+                            fwy += fstep_wy;
+                        }
                     }
                 }
             }

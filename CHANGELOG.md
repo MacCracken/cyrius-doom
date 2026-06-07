@@ -5,6 +5,109 @@ All notable changes to cyrius-doom will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.28.0] - 2026-06-07
+
+Graphics review / hardening / audit / performance pass — the new
+anchor for the 0.28.x arc. A multi-agent audit of the entire render
+path (render / framebuf / texture / sprite / status / menu + the
+fixed-point math feeding them) surfaced 67 raw findings, triaged to
+27 canonical and adversarially verified down to 20 real ones; 8
+shipped here, the rest re-slotted across 0.28.x (see
+`docs/development/roadmap.md`). Audit artifact:
+`docs/audit/2026-06-07-v0.28-graphics-hardening.md`.
+
+The headline is **memory-safety hardening of the patch decoders**:
+the C2-class bounds checks that have lived in `texture_get_column`
+since v0.24.0 were never propagated to the other three patch
+decoders (weapon, sprite, HUD/menu/title) or to the `TEXTURE1`
+parser, and the visplane row loops could write out of bounds on
+crafted geometry. All four decode paths now mirror
+`texture_get_column`, and the visplane projection is absolutely
+clamped to its row-loop bounds. Latent on the trusted shareware
+IWAD, reachable under the planned PWAD support — except F17, which
+also fixed a real visible artifact on E1M1.
+
+### Security
+
+- **`render.cyr` — heap OOB *write* in the visplane loops (F17).**
+  `ceil_screen` / `floor_screen` were only *relatively* clamped
+  (`>= ct`, `<= cb`); the `vp_ceil_*` / `vp_floor_*` row loops
+  (each `alloc(200*8)`) used the un-capped side, so a sector with
+  extreme heights at minimum depth drove the projection past the
+  array and `store64` ran off the end (the arrays are alloc'd
+  consecutively, so the overflow corrupted the neighbouring
+  visplane bounds). Now absolutely clamped to exactly the loop
+  bounds — `ceil_screen <= SCREEN_HEIGHT` (the ceiling loop is
+  half-open `[ct, ceil_screen)`) and `floor_screen >= -1` (the
+  floor loop is `[floor_screen+1, cb]`) — which leaves every in-band
+  row write identical on conformant maps. `map_validate()` bounds
+  *indices*, not coordinates, so this was the real memory-safety
+  boundary.
+- **`render.cyr` / `sprite.cyr` / `status.cyr` — bound the patch
+  column decoders (F01 / F02 / F03).** `render_draw_weapon`,
+  `sprite_render_all`, and the shared HUD/menu/title decoder
+  `st_draw_patch_shaded` read `read_le32(buf + 8 + col*4)` and
+  walked post lists with only an iteration-count `safety` guard and
+  no address bounds. Each now mirrors `texture_get_column`: column
+  directory bounds (`8 + col*4 + 4 > size`), `col_off >= size`, and
+  per-post `post + 1 >= end` / `post + 4 + length > end` checks,
+  plus a `psz < 8` header floor. `st_draw_patch_from_buf` /
+  `st_draw_patch_shaded` now take the backing lump size (threaded
+  from every call site in `status.cyr` + `menu.cyr`).
+- **`texture.cyr` — validate `TEXTURE1` offsets + patch refs (F19).**
+  `texture_init` now bounds the offset directory and each
+  texture's 22-byte header against the lump (`off + 22 > t1_size`
+  skips a malformed entry — the zeroed `tex_table` slot is guarded
+  by the existing `tw == 0` early-out), and `texture_get_column`
+  bounds every 10-byte patch reference to the lump extent
+  (`tex_def_end`). Completes the patch-decode attack surface.
+
+### Fixed
+
+- **`render.cyr` — visible corruption on E1M1 (F17).** As a direct
+  consequence of the OOB-write fix above, an 11-pixel block at
+  x=234–237, y=107–109 that previously rendered as stray near-black
+  speckle (from the corrupted visplane bounds) now renders the
+  correct floor texture. This is the only intended pixel change in
+  0.28.0; all other frames (E1M1/E1M3/E1M5 game + automap +
+  intermission, title, menu, skill) are byte-identical to 0.27.5.
+
+### Removed
+
+- **`render.cyr` — dead `render_flat_span` (singular) deleted (F16).**
+  43-line per-pixel span routine with zero call sites (superseded
+  by the deferred row-based `render_flat_spans`). Output unchanged.
+
+### Performance
+
+- **`render.cyr` — inline the flat fill + hoist the COLORMAP row
+  (F11).** `render_flat_spans` called `flat_get_pixel` (re-masking
+  `& 63`) and `render_shade` (re-clamping the light level, already
+  `0..31` here) for *every* floor/ceiling pixel — two calls plus
+  redundant work on the dominant fill path. The fetch is now
+  inlined and the COLORMAP row pointer (`colormap + light*256`) is
+  hoisted per span. Byte-identical output. **`render_frame`
+  ≈2.10 ms → ≈1.78 ms (~15%)**, `render_frame+sprites` ≈2.12 ms →
+  ≈1.78 ms, measured same-toolchain (cycc 6.0.83) before/after
+  against the 22 ms @ 35 Hz budget (now ~12× headroom).
+  `texture_get_column` unchanged (~685 ns).
+- **`render.cyr` — cache the weapon patch (F14).**
+  `render_draw_weapon` re-read the weapon lump from the WAD via
+  `wad_read_lump_into` *every frame*; now re-read only when the
+  firing frame actually changes the lump (guarded after the size
+  check so a rejected lump is never cached).
+
+### Changed
+
+- **Toolchain pin `6.0.29` → `6.0.83`** in `cyrius.cyml`. Lock
+  re-resolved (canonical 27 entries, `cyrius deps --verify` 27/0).
+  Codegen-identical to 6.0.29 for the unchanged sources.
+
+Binary `590,824 → 592,456 B` (+1,632 B: the patch-decode bounds
+checks, net of the `render_flat_span` deletion). DCE NOP-sled
+985 fns / 293,833 B. Tests 37/37 WAD-free + 73/73 full; fuzz
+`fuzz_wad` 1k + `fuzz_fixed` 50k clean.
+
 ## [0.27.5] - 2026-06-01
 
 Post-playtest movement fixes plus the toolchain/lockfile cleanup

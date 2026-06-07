@@ -68,7 +68,7 @@ jobs:
         # Unconditional supply-chain gate: the committed cyrius.lock is
         # verified against the resolved dep hashes. The empty-lock guard
         # for the cycc 6.0.1 lockfile-writer regression was dropped in
-        # 0.27.5 — the toolchain pin is now 6.0.29, whose writer is fixed.
+        # 0.27.5; the toolchain pin (now 6.0.83) has a working lock writer.
         run: cyrius deps --verify
 
       - name: Build
@@ -136,7 +136,7 @@ jobs:
         # Unconditional supply-chain gate: the committed cyrius.lock is
         # verified against the resolved dep hashes. The empty-lock guard
         # for the cycc 6.0.1 lockfile-writer regression was dropped in
-        # 0.27.5 — the toolchain pin is now 6.0.29, whose writer is fixed.
+        # 0.27.5; the toolchain pin (now 6.0.83) has a working lock writer.
         run: cyrius deps --verify
 
       - name: Run tests (WAD-free assertions)

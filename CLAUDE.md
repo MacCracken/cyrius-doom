@@ -10,7 +10,7 @@
 
 - **Type**: Standalone game binary / kernel demo
 - **License**: GPL-3.0-only (clean-room implementation from documented specs)
-- **Language**: Cyrius (toolchain pinned in `cyrius.cyml [package].cyrius` — `cycc 6.0.29` at the time of writing; canonical pin is the file)
+- **Language**: Cyrius (toolchain pinned in `cyrius.cyml [package].cyrius` — `cycc 6.0.83` at the time of writing; canonical pin is the file)
 - **Version**: `VERSION` at project root is the source of truth (referenced via `version = "${file:VERSION}"` in `cyrius.cyml`). Do not inline the number here.
 - **Genesis repo**: [agnosticos](https://github.com/MacCracken/agnosticos)
 - **Standards**: [First-Party Standards](https://github.com/MacCracken/agnosticos/blob/main/docs/development/planning/first-party-standards.md) · [First-Party Documentation](https://github.com/MacCracken/agnosticos/blob/main/docs/development/planning/first-party-documentation.md)

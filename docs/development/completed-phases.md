@@ -4,7 +4,13 @@
 
 Each entry: one row, headline only. For the full changelog see [`CHANGELOG.md`](../../CHANGELOG.md).
 
-## v0.27.x — Language-adoption arc (in flight, 0.27.0–0.27.5 shipped)
+## v0.28.x — Graphics arc (in flight, 0.28.0 shipped)
+
+| Version | Shipped | Milestone |
+|---------|---------|-----------|
+| v0.28.0 | 2026-06-07 | Graphics review/hardening/audit/performance — the new 0.28.x anchor. Multi-agent render-path audit (67 raw → 27 canonical → 20 adversarially verified; 8 shipped, rest re-slotted across 0.28.1–.7). **Hardening**: propagated the v0.24.0 C2 patch-bounds checks from `texture_get_column` to the three other patch decoders — weapon `render_draw_weapon` (F01), `sprite_render_all` (F02), the shared HUD/menu/title `st_draw_patch_shaded` (F03, lump size threaded from every call site in status + menu) — and to the `TEXTURE1` parser (F19); fixed a genuine heap **OOB write** in the visplane row loops where `ceil_screen`/`floor_screen` were only relatively clamped (F17), which also corrected a real 11-px corruption block on E1M1 (x=234–237, y=107–109). **Perf**: inlined the flat fetch + hoisted the COLORMAP row in `render_flat_spans` (F11) — `render_frame` ~2.10 → ~1.78 ms (~15%, same-toolchain), `texture_get_column` unchanged; cached the weapon patch instead of re-reading the lump every frame (F14). **Hygiene**: deleted dead `render_flat_span` (F16). Toolchain pin 6.0.29 → 6.0.83. Binary 590,824 → 592,456 B (+1,632 B bounds checks, net of the dead-fn delete). 37/37 WAD-free + 73/73 full; fuzz 1k/50k clean; 11/12 reference frames byte-identical (E1M1 game = the intended F17 fix). Audit: `docs/audit/2026-06-07-v0.28-graphics-hardening.md`. |
+
+## v0.27.x — Language-adoption arc (complete, 0.27.0–0.27.5 shipped)
 
 | Version | Shipped | Milestone |
 |---------|---------|-----------|

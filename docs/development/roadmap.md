@@ -12,91 +12,96 @@
 
 | Slot | Theme | Status |
 |---|---|---|
-| **v0.27.x** | `lib/test.cyr` table-driven test refactor | next (deferred by the 0.27.4 fb hotfix) |
-| **v0.27.6** | yukti `sys_stat` dup-fn cleanup (lockfile half shipped in 0.27.5) | gated on yukti rebundle |
-| **v0.28.x** | DOOM Black Book audit (5 patches) | next minor — written against post-0.27.x modernized code |
-| **v0.29.x** | Performance pass | gated on Cyrius O4 linear-scan regalloc (v6.4.x cyrius slot) |
+| **v0.28.1** | Visplane pool rewrite (Black Book ch.9 / F08); rides the `lib/test.cyr` `test_each` refactor | next |
+| **v0.28.2** | Sprite + masked-seg depth-aware clipping (F07 / F05b / F05) | after 0.28.1 |
+| **v0.28.3** | Sky + wall-mapping parity (F09) | queued |
+| **v0.28.4** | Structural perf — sidedef/sector index + thing-sector caches (F12 / F15) | queued, bench-gated |
+| **v0.28.5–.7** | Original Black Book sub-audits re-slotted: BSP+collision, game-state, security-refresh | queued |
+| **v0.28.x** | yukti `sys_stat` dup-fn cleanup | gated on yukti rebundle (likely moot) |
+| **v0.29.x** | O4 micro-perf pass + deep renderer fidelity (F06 native-scale midtex, F22 perspective-correct U/depth) | gated on Cyrius O4 regalloc (v6.4.x) |
 | **v1.0.0** | Ship: full E1 + multiple display backends + AGNOS integration | future |
 
-The current arc (**v0.27.x — language-adoption**) was re-anchored from the original "performance pass" thesis when Cyrius O4 slipped to v6.4.x and the v5.8.x language arc (sum types, `Result<T, E>`, `?`, exhaustive match) matured in stdlib. Perf-pass re-targets to v0.29.x; the Black Book audit (originally v0.25.0) re-anchors to v0.28.x so audit deltas land against the modernized code.
+> **v0.28.0 shipped 2026-06-07** (graphics review/hardening/audit/performance) — moved to [`completed-phases.md`](completed-phases.md). At the user's direction this graphics pass *became* 0.28.0, and the previously-roadmapped Black Book audit + lingering 0.27.x housekeeping were pushed **behind** it (re-slotted below).
+
+The current arc is **v0.28.x — graphics** (review / hardening / parity / performance). The language-adoption arc (v0.27.x) is complete. v0.28.0 was anchored on a multi-agent audit of the render path (`docs/audit/2026-06-07-v0.28-graphics-hardening.md`); it shipped the memory-safety hardening + safe perf, and the parity items it surfaced now drive 0.28.1–0.28.7. The O4-gated perf micro-pass and the deepest renderer-fidelity work remain at v0.29.x.
 
 ---
 
-## v0.27.x — Language-adoption arc
+## v0.28.x — Graphics arc
 
-Absorb the v5.8.x → v6.0.1 Cyrius language gains (sum types, `Result<T, E>`, `?` operator, exhaustive match, parse-only `: i64` return annotations) and the modern manifest convention into doom's actual code + toolchain. Shipped through 0.27.2 (see `completed-phases.md`).
+The graphics review/hardening/audit/performance pass **became v0.28.0** (shipped — see `completed-phases.md`). The previously-roadmapped DOOM Black Book audit (originally v0.25.0, re-anchored to v0.28.x) and the lingering language-arc housekeeping were pushed **behind** it, re-slotted below. Scope across the arc: close the render-path parity gaps the 0.28.0 audit surfaced, chapter-by-chapter against Fabien Sanglard's *Game Engine Black Book: DOOM* + the Unofficial DOOM Specs, with PPM diffs as ground truth. Finding IDs (Fnn) reference [`docs/audit/2026-06-07-v0.28-graphics-hardening.md`](../audit/2026-06-07-v0.28-graphics-hardening.md).
 
-### v0.27.x — `lib/test.cyr` table-driven test refactor
+### v0.28.1 — Visplane pool rewrite (keystone parity)
 
-> Was slotted v0.27.4; deferred when the framebuffer geometry hotfix
-> (top-band tiling on real displays) claimed 0.27.4. Re-slots into the
-> next free 0.27.x.
+The per-row single-`(x1,x2,flat,light)` visplane model can't represent two flats on one screen row, and the farthest seg to touch a row wins (BSP is front-to-back) — so a farther sector's flat can overwrite a nearer one. Replace with a real visplane pool.
 
-Adopt the v5.7.43 `test_each(cases, fn)` stdlib helper. Current `tests/doom.tcyr` is ~73 asserts of hand-rolled per-case calls; table-driven cuts boilerplate and makes adding new cases cheap.
+| # | Item | Reference | Detail |
+|---|------|-----------|--------|
+| 1 | Visplane pool keyed by (flat, lightnum, height) | Black Book ch. 9 (R_FindPlane/R_DrawPlanes) | per-column `top[]`/`bottom[]`; F08 |
+| 2 | Drop redundant per-cell flat/light re-stores | — | folds into the pool; F13 |
+| 3 | `lib/test.cyr` `test_each` refactor (rides along) | v5.7.43 stdlib | ~32 asserts collapsed; the rewrite needs a healthy PPM-diff harness |
+| 4 | Span shape + count vs reference | E1M1 / E1M3 / E1M5 | flag-gated, PPM-diffed |
+
+### v0.28.2 — Sprite + masked-seg depth-aware clipping
+
+The single collapsed `clip_top`/`clip_bottom` pair holds the *farthest* opening at draw time, so sprites and masked midtextures can't be clipped against walls at the right depth. Build the per-drawseg silhouette infrastructure, then the dependent fixes.
+
+| # | Item | Reference | Detail |
+|---|------|-----------|--------|
+| 1 | Per-drawseg `mfloorclip`/`mceilingclip` recorded at seg depth | Black Book ch. 11 | F07; foundation for the rest |
+| 2 | Masked-seg clip against the wall silhouette | Black Book ch. 10 | F05b (rides on F07) |
+| 3 | Masked-seg `clip_solid` over-paint guard | — | F05 — correct **only** once F07/F05b land; the bare guard over-clips the "near grate / far wall" case (probed no-op on E1M1–E1M7, so 0.28.0 correctly skipped it) |
+| 4 | Sprite-vs-sprite + sprite-vs-masked clipping | Black Book ch. 11 | completeness |
+
+### v0.28.3 — Sky + wall-mapping parity
+
+| # | Item | Reference | Detail |
+|---|------|-----------|--------|
+| 1 | Sky horizon anchoring + corrected angular scale | Black Book ch. 8 (R_DrawSkyColumn) | F09; sky-Y to the horizon (not per-column `ct`), per-column view-angle table; never lit |
+| 2 | Brightness / lighting A-B vs reference | Black Book ch. 8 (COLORMAP) | per-light-level PPM diff (carries the F25 verification forward) |
+
+### v0.28.4 — Structural performance (O4-independent, bench-gated)
 
 | # | Item | Detail |
 |---|------|--------|
-| 1 | Add `"test"` to `cyrius.cyml [deps] stdlib` | One-line manifest change |
-| 2 | Convert asr / fixed-point asserts → `test_each` | ~20 asserts collapsed |
-| 3 | Convert trig-table asserts → `test_each` | ~12 asserts collapsed |
-| 4 | Extend test corpus once boilerplate drops | Add 20+ cases per group |
+| 1 | Per-sidedef texture + per-sector flat index cache at map load | F12 — removes 3 `texture_find` + 2 `flat_find` linear scans per seg/frame |
+| 2 | Per-thing sector/floor-height cache | F15 — re-walk BSP only when the thing moves |
+| 3 | Automap line pre-clip | F26 — optional; negligible (overlay, not hot path) |
 
-### v0.27.6 — yukti `sys_stat` dup-fn cleanup
-
-The lockfile half of this slot shipped early in **0.27.5** (toolchain pin → 6.0.29 resolved the cycc lockfile-writer regression: canonical 27-entry lock, CI empty-lock guard dropped, `cyrius deps --verify` unconditional). What remains is the yukti dup-fn warning. Pure cleanup — no new doom features.
-
-| # | Item | Gated on |
-|---|------|----------|
-| 1 | Re-resolve deps to drop the yukti `sys_stat` dup-fn warning; strike known-issue #2 | yukti re-bundle (note: did not fire under 6.0.29 — re-confirm whether already moot) |
-
-### Watch (not yet 0.27.x slot material)
-
-- **`texture.cyr` Result adoption** — `texture_get_column` + `texture_composite` migration deferred from v0.27.3 (the wad-side adoption already demonstrated the full `Result` + `?` + `match` pattern; texture's hot render-path call sites are gracefully handled by the existing `0`-on-fail sentinel). Revisit alongside v0.28.0's column-rendering audit — typed errors at the texture boundary will help debug visplane / column-step issues caught by the Black Book audit's PPM diffs vs chocolate-doom.
-- **`lib/random.cyr`** (v5.9.x stdlib addition) — deterministic per-DOOM-tick PRNG. Doom's monster AI is already deterministic per the original game; not adopted unless RNG is wanted for intermission/menu polish.
-- **`#io` effect annotations** (v5.11.x) — would document the io-side-effect set of `wad_lump_read` / `framebuf_present` / `audio_write`. No semantic change. Defer until Cyrius pins the annotation surface as stable.
-- **mabda 3.0 fold / bayan-ganita carve** (v6.0.x cyrius planned) — doom uses no JSON/TOML, no-op for us.
-
----
-
-## v0.28.x — DOOM Black Book Audit
-
-Was v0.25.0; re-anchored so audit deltas are written against the modernized 0.27.x code rather than against code we'd rewrite in the language-adoption arc. Scope: chapter-by-chapter verification against Fabien Sanglard's *Game Engine Black Book: DOOM* + the Unofficial DOOM Specs, with reference PPMs from chocolate-doom as ground truth for visual comparisons.
-
-### v0.28.0 — Rendering pipeline audit
+### v0.28.5 — BSP + collision audit (original Black Book sub-phase)
 
 | # | Item | Reference | Detail |
 |---|------|-----------|--------|
-| 1 | Visplane span generation | Black Book ch. 9 (R_DrawPlanes) | Spans match shape + count vs reference on E1M1 / E1M3 / E1M5 |
-| 2 | Column rendering | Black Book ch. 8 (R_DrawColumn) | Texture-coord stepping, light scale, COLORMAP lookup parity |
-| 3 | Sky rendering | Black Book ch. 8 (R_DrawSkyColumn) | Sky never lit; column wraps at 256 |
-| 4 | Masked midtexture clipping | Black Book ch. 10 | `silhouette` masking against floor/ceiling clips |
-| 5 | Sprite-to-wall clipping | Black Book ch. 11 (R_DrawMaskedColumn) | Sprite spans clipped against `mfloorclip` / `mceilingclip` arrays |
+| 1 | BSP traversal invariants | Black Book ch. 7 + bsp lib | `bsp_point_on_side` parity; front-to-back walk order |
+| 2 | Subsector containment | Black Book ch. 7 | every point in a subsector returns that subsector |
+| 3 | Wall-slide collision | Black Book ch. 12 | slide against angled walls matches reference |
+| 4 | Blockmap query correctness (+ C3 BLOCKMAP bounds) | Unofficial Specs §4.7 | cell-list parity on E1M6; re-verify the 2026-04-13 C3 finding |
 
-### v0.28.1 — BSP + collision audit
-
-| # | Item | Reference | Detail |
-|---|------|-----------|--------|
-| 1 | BSP traversal invariants | Black Book ch. 7 + bsp lib | `bsp_point_on_side` parity with reference; front-to-back walk order |
-| 2 | Subsector containment | Black Book ch. 7 | Every point in a subsector returns that subsector |
-| 3 | Wall-slide collision | Black Book ch. 12 | Player slide against angled walls matches reference geometry |
-| 4 | Blockmap query correctness | Unofficial Specs §4.7 | BLOCKMAP cell-list parity on E1M6 stress map |
-
-### v0.28.2 — Game state audit
+### v0.28.6 — Game state audit (original Black Book sub-phase)
 
 | # | Item | Reference | Detail |
 |---|------|-----------|--------|
-| 1 | `R_DrawPSprite` weapon-sprite coords | Black Book ch. 11 | Weapon bob `psprite_x` / `psprite_y` matches reference frames |
-| 2 | Brightness / lighting tuning | Black Book ch. 8 (COLORMAP) | A/B screenshot diff vs chocolate-doom, per-light-level |
-| 3 | Episode-end intermission | Unofficial Specs §1.10 | E1M8 boss kill → text screen → bunny scroll |
-| 4 | Visplane budget under stress | Unofficial Specs §10.4 | E1M9 + max-difficulty thing count: no visplane overflow |
+| 1 | `R_DrawPSprite` weapon-sprite coords | Black Book ch. 11 | weapon bob `psprite_x`/`psprite_y` vs reference |
+| 2 | Episode-end intermission | Unofficial Specs §1.10 | E1M8 boss kill → text → bunny scroll |
+| 3 | Visplane budget under stress | Unofficial Specs §10.4 | E1M9 + max things: no overflow (bounded by the F08 pool) |
 
-### v0.28.3 — Security audit refresh (post-Result adoption)
+### v0.28.7 — Security audit refresh
+
+Partly discharged early by 0.28.0 (F01/F02/F03/F19 patch-decode propagation + F17 OOB-write fix). Remaining:
 
 | # | Item | Detail |
 |---|------|--------|
-| 1 | Re-walk the v0.24.0 CVE checklist | All 5 items checked under 0.27.3 `Result`-wrapped paths |
-| 2 | Fuzz-corpus refresh | Add ADT-discriminator-aware mutators for the new `Result<T, E>` shape |
-| 3 | Audit doc | `docs/audit/2026-XX-XX-v0.28-black-book.md` — single artifact, sectioned per 0.28.x patch |
+| 1 | Re-walk the 2026-04-13 CVE checklist | confirm C3 (BLOCKMAP) + H1 (WAD lump size) under current code |
+| 2 | Fuzz-corpus refresh | add patch / TEXTURE1 / ADT-discriminator mutators to exercise the F01/F02/F03/F19 decoders directly |
+| 3 | Bench formatter fix | `benches/doom.bcyr` sub-ms avg formatter (prints min > max) |
+
+### Gated / watch (carried forward)
+
+- **yukti `sys_stat` dup-fn cleanup** — strike known-issue #2 once yukti re-bundles without `sys_stat`. Did not fire under 6.0.29 or 6.0.83; likely already moot. Gated on a yukti rebundle. Does not block any 0.28.x graphics slot.
+- **`texture.cyr` Result adoption** — `texture_get_column` typed errors; revisit alongside the 0.28.1 visplane rewrite.
+- **`lib/random.cyr`** (v5.9.x) — deterministic per-tick PRNG; not adopted unless wanted for intermission/menu polish.
+- **`#io` effect annotations** (v5.11.x) — defer until Cyrius pins the annotation surface as stable.
+- **mabda 3.0 fold / bayan-ganita carve** — doom uses no JSON/TOML, no-op for us.
 
 ---
 
@@ -111,6 +116,8 @@ Re-targeted from the original 0.27.0 thesis. Cyrius's compiler-optimization trac
 | 3 | Wait for **Cyrius O4** (linear-scan regalloc, Poletto–Sarkar; v6.4.x per cyrius roadmap) | Upstream | The single biggest win. `render_frame` projection: 2.1 ms → ≤1.0 ms. Column renderer, BSP walk, patch cache all benefit. |
 | 4 | Re-bench hot paths on O2 / O3 / O4-enabled toolchain | Pending | `bench-history.csv` row per upstream phase landing, with A/B before/after to confirm the compiler wins stick. |
 | 5 | Revisit manual patterns only after O4 | Pending | Any remaining 5–10 % wins from column-loop restructure are worth chasing at that point; before then, no. |
+| 6 | Native-scale midtexture w/ peg anchoring | Needs an `rw_scale` path | F06 — deep renderer fidelity; the engine is uniformly stretch-to-section today, so there's no scale path to hook onto |
+| 7 | Perspective-correct U / depth across segs | Renderer rework | F22 — engine is consistently affine (screen-linear frac/depth/U); a half-fix is worse than none |
 
 ---
 

@@ -51,7 +51,7 @@ fn menu_draw_lump(name, px, py): i64 {
     var sz = wad_lump_size(idx);
     if (sz > MENU_PATCH_BUF_SIZE) { return 0; }
     wad_read_lump_into(idx, menu_patch_buf, sz);
-    st_draw_patch_from_buf(menu_patch_buf, px, py);
+    st_draw_patch_from_buf(menu_patch_buf, px, py, sz);
     return 0;
 }
 
