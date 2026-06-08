@@ -93,18 +93,18 @@ fn doom_exit(code): i64 {
 }
 
 fn doom_main(): i64 {
+    #ifdef CYRIUS_TARGET_AGNOS
+    # agnos: warm-up mmap. Without it, doom faults at RIP=0 in ring 3 immediately
+    # after alloc_init's first mmap returns — the first mmap syscall from this
+    # freshly-exec'd process corrupts the ring-3 return state (kernel bug under
+    # investigation; agnsh is unaffected). A throwaway mmap makes alloc_init's the
+    # second mmap, which returns cleanly. Remove once the kernel first-mmap-return
+    # bug is fixed (see agnos docs/development/planning/doom-on-agnos-*).
+    syscall(27, 2097152);
+    #endif
     alloc_init();
-    #ifdef CYRIUS_TARGET_AGNOS
-    syscall(1, 1, "DOOM: alloc ok\n", 15);
-    #endif
     args_init();
-    #ifdef CYRIUS_TARGET_AGNOS
-    syscall(1, 1, "DOOM: args ok\n", 14);
-    #endif
-    sakshi_info("cyrius-doom v0.28.1", 19);
-    #ifdef CYRIUS_TARGET_AGNOS
-    syscall(1, 1, "DOOM: sakshi ok\n", 16);
-    #endif
+    sakshi_info("cyrius-doom v0.28.2", 19);
 
     # WAD path: argv[1] on Linux. On agnos, agnsh `run /bin/doom` passes no argv
     # beyond the path, so default to /DOOM1.WAD (staged on the ext2 root).

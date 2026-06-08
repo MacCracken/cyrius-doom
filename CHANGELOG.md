@@ -5,6 +5,33 @@ All notable changes to cyrius-doom will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.28.2] - 2026-06-08
+
+**DOOM renders on AGNOS.** The `--agnos` build now boots to the title screen
+under the sovereign OS: the 584 KB ELF exec's from disk in ring 3, slurps the
+4.2 MB `DOOM1.WAD` into memory, parses it, builds the palette, and blits a
+240-colour frame to the hardware framebuffer via `fbinfo`#38 / `blit`#39. This is
+the "agnsh launches DOOM" milestone — the first real userland application on
+AGNOS. (Validated by `agnos/scripts/doom-smoke.sh`: gnoboot+OVMF+NVMe, ring-3
+exec, WAD load, non-blank framebuffer screendump.)
+
+Two AGNOS *kernel* fixes (in the `agnos` repo) unblocked the render — the WAD
+needs ~24 MB and the old PMM only managed 16 MB; and the kernel could not reach
+physical pages ≥16 MB to zero a freshly-`mmap`'d region. Neither is a port issue.
+
+### Added / Changed
+
+- **Warm-up `mmap`** (`main.cyr`, agnos only) — the FIRST `mmap` syscall from a
+  freshly-exec'd ring-3 process corrupts the ring-3 return state on AGNOS (a
+  kernel first-syscall-return bug, doom-specific; agnsh is unaffected). A
+  throwaway `mmap` before `alloc_init` makes the real heap `mmap` the second
+  syscall, which returns cleanly. Documented in-place; removed once the kernel
+  bug is fixed. The Linux build is unchanged.
+
+### Fixed
+
+- Stripped the boot-bisect debug markers added during agnos bring-up.
+
 ## [0.28.1] - 2026-06-08
 
 **AGNOS target support — cyrius-doom builds and runs `--agnos`.** The first
