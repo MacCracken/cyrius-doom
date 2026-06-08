@@ -5,6 +5,39 @@ All notable changes to cyrius-doom will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.28.1] - 2026-06-08
+
+**AGNOS target support — cyrius-doom builds and runs `--agnos`.** The first
+port of the engine to the sovereign OS (the "agnsh launches DOOM" arc). The
+engine's OS interactions are branched under `CYRIUS_TARGET_AGNOS`, inlining the
+agnos syscall numbers (which collide with Linux ones — e.g. agnos `0`=exit not
+read, `2`=getpid not open, `16`=kill not ioctl), so the Linux build is byte-for-
+byte unchanged.
+
+### Added
+
+- **Timing** (`tick.cyr`) — `tick_get_time_ns`/`tick_begin`/`tick_wait` use agnos
+  `uptime_ms`(#40) + `sleep_ms`(#41) instead of `CLOCK_GETTIME`/`NANOSLEEP`.
+- **Framebuffer** (`framebuf.cyr`) — `framebuf_init` queries geometry via
+  `fbinfo`(#38); `framebuf_flip` builds a tightly-packed integer-scaled 32bpp
+  frame and presents it via `blit`(#39) (the kernel handles the FB pitch), instead
+  of `/dev/fb0` ioctls + `lseek`+`write`.
+- **WAD** (`wad.cyr`) — agnos has no `lseek` (its syscall 8 is `dup`), so the WAD
+  is slurped into memory at `wad_open` and the 5 seek sites route through a
+  `wad_pread` offset reader. (Linux keeps the live-fd `lseek`+`read` path.)
+- **Input** (`input.cyr`) — stubbed on agnos (no termios; key up/down events need
+  a kernel raw-scancode mode — a follow-on). The title/menu renders without input.
+- **Sound** (`sound.cyr`) — disabled on agnos (no PC-speaker `/dev/console`).
+- **Process exit / WAD path** (`main.cyr`) — portable `doom_exit` (agnos exit is
+  syscall 0); defaults the WAD path to `/DOOM1.WAD` when run with no argv.
+
+### Notes
+
+- Validated on the agnos kernel under QEMU: the 584 KB ELF execs from disk in
+  ring 3, the heap/`mmap`, timing, and sakshi all initialize. WAD loading is
+  currently gated on a kernel-side memory limit (the agnos 2 MB-page pool) — a
+  kernel bite, not a port issue. The Linux build is unaffected (still renders).
+
 ## [0.28.0] - 2026-06-07
 
 Graphics review / hardening / audit / performance pass — the new

@@ -85,26 +85,13 @@ fn wad_open(path): i64 {
     # read (header / directory / lumps) by offset via wad_pread. read#5 advances
     # the per-fd position, so a sequential chunk loop drains the file to EOF.
     wad_data = alloc(WAD_DATA_MAX);
-    if (wad_data == 0) { syscall(1, 1, "WAD: alloc=0!\n", 13); }
-    if (wad_data != 0) { syscall(1, 1, "WAD: alloc ok\n", 14); }
     wad_size = 0;
     var rn = 1;
-    var _wdbg = 1;
-    if (wad_fd < 0) { syscall(1, 1, "WAD: fd<0\n", 10); }
-    if (wad_fd >= 0) { syscall(1, 1, "WAD: fd ok\n", 11); }
     while (rn > 0) {
         if (wad_size + 65536 > WAD_DATA_MAX) { break; }
         rn = file_read(wad_fd, wad_data + wad_size, 65536);
-        if (_wdbg == 1) {
-            if (rn > 0)  { syscall(1, 1, "WAD: read>0\n", 12); }
-            if (rn == 0) { syscall(1, 1, "WAD: read=0\n", 12); }
-            if (rn < 0)  { syscall(1, 1, "WAD: read<0\n", 12); }
-            _wdbg = 0;
-        }
         if (rn > 0) { wad_size = wad_size + rn; }
     }
-    if (wad_size > 0)  { syscall(1, 1, "WAD: slurp>0\n", 13); }
-    if (wad_size == 0) { syscall(1, 1, "WAD: slurp=0\n", 13); }
     file_close(wad_fd);
     wad_fd = -1;
     #endif
