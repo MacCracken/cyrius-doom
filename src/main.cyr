@@ -93,9 +93,28 @@ fn doom_exit(code): i64 {
 }
 
 fn doom_main(): i64 {
+    #ifdef CYRIUS_TARGET_AGNOS
+    syscall(1, 1, "DOOM: entry\n", 12);   # raw write(1) bisect markers (bypass sakshi)
+    var mm = syscall(27, 2097152);        # raw mmap 2 MB — probe the heap-backing path
+    if (mm == 0) { syscall(1, 1, "DOOM: mmap=0\n", 12); }
+    if (mm != 0) {
+        syscall(1, 1, "DOOM: mmap ret\n", 15);
+        store8(mm, 65);                    # touch the page — faults if unmapped
+        syscall(1, 1, "DOOM: mmap wrote\n", 17);
+    }
+    #endif
     alloc_init();
+    #ifdef CYRIUS_TARGET_AGNOS
+    syscall(1, 1, "DOOM: alloc ok\n", 15);
+    #endif
     args_init();
+    #ifdef CYRIUS_TARGET_AGNOS
+    syscall(1, 1, "DOOM: args ok\n", 14);
+    #endif
     sakshi_info("cyrius-doom v0.28.0", 19);
+    #ifdef CYRIUS_TARGET_AGNOS
+    syscall(1, 1, "DOOM: sakshi ok\n", 16);
+    #endif
 
     # WAD path: argv[1] on Linux. On agnos, agnsh `run /bin/doom` passes no argv
     # beyond the path, so default to /DOOM1.WAD (staged on the ext2 root).
