@@ -12,6 +12,12 @@ enum TickConst {
 var tick_state = 0;
 
 fn tick_get_time_ns(): i64 {
+    #ifdef CYRIUS_TARGET_AGNOS
+    # agnos has no CLOCK_GETTIME; uptime_ms(#40) returns monotonic ms in rax.
+    # ms -> ns. 10 ms granularity (100 Hz kernel timer) — fine for 35 Hz tics;
+    # tick_wait sleeps the remainder and self-corrects against this clock.
+    return syscall(40) * 1000000;
+    #endif
     var ts[16];
     syscall(SYS_CLOCK_GETTIME, CLOCK_MONOTONIC, &ts);
     return load64(&ts) * 1000000000 + load64(&ts + 8);
@@ -26,6 +32,14 @@ fn tick_init(): i64 {
 }
 
 fn tick_begin(): i64 {
+    #ifdef CYRIUS_TARGET_AGNOS
+    # No CLOCK_GETTIME — derive sec/nsec from uptime_ms so tick_wait's
+    # existing ns math is unchanged.
+    var tn = tick_get_time_ns();
+    store64(tick_state + 8, tn / 1000000000);
+    store64(tick_state + 16, tn % 1000000000);
+    return 0;
+    #endif
     var ts[16];
     syscall(SYS_CLOCK_GETTIME, CLOCK_MONOTONIC, &ts);
     store64(tick_state + 8, load64(&ts));
@@ -40,10 +54,16 @@ fn tick_wait(): i64 {
 
     if (elapsed < TICK_NS) {
         var remain = TICK_NS - elapsed;
+        #ifdef CYRIUS_TARGET_AGNOS
+        var rem_ms = remain / 1000000;          # ns -> ms
+        if (rem_ms > 0) { syscall(41, rem_ms); }   # sleep_ms(#41)
+        #endif
+        #ifndef CYRIUS_TARGET_AGNOS
         var sleep_ts[16];
         store64(&sleep_ts, remain / 1000000000);
         store64(&sleep_ts + 8, remain % 1000000000);
         syscall(SYS_NANOSLEEP, &sleep_ts, 0);
+        #endif
     }
 
     store64(tick_state, load64(tick_state) + 1);

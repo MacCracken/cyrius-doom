@@ -36,6 +36,14 @@ var sound_queue_freq = 0;
 var sound_queue_ticks = 0;
 
 fn sound_init(): i64 {
+    #ifdef CYRIUS_TARGET_AGNOS
+    # agnos syscall 2 is getpid (not open) and 16 is kill (not ioctl) — opening
+    # "/dev/console" here would return a positive pid, falsely enable sound, and
+    # later kill() the process via the KIOCSOUND ioctl path. No PC speaker on
+    # agnos; leave sound disabled so set_freq/shutdown stay no-ops.
+    sound_enabled = 0;
+    return 0;
+    #endif
     # Try to open /dev/console for speaker control
     sound_fd = syscall(2, "/dev/console", 2, 0);
     if (sound_fd >= 0) {

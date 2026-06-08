@@ -87,6 +87,13 @@ enum TermConst {
 # c_cc[VTIME] = 16 + 5 = 21
 
 fn input_enable_raw_mode(): i64 {
+    #ifdef CYRIUS_TARGET_AGNOS
+    # agnos has no termios (its syscall 16 is kill, not ioctl). Stdin is the
+    # kernel line-discipline reader; nothing to set up here. Real key up/down
+    # input is a follow-on (needs a kernel raw/non-blocking scancode mode).
+    raw_mode_active = 1;
+    return 0;
+    #endif
     # Save original termios
     syscall(16, 0, TCGETS, &orig_termios);
 
@@ -119,6 +126,10 @@ fn input_enable_raw_mode(): i64 {
 }
 
 fn input_disable_raw_mode(): i64 {
+    #ifdef CYRIUS_TARGET_AGNOS
+    raw_mode_active = 0;
+    return 0;
+    #endif
     if (raw_mode_active == 1) {
         syscall(16, 0, TCSETS, &orig_termios);
         raw_mode_active = 0;
@@ -155,6 +166,16 @@ fn input_shutdown(): i64 {
 
 fn input_poll(): i64 {
     input_flags = 0;
+
+    #ifdef CYRIUS_TARGET_AGNOS
+    # CRITICAL: on agnos syscall 0 is EXIT and read#5 (fd 0) is BLOCKING +
+    # line-disciplined — a blocking line read here would freeze the game loop
+    # (and the Linux `syscall(0,...)` would literally exit the process). So
+    # provide no keys for now; the title/menu renders without input. Playable
+    # key up/down events are a follow-on once the kernel grows a raw/non-blocking
+    # keyboard mode. input_flags stays 0; input_quit untouched.
+    return 0;
+    #endif
 
     var buf[32];
     var n = syscall(0, 0, &buf, 32);

@@ -15,6 +15,7 @@ enum WadConst {
     WAD_DIR_ENTRY_SIZE = 24;
     WAD_MAX_LUMPS = 2048;
     WAD_LUMP_BUF_SIZE = 65536;
+    WAD_DATA_MAX = 8388608;        # 8 MB — DOOM1.WAD shareware is ~4.2 MB (agnos in-memory WAD)
 }
 
 # Typed errors for the WAD IO/parse boundary.
@@ -34,6 +35,8 @@ var wad_fd = -1;
 var wad_numlumps = 0;
 var wad_dir = 0;
 var wad_lump_buf = 0;
+var wad_data = 0;       # agnos: the whole WAD slurped into memory (no lseek on agnos)
+var wad_size = 0;       # agnos: bytes actually read into wad_data
 
 fn wad_alloc(): i64 {
     wad_dir = alloc(WAD_MAX_LUMPS * WAD_DIR_ENTRY_SIZE);
@@ -50,6 +53,21 @@ fn read_le32(buf): i64 {
     return load8(buf) | (load8(buf + 1) << 8) | (load8(buf + 2) << 16) | (load8(buf + 3) << 24);
 }
 
+# Read `size` bytes at absolute file `offset` into `dst`. The one IO chokepoint
+# the WAD reader needs: agnos has no lseek (its syscall 8 is dup), so on agnos we
+# serve from the in-memory WAD (slurped in wad_open); on Linux we lseek(8)+read
+# the live fd. Returns bytes read.
+fn wad_pread(dst, offset, size): i64 {
+    #ifdef CYRIUS_TARGET_AGNOS
+    if (offset < 0) { return 0; }
+    if (offset + size > wad_size) { return 0; }
+    memcpy(dst, wad_data + offset, size);
+    return size;
+    #endif
+    syscall(8, wad_fd, offset, 0);
+    return file_read(wad_fd, dst, size);
+}
+
 # Open a WAD file. Returns `Result<i64, WadError>` —
 # `Ok(0)` on success, typed `Err` on failure.
 # Call sites must inspect the Result (see main.cyr's `boot_init`
@@ -62,8 +80,24 @@ fn wad_open(path): i64 {
         return Err(WadOpenFailed);
     }
 
+    #ifdef CYRIUS_TARGET_AGNOS
+    # agnos has no lseek; slurp the whole WAD into memory, then serve every
+    # read (header / directory / lumps) by offset via wad_pread. read#5 advances
+    # the per-fd position, so a sequential chunk loop drains the file to EOF.
+    wad_data = alloc(WAD_DATA_MAX);
+    wad_size = 0;
+    var rn = 1;
+    while (rn > 0) {
+        if (wad_size + 65536 > WAD_DATA_MAX) { break; }
+        rn = file_read(wad_fd, wad_data + wad_size, 65536);
+        if (rn > 0) { wad_size = wad_size + rn; }
+    }
+    file_close(wad_fd);
+    wad_fd = -1;
+    #endif
+
     var hdr[12];
-    var n = file_read(wad_fd, &hdr, 12);
+    var n = wad_pread(&hdr, 0, 12);
     if (n != 12) {
         file_close(wad_fd);
         wad_fd = -1;
@@ -91,13 +125,11 @@ fn wad_open(path): i64 {
     var diroffset = read_le32(&hdr + 8);
     if (wad_numlumps > WAD_MAX_LUMPS) { wad_numlumps = WAD_MAX_LUMPS; }
 
-    # Seek to directory
-    syscall(8, wad_fd, diroffset, 0);
-
-    # Read directory entries (16 bytes each in WAD)
+    # Read directory entries (16 bytes each in WAD) — wad_pread seeks per entry
+    # (in-memory offset on agnos, lseek+read on Linux).
     var raw[16];
     for (var i = 0; i < wad_numlumps; i += 1) {
-        n = file_read(wad_fd, &raw, 16);
+        n = wad_pread(&raw, diroffset + i * 16, 16);
         if (n != 16) { break; }
 
         var entry = wad_dir + i * WAD_DIR_ENTRY_SIZE;
@@ -164,8 +196,7 @@ fn wad_read_lump(lump_index): i64 {
 
     # Zero-fill before read to prevent uninitialized data on partial read
     memset(wad_lump_buf, 0, size);
-    syscall(8, wad_fd, offset, 0);
-    var n = file_read(wad_fd, wad_lump_buf, size);
+    var n = wad_pread(wad_lump_buf, offset, size);
     if (n < 0) { return 0; }
     if (n != size) { sakshi_warn("partial lump read", 18); }
     return wad_lump_buf;
@@ -183,8 +214,7 @@ fn wad_read_lump_into(lump_index, buf, bufsize): i64 {
 
     # Zero-fill before read to prevent uninitialized data on partial read
     memset(buf, 0, size);
-    syscall(8, wad_fd, offset, 0);
-    return file_read(wad_fd, buf, size);
+    return wad_pread(buf, offset, size);
 }
 
 # ── Result-returning IO/parse boundary (v0.27.3) ─────────────────
@@ -208,8 +238,7 @@ fn wad_read_lump_r(lump_index): i64 {
     if (size == 0) { return Ok(wad_lump_buf); }
 
     memset(wad_lump_buf, 0, size);
-    syscall(8, wad_fd, offset, 0);
-    var n = file_read(wad_fd, wad_lump_buf, size);
+    var n = wad_pread(wad_lump_buf, offset, size);
     if (n < 0) { return Err(WadIoFailed); }
     if (n != size) { sakshi_warn("partial lump read", 18); }
     return Ok(wad_lump_buf);
@@ -229,8 +258,7 @@ fn wad_read_lump_into_r(lump_index, buf, bufsize): i64 {
     if (size == 0) { return Ok(0); }
 
     memset(buf, 0, size);
-    syscall(8, wad_fd, offset, 0);
-    var n = file_read(wad_fd, buf, size);
+    var n = wad_pread(buf, offset, size);
     if (n < 0) { return Err(WadIoFailed); }
     return Ok(n);
 }

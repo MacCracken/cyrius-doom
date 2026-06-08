@@ -53,6 +53,36 @@ fn framebuf_init(): i64 {
     screen_buf = alloc(64000);
     if (palette == 0) { palette = alloc(768); }
 
+    #ifdef CYRIUS_TARGET_AGNOS
+    # agnos: geometry via fbinfo(#38) — 24-byte struct {w@0 h@4 pitch@8 bpp@12
+    # fmt@16 flags@20}; pixels reach the screen via blit(#39), not /dev/fb0.
+    var fbi = alloc(24);
+    memset(fbi, 0, 24);
+    syscall(38, fbi, 24);
+    fb_xres  = load32(fbi + 0);
+    fb_yres  = load32(fbi + 4);
+    fb_pitch = load32(fbi + 8);
+    fb_bpp   = load32(fbi + 12);
+    if (fb_xres <= 0) { fb_xres = SCREEN_WIDTH; }
+    if (fb_yres <= 0) { fb_yres = SCREEN_HEIGHT; }
+    if (fb_bpp  <= 0) { fb_bpp  = 32; }
+    fb_fd = 1;                          # marker: FB present (blit#39 path)
+    var asx = fb_xres / SCREEN_WIDTH;
+    var asy = fb_yres / SCREEN_HEIGHT;
+    fb_scale = asx;
+    if (asy < fb_scale) { fb_scale = asy; }
+    if (fb_scale < 1) { fb_scale = 1; }
+    if (fb_scale > 3) { fb_scale = 3; }   # cap the blit-buffer size (heap budget)
+    fb_xoff = (fb_xres - SCREEN_WIDTH * fb_scale) / 2;
+    fb_yoff = (fb_yres - SCREEN_HEIGHT * fb_scale) / 2;
+    if (fb_xoff < 0) { fb_xoff = 0; }
+    if (fb_yoff < 0) { fb_yoff = 0; }
+    # tightly-packed scaled 32bpp blit buffer; the kernel blit(#39) places it at
+    # (fb_xoff,fb_yoff) honoring the real FB pitch, so no pitch stride here.
+    fb_buf = alloc(SCREEN_WIDTH * fb_scale * SCREEN_HEIGHT * fb_scale * 4);
+    return 0;
+    #endif
+
     fb_fd = file_open("/dev/fb0", 2, 0);
     if (fb_fd < 0) {
         fb_fd = -1;
@@ -209,7 +239,45 @@ fn framebuf_blit(): i64 {
     return 0;
 }
 
+# agnos: expand the 320x200 paletted frame into a tightly-packed scaled 32bpp
+# buffer (stride = scaled_w*4, no FB pitch), then the kernel blit(#39) places it
+# at (fb_xoff,fb_yoff) honoring the real pitch + clipping. Byte order B,G,R,X
+# matches the typical GOP BGRX FB (same expansion the Linux 32bpp path uses).
+#ifdef CYRIUS_TARGET_AGNOS
+fn framebuf_blit_agnos(): i64 {
+    var sw = SCREEN_WIDTH * fb_scale;
+    for (var sy = 0; sy < SCREEN_HEIGHT; sy += 1) {
+        var src_row = screen_buf + sy * SCREEN_WIDTH;
+        for (var sx = 0; sx < SCREEN_WIDTH; sx += 1) {
+            var po = load8(src_row + sx) * 3;
+            var r = load8(palette + po);
+            var g = load8(palette + po + 1);
+            var b = load8(palette + po + 2);
+            var p32 = 0xFF000000 | (r << 16) | (g << 8) | b;
+            for (var ry = 0; ry < fb_scale; ry += 1) {
+                var dst = fb_buf + (sy * fb_scale + ry) * sw * 4 + (sx * fb_scale) * 4;
+                for (var rx = 0; rx < fb_scale; rx += 1) {
+                    store32(dst, p32);
+                    dst += 4;
+                }
+            }
+        }
+    }
+    return 0;
+}
+#endif
+
 fn framebuf_flip(): i64 {
+    #ifdef CYRIUS_TARGET_AGNOS
+    if (fb_fd >= 0) {
+        framebuf_blit_agnos();
+        var asw = SCREEN_WIDTH * fb_scale;
+        var ash = SCREEN_HEIGHT * fb_scale;
+        # blit(src, w, h, dstxy = (dst_y<<16)|dst_x)
+        syscall(39, fb_buf, asw, ash, (fb_yoff << 16) | fb_xoff);
+    }
+    return 0;
+    #endif
     if (fb_fd >= 0) {
         framebuf_blit();
         var rows = SCREEN_HEIGHT * fb_scale;

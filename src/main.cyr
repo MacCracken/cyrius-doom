@@ -70,7 +70,7 @@ fn load_map(): i64 {
 # operator: any `Err` short-circuits and returns up to `doom_main`,
 # which `match`-es on the typed `WadError` payload to log the cause
 # and exit cleanly.  Replaces the prior inline `if (... != 0) {
-# sakshi_error(...); syscall(60, 1); }` boilerplate at the boot
+# sakshi_error(...); doom_exit(1); }` boilerplate at the boot
 # boundary.
 fn boot_init(wad_path): i64 {
     wad_open(wad_path)?;
@@ -81,15 +81,36 @@ fn boot_init(wad_path): i64 {
     return Ok(0);
 }
 
+# Portable process exit: agnos exit is syscall 0; Linux is 60.
+fn doom_exit(code): i64 {
+    #ifdef CYRIUS_TARGET_AGNOS
+    syscall(0, code);
+    #endif
+    #ifndef CYRIUS_TARGET_AGNOS
+    syscall(60, code);
+    #endif
+    return 0;
+}
+
 fn doom_main(): i64 {
     alloc_init();
     args_init();
     sakshi_info("cyrius-doom v0.28.0", 19);
 
+    # WAD path: argv[1] on Linux. On agnos, agnsh `run /bin/doom` passes no argv
+    # beyond the path, so default to /DOOM1.WAD (staged on the ext2 root).
+    var wadpath = 0;
+    #ifdef CYRIUS_TARGET_AGNOS
+    wadpath = "/DOOM1.WAD";
+    if (argc() >= 2) { wadpath = argv(1); }
+    #endif
+    #ifndef CYRIUS_TARGET_AGNOS
     if (argc() < 2) {
         sakshi_error("usage: doom <wad> [map] [--ppm]", 31);
-        syscall(60, 1);
+        doom_exit(1);
     }
+    wadpath = argv(1);
+    #endif
 
     # Init subsystems
     tables_init();
@@ -98,7 +119,7 @@ fn doom_main(): i64 {
     # `wad_open` + PLAYPAL load via `?`; any `Err` short-circuits
     # back here.  Match on the typed payload to log the cause and
     # exit with a non-zero status.
-    var br = boot_init(argv(1));
+    var br = boot_init(wadpath);
     if (is_err_result(br) == 1) {
         match load64(br + 8) {
             WadOpenFailed   => { sakshi_error("cannot open WAD file", 20); }
@@ -107,7 +128,7 @@ fn doom_main(): i64 {
             WadLumpNotFound => { sakshi_error("missing PLAYPAL lump", 20); }
             _               => { sakshi_error("boot init failed", 16); }
         }
-        syscall(60, 1);
+        doom_exit(1);
     }
     sakshi_info("wad loaded", 10);
 
@@ -173,11 +194,11 @@ fn doom_main(): i64 {
         framebuf_write_ppm("/tmp/doom_skill.ppm");
         sakshi_info("wrote /tmp/doom_skill.ppm", 25);
         wad_close();
-        syscall(60, 0);
+        doom_exit(0);
     }
 
     # Load initial map
-    if (load_map() != 0) { syscall(60, 1); }
+    if (load_map() != 0) { doom_exit(1); }
 
     # Game screenshot mode (also renders intermission)
     if (ppm_mode == 1) {
@@ -216,7 +237,7 @@ fn doom_main(): i64 {
         framebuf_write_ppm("/tmp/doom_inter.ppm");
         sakshi_info("wrote /tmp/doom_inter.ppm", 25);
         wad_close();
-        syscall(60, 0);
+        doom_exit(0);
     }
 
     # Interactive mode: show menu unless map specified on CLI
@@ -230,7 +251,7 @@ fn doom_main(): i64 {
             input_shutdown();
             wad_close();
             sakshi_info("quit from menu", 14);
-            syscall(60, 0);
+            doom_exit(0);
         }
     }
 
@@ -324,4 +345,4 @@ fn doom_main(): i64 {
 }
 
 doom_main();
-syscall(60, 0);
+doom_exit(0);
