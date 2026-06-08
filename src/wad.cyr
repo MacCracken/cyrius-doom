@@ -15,7 +15,7 @@ enum WadConst {
     WAD_DIR_ENTRY_SIZE = 24;
     WAD_MAX_LUMPS = 2048;
     WAD_LUMP_BUF_SIZE = 65536;
-    WAD_DATA_MAX = 8388608;        # 8 MB — DOOM1.WAD shareware is ~4.2 MB (agnos in-memory WAD)
+    WAD_DATA_MAX = 6291456;        # 6 MB (3x 2 MB pages) — DOOM1.WAD shareware is ~4.2 MB
 }
 
 # Typed errors for the WAD IO/parse boundary.
@@ -85,6 +85,8 @@ fn wad_open(path): i64 {
     # read (header / directory / lumps) by offset via wad_pread. read#5 advances
     # the per-fd position, so a sequential chunk loop drains the file to EOF.
     wad_data = alloc(WAD_DATA_MAX);
+    if (wad_data == 0) { syscall(1, 1, "WAD: alloc=0!\n", 13); }
+    if (wad_data != 0) { syscall(1, 1, "WAD: alloc ok\n", 14); }
     wad_size = 0;
     var rn = 1;
     var _wdbg = 1;
