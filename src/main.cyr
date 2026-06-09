@@ -93,15 +93,13 @@ fn doom_exit(code): i64 {
 }
 
 fn doom_main(): i64 {
-    #ifdef CYRIUS_TARGET_AGNOS
-    # agnos: warm-up mmap. Without it, doom faults at RIP=0 in ring 3 immediately
-    # after alloc_init's first mmap returns — the first mmap syscall from this
-    # freshly-exec'd process corrupts the ring-3 return state (kernel bug under
-    # investigation; agnsh is unaffected). A throwaway mmap makes alloc_init's the
-    # second mmap, which returns cleanly. Remove once the kernel first-mmap-return
-    # bug is fixed (see agnos docs/development/planning/doom-on-agnos-*).
-    syscall(27, 2097152);
-    #endif
+    # NOTE: the agnos warm-up-mmap workaround was REMOVED once the kernel
+    # root cause was fixed. The "first-mmap-return RIP=0" fault was NOT a
+    # first-mmap bug — it was the user stack being placed in the kernel
+    # identity-mapped range (pid>=2 → VA>=16 MB), so a later mmap's
+    # memset(phys,0,2MB) whose identity VA aliased the stack zeroed the live
+    # ring-3 stack → `ret` to RIP=0. agnos relocates user stacks to the
+    # non-identity arena top (0x3FC00000); no warm-up needed.
     alloc_init();
     args_init();
     sakshi_info("cyrius-doom v0.28.2", 19);
