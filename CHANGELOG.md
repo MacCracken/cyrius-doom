@@ -5,6 +5,25 @@ All notable changes to cyrius-doom will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.28.3] - 2026-06-09
+
+### Added
+
+- **Keyboard input on AGNOS — DOOM is now playable past the title screen.** The
+  `--agnos` build rendered its title but took no input (the loop sat on TITLEPIC
+  forever): the old `input_poll` agnos branch returned no keys, because AGNOS's only
+  stdin path (`read`#5) is blocking + line-disciplined + cooked-to-ASCII — fatal in
+  the frame loop and dropping key-up. It now drains the kernel's new **`kbscan`#42**
+  (a non-blocking raw Set-1 scancode poll), decodes make/break, and keeps `key_state`
+  as **persistent held state** (a key stays down until its break code arrives —
+  closer to real DOOM than the Linux press-then-clear path). Mapping: WASD move/strafe,
+  arrows turn (`0xE0` extended), Space/E use, F fire, R run, Tab automap, 1–7 weapons,
+  Q/Esc quit. `src/input.cyr`. Validated in QEMU via `agnos/scripts/doom-input-test.py`
+  (USB-xHCI keyboard + HMP `sendkey`): `w` advances title→menu, `q` quits.
+  Iron burn pending. Requires AGNOS kernel with `kbscan`#42.
+
 ## [0.28.2] - 2026-06-08
 
 **DOOM renders on AGNOS.** The `--agnos` build now boots to the title screen

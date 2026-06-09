@@ -88,9 +88,9 @@ enum TermConst {
 
 fn input_enable_raw_mode(): i64 {
     #ifdef CYRIUS_TARGET_AGNOS
-    # agnos has no termios (its syscall 16 is kill, not ioctl). Stdin is the
-    # kernel line-discipline reader; nothing to set up here. Real key up/down
-    # input is a follow-on (needs a kernel raw/non-blocking scancode mode).
+    # agnos has no termios (its syscall 16 is kill, not ioctl). Real key up/down
+    # comes from kbscan(#42) in input_poll (a non-blocking raw-scancode drain),
+    # not stdin/raw-mode — so there's nothing to set up here.
     raw_mode_active = 1;
     return 0;
     #endif
@@ -164,16 +164,88 @@ fn input_shutdown(): i64 {
 # Called once per tick. Reads all available bytes from stdin,
 # decodes escape sequences, updates key state and action flags.
 
+#ifdef CYRIUS_TARGET_AGNOS
+# Map a US-QWERTY Set-1 scancode (already masked to 7 bits; `ext`=1 if it
+# followed an 0xE0 extended prefix) to the key_state index this file's flag
+# builder reads — which are ASCII codes for letters/space/enter/tab and the
+# 128..131 block for the arrows. Returns -1 for keys DOOM ignores. Letters map
+# to lowercase ASCII so the same indices serve both input paths.
+fn doom_agnos_sc_to_key(sc, ext): i64 {
+    if (ext == 1) {
+        if (sc == 72) { return 128; }   # up
+        if (sc == 80) { return 129; }   # down
+        if (sc == 75) { return 130; }   # left
+        if (sc == 77) { return 131; }   # right
+        return 0 - 1;
+    }
+    if (sc == 17) { return 119; }       # w  -> forward
+    if (sc == 30) { return 97;  }       # a  -> strafe left
+    if (sc == 31) { return 115; }       # s  -> backward
+    if (sc == 32) { return 100; }       # d  -> strafe right
+    if (sc == 18) { return 101; }       # e  -> use
+    if (sc == 33) { return 102; }       # f  -> fire
+    if (sc == 19) { return 114; }       # r  -> run
+    if (sc == 16) { return 113; }       # q  -> quit
+    if (sc == 57) { return 32;  }       # space -> use
+    if (sc == 28) { return 10;  }       # enter
+    if (sc == 15) { return 9;   }       # tab -> automap
+    if (sc == 1)  { return 27;  }       # esc -> quit/back
+    if (sc >= 2 && sc <= 8) { return sc + 47; }   # 1..7 -> ASCII '1'..'7' (weapons)
+    return 0 - 1;
+}
+#endif
+
 fn input_poll(): i64 {
     input_flags = 0;
 
     #ifdef CYRIUS_TARGET_AGNOS
-    # CRITICAL: on agnos syscall 0 is EXIT and read#5 (fd 0) is BLOCKING +
-    # line-disciplined — a blocking line read here would freeze the game loop
-    # (and the Linux `syscall(0,...)` would literally exit the process). So
-    # provide no keys for now; the title/menu renders without input. Playable
-    # key up/down events are a follow-on once the kernel grows a raw/non-blocking
-    # keyboard mode. input_flags stays 0; input_quit untouched.
+    # Raw key up/down via kbscan(#42): a non-blocking drain of the kernel's
+    # Set-1 scancode buffer (read#5 is blocking + cooked + line-disciplined —
+    # fatal in a frame loop and drops key-up). We decode make/break here and
+    # keep key_state as PERSISTENT held state (a key stays down until its break
+    # code arrives) — closer to real DOOM than the Linux press-then-clear path.
+    # NB: distinct local names (ag_*) — Cyrius locals are function-scoped, and
+    # the Linux path below is still compiled (dead) under --agnos, so its loop
+    # vars (n / i / wi) would collide otherwise.
+    var ag_buf[64];
+    var ag_n = syscall(42, &ag_buf, 64);
+    var ag_i = 0;
+    var ag_ext = 0;
+    while (ag_i < ag_n) {
+        var ag_sc = load8(&ag_buf + ag_i);
+        ag_i += 1;
+        if (ag_sc == 224) { ag_ext = 1; continue; }   # 0xE0 extended-key prefix
+        var ag_rel = 0;
+        if (ag_sc > 127) { ag_rel = 1; ag_sc = ag_sc & 0x7F; }   # high bit = break (key up)
+        var ag_kc = doom_agnos_sc_to_key(ag_sc, ag_ext);
+        ag_ext = 0;
+        if (ag_kc >= 0) {
+            if (ag_rel == 1) { store64(key_state + ag_kc * 8, 0); }
+            else { store64(key_state + ag_kc * 8, 1); }
+        }
+    }
+
+    # Build action flags from the persistent key_state (NOT cleared here).
+    if (load64(key_state + KEY_W * 8) == 1) { input_flags |= INP_FORWARD; }
+    if (load64(key_state + KEY_UP * 8) == 1) { input_flags |= INP_FORWARD; }
+    if (load64(key_state + KEY_S * 8) == 1) { input_flags |= INP_BACKWARD; }
+    if (load64(key_state + KEY_DOWN * 8) == 1) { input_flags |= INP_BACKWARD; }
+    if (load64(key_state + KEY_LEFT * 8) == 1) { input_flags |= INP_TURN_LEFT; }
+    if (load64(key_state + KEY_RIGHT * 8) == 1) { input_flags |= INP_TURN_RIGHT; }
+    if (load64(key_state + KEY_A * 8) == 1) { input_flags |= INP_STRAFE_LEFT; }
+    if (load64(key_state + KEY_D * 8) == 1) { input_flags |= INP_STRAFE_RIGHT; }
+    if (load64(key_state + KEY_SPACE * 8) == 1) { input_flags |= INP_USE; }
+    if (load64(key_state + KEY_E * 8) == 1) { input_flags |= INP_USE; }
+    if (load64(key_state + 102 * 8) == 1) { input_flags |= INP_FIRE; }
+    if (load64(key_state + KEY_R * 8) == 1) { input_flags |= INP_RUN; }
+    if (load64(key_state + KEY_TAB * 8) == 1) { input_flags |= INP_TAB; }
+    if (load64(key_state + KEY_Q * 8) == 1) { input_quit = 1; }
+    if (load64(key_state + KEY_ESC * 8) == 1) { input_quit = 1; }
+
+    input_weapon = 0;
+    for (var ag_wi = 1; ag_wi <= 7; ag_wi += 1) {
+        if (load64(key_state + (48 + ag_wi) * 8) == 1) { input_weapon = ag_wi; }
+    }
     return 0;
     #endif
 
