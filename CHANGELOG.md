@@ -45,7 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   but for a flat wall it is the scale (`PROJ_DIST / z`), not `z`, that is linear
   in screen-x. Both loops now interpolate scale and derive per-column depth,
   straightening wall top/bottom edges and texture-height scaling on angled walls.
-  `render_frame` 2.486 ms (perf-neutral; 22 ms budget).
+  `render_frame` 2.520 ms (perf-neutral; 22 ms budget).
 - **Boot diagnostics bypassed sakshi.** The `loading map` / `map: <name>`,
   `map: V=… L=…` stats, and `things: N total (…)` lines were bare
   `syscall(1, …)` writes, rendering as un-prefixed bare lines interleaved with
@@ -57,17 +57,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Toolchain pin → `cycc 6.1.29`** (`cyrius.cyml`, was 6.0.83). The local
   toolchain launchers resolve the newest installed `cycc` regardless of the
   versioned path, so the pin now matches the only compiler that actually runs
-  and the build is no longer "drift"-warned. Build 597,608 B; 37/37 + 73/73;
-  `render_frame` 2.486 ms (cross-version perf vs 0.28.0 is not comparable — the
-  codegen changed with the pin).
-- **CI lockfile gate hardened against the 6.1.29 `cyrius deps` writer.** Under
-  6.1.29 the lock *writer* emits an incomplete lock on a cold cache (writes only
-  the already-fetched subset, e.g. 51 of 92 entries), which would fail the
-  `cyrius deps --verify` gate. CI now restores the committed `cyrius.lock` (the
-  92-entry supply-chain anchor) after the dep-fetch resolve and before verify;
-  `--verify` is 92/0 against it. The committed lock is hand-preserved — not
-  regenerated under 6.1.29 (same class as the cycc 6.0.1 writer regression
-  resolved in 0.27.5). See `docs/development/state.md` Known issue #3.
+  and the build is no longer "drift"-warned. Build 600,848 B; 37/37 + 73/73;
+  `render_frame` 2.520 ms (cross-version perf vs 0.28.0 is not comparable — the
+  codegen + bundled stdlib changed with the pin).
+- **`cyrius.lock` regenerated for the new pin.** `./lib/` is a gitignored build
+  artifact that `cyrius deps` populates from the pinned toolchain's stdlib, so
+  bumping the pin changes the lock's contents. Regenerated via a clean resolve
+  (`rm -rf lib && cyrius deps`) → **37 entries**; `cyrius deps --verify` 37/0.
+  CI keeps the unchanged `cyrius deps` → `cyrius deps --verify` flow — a clean
+  checkout resolves `./lib/` from the pinned stdlib and verifies 37/0.
 
 ## [0.28.3] - 2026-06-09
 

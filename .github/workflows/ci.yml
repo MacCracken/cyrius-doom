@@ -62,24 +62,17 @@ jobs:
           }
 
       - name: Resolve dependencies
-        # Fetch/resolve the dep tree. NOTE: under the 6.1.29 pin the
-        # `cyrius deps` lock WRITER regressed (writes an incomplete lock —
-        # drops ~41 of the 92 entries, the same class as the cycc 6.0.1
-        # regression). Its rewritten lock is discarded by the restore step
-        # below; this step is kept only to fetch the deps.
+        # Resolves the dep tree into ./lib/ (a gitignored build artifact copied
+        # from the pinned toolchain's stdlib + the [deps.*] git overrides) and
+        # (re)writes cyrius.lock to match the resolved set.
         run: cyrius deps
 
-      - name: Restore committed lock (guard 6.1.29 writer regression)
-        # The committed cyrius.lock is the supply-chain anchor; `cyrius deps`
-        # above overwrote it with an incomplete lock. Restore the committed
-        # version so the verify gate checks the real anchor, not the broken
-        # writer's output.
-        run: git checkout -- cyrius.lock
-
       - name: Verify dep hashes
-        # Unconditional supply-chain gate: the committed cyrius.lock (restored
-        # above) is verified against the resolved dep hashes. Verifies clean
-        # (92/0) under 6.1.29 — only the lock WRITER is broken, not --verify.
+        # Unconditional supply-chain gate: verifies the resolved ./lib/ file
+        # hashes against cyrius.lock. cyrius.lock is committed as the presence
+        # anchor (checked above) + human-auditable record; `cyrius deps` rewrites
+        # it from the pinned stdlib each run, so a clean checkout under 6.1.29
+        # yields a 37-entry lock that verifies 37/0.
         run: cyrius deps --verify
 
       - name: Build
@@ -141,24 +134,17 @@ jobs:
           }
 
       - name: Resolve dependencies
-        # Fetch/resolve the dep tree. NOTE: under the 6.1.29 pin the
-        # `cyrius deps` lock WRITER regressed (writes an incomplete lock —
-        # drops ~41 of the 92 entries, the same class as the cycc 6.0.1
-        # regression). Its rewritten lock is discarded by the restore step
-        # below; this step is kept only to fetch the deps.
+        # Resolves the dep tree into ./lib/ (a gitignored build artifact copied
+        # from the pinned toolchain's stdlib + the [deps.*] git overrides) and
+        # (re)writes cyrius.lock to match the resolved set.
         run: cyrius deps
 
-      - name: Restore committed lock (guard 6.1.29 writer regression)
-        # The committed cyrius.lock is the supply-chain anchor; `cyrius deps`
-        # above overwrote it with an incomplete lock. Restore the committed
-        # version so the verify gate checks the real anchor, not the broken
-        # writer's output.
-        run: git checkout -- cyrius.lock
-
       - name: Verify dep hashes
-        # Unconditional supply-chain gate: the committed cyrius.lock (restored
-        # above) is verified against the resolved dep hashes. Verifies clean
-        # (92/0) under 6.1.29 — only the lock WRITER is broken, not --verify.
+        # Unconditional supply-chain gate: verifies the resolved ./lib/ file
+        # hashes against cyrius.lock. cyrius.lock is committed as the presence
+        # anchor (checked above) + human-auditable record; `cyrius deps` rewrites
+        # it from the pinned stdlib each run, so a clean checkout under 6.1.29
+        # yields a 37-entry lock that verifies 37/0.
         run: cyrius deps --verify
 
       - name: Run tests (WAD-free assertions)

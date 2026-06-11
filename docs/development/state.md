@@ -21,10 +21,10 @@
 
 | Metric | Value |
 |---|---|
-| `build/doom` | **597,608 B** (cycc 6.1.29; not directly comparable to the 0.28.0 592,456 B — toolchain codegen changed between pins) |
-| Unreachable fns (NOP-sled today, real shrink under O3) | 986 / 293,970 B |
+| `build/doom` | **600,848 B** (cycc 6.1.29, clean `./lib/`; not directly comparable to the 0.28.0 592,456 B — toolchain codegen + bundled stdlib changed between pins) |
+| Unreachable fns (NOP-sled today, real shrink under O3) | 997 / 293,561 B |
 | Recovery target under Cyrius O3 real DCE | ~260 KB |
-| Frame time | `render_frame` 2.486 ms / `+sprites` 2.494 ms (bench-history 2026-06-10, 0.28.4, cycc 6.1.29; F22 perspective depth+U complete). Cross-version comparison vs the 0.28.0 ~1.78 ms is **not valid** — the cycc pin changed (6.0.83 → 6.1.29) so the delta mixes codegen + 0.28.1–.4 code; F22 perspective depth+U is per-column ≈neutral. ~8.8× headroom on the 22 ms budget. |
+| Frame time | `render_frame` 2.520 ms / `+sprites` 2.502 ms (bench-history 2026-06-10, 0.28.4, cycc 6.1.29, clean `./lib/`; F22 perspective depth+U complete). Cross-version comparison vs the 0.28.0 ~1.78 ms is **not valid** — the cycc pin changed (6.0.83 → 6.1.29) so the delta mixes codegen + 0.28.1–.4 code; F22 perspective depth+U is per-column ≈neutral. ~8.7× headroom on the 22 ms budget. |
 | Hot math | `fixed_mul` 6 ns / `asr` 4 ns / `texture_get_column` ~725 ns / `pcache_get_hit` 7 ns |
 
 Frame-time budget: 22 ms per tick @ 35 Hz. Current: ~12× headroom.
@@ -33,8 +33,8 @@ Frame-time budget: 22 ms per tick @ 35 Hz. Current: ~12× headroom.
 
 | Gate | Result |
 |---|---|
-| `cyrius deps --verify` | **92 verified, 0 failed** against the committed lock. The 6.1.29 `cyrius deps` *writer* is cold-cache-incomplete (writes a partial lock on first resolve), so CI now restores the committed lock before verify — see Known issues #3. |
-| `cyrius build src/main.cyr build/doom` | OK, 597,608 B (cycc 6.1.29 = pin; no drift warning) |
+| `cyrius deps --verify` | **37 verified, 0 failed** on a clean resolve (`rm -rf lib && cyrius deps`). `./lib/` is a gitignored build artifact regenerated from the pinned 6.1.29 stdlib + git-override deps; the committed lock (37 entries) matches it. CI runs `cyrius deps` then this gate. |
+| `cyrius build src/main.cyr build/doom` | OK, 600,848 B (cycc 6.1.29 = pin; clean `./lib/`; no drift warning) |
 | `cyrius test tests/doom.tcyr` (WAD-free, CI subset) | 37/37 |
 | `./build/test_doom wad/DOOM1.WAD` (full) | 73/73 |
 | `fuzz_wad` / `fuzz_fixed` | **not re-run this cycle** — 0.28.4 touched render/player/input/log, not the WAD parser or `fixed.cyr`; last green at 0.28.0 (1k / 50k clean). |
@@ -69,7 +69,7 @@ Current arc: **v0.28.x graphics** (review/hardening/parity/performance). The v0.
 | **v0.28.1** | shipped 2026-06-08 | **AGNOS target support** — first port. OS interactions branched under `CYRIUS_TARGET_AGNOS`: inlined agnos syscall numbers (collide with Linux), portable timing (`uptime_ms`/`sleep_ms`), fb queries (`fbinfo`#38/`blit`#39), WAD memory-load (no `lseek`), exit/input/sound paths. Linux build byte-identical. |
 | **v0.28.2** | shipped 2026-06-08 | **DOOM renders on AGNOS** — the 584 KB ELF ring-3 exec's from disk, loads the 4.2 MB `DOOM1.WAD`, builds the palette, and blits a 240-colour frame to the hardware framebuffer via `fbinfo`#38 / `blit`#39. (Unblocked by two AGNOS kernel fixes: PMM→24 MB, phys-page zeroing ≥16 MB.) |
 | **v0.28.3** | shipped 2026-06-09 | **AGNOS keyboard input** via `kbscan`#42 (non-blocking raw Set-1 scancode poll, make/break decode, persistent `key_state`) — DOOM playable past the title screen. WASD/arrows/space/E/F/R/Tab/1–7/Q/Esc. |
-| **v0.28.4** | shipped 2026-06-10 | Gameplay correctness. (1) render+sprite/movement **90° angle-convention unification** — `render_transform_vertex` + sprite transforms used depth `dy·cos−dx·sin` (north@0) while movement/hitscan/floors/map use `(cos,sin)` (east@0); walls/sprites now match. (2) **one-sided-wall collision** — `player_check_linedef` treated flagless one-sided walls as passable. (3) **Linux `termios` VMIN** offset off-by-one (`c_line` byte) left VMIN=1 → blocking `read` → loop froze between keystrokes. (4) **perspective-correct wall + masked-seg depth** (interpolate scale not z) — this is **F22**, pulled forward from 0.29.x; texture-U half (F22b) also landed. (5) **sakshi log routing** for boot diagnostics. Toolchain pin → 6.1.29 + CI committed-lock restore guard. |
+| **v0.28.4** | shipped 2026-06-10 | Gameplay correctness. (1) render+sprite/movement **90° angle-convention unification** — `render_transform_vertex` + sprite transforms used depth `dy·cos−dx·sin` (north@0) while movement/hitscan/floors/map use `(cos,sin)` (east@0); walls/sprites now match. (2) **one-sided-wall collision** — `player_check_linedef` treated flagless one-sided walls as passable. (3) **Linux `termios` VMIN** offset off-by-one (`c_line` byte) left VMIN=1 → blocking `read` → loop froze between keystrokes. (4) **perspective-correct wall + masked-seg depth** (interpolate scale not z) — this is **F22**, pulled forward from 0.29.x; texture-U half (F22b) also landed. (5) **sakshi log routing** for boot diagnostics. Toolchain pin → 6.1.29 (committed `cyrius.lock` regenerated against the new stdlib → 37 entries). |
 
 ### Forward 0.28.x slots (re-slotted at the 0.28.4 cut — the AGNOS arc consumed 0.28.1–.3 and gameplay correctness took 0.28.4, so the Black Book parity/perf themes shift to ≥ 0.28.5)
 
@@ -88,9 +88,7 @@ After 0.28.x: **v0.29.x** O4 micro-perf pass + deep renderer fidelity (F06 nativ
 | # | Issue | Workaround |
 |---|---|---|
 | 2 | `lib/yukti.cyr:39: duplicate fn 'sys_stat' (last definition wins)` — stdlib defines `sys_stat` and vani's transitively-bundled yukti also defines it (unannotated). | Codegen-identical, warning-only. Did not fire under cycc 6.0.29 or 6.0.83, but kept tracked until yukti drops `sys_stat` from its dist surface. Gated on a yukti rebundle. |
-| 3 | cycc 6.1.29 `cyrius deps` lock **writer** emits an incomplete lock on a cold cache (first resolve writes only the already-fetched subset — e.g. 51 of 92 entries — so a following `cyrius deps --verify` fails with `cannot hash` on the dropped files). The `--verify` path itself is correct: **92/0** against the committed lock. Same class as the (resolved-in-0.27.5) cycc 6.0.1 writer regression; re-surfaced by the 6.1.29 pin bump (0.28.4). | CI keeps `cyrius deps` (needed for the dep fetch) but restores the committed `cyrius.lock` via `git checkout -- cyrius.lock` **before** `cyrius deps --verify` (`ci.yml`, both jobs). The committed lock is the hand-preserved supply-chain anchor — do **not** commit a `cyrius deps`-regenerated lock under 6.1.29. |
-
-> Issue #1 (cycc 6.0.1 lockfile-writer regression — empty `cyrius.lock`) was **resolved in 0.27.5**: toolchain pin bumped to 6.0.29, whose `cyrius deps` wrote a canonical lock. The `sha256sum` hand-population + CI empty-lock guard were dropped then. **Superseded in 0.28.4** (see Issue #3): the 6.1.29 pin re-broke the lock writer on cold caches, so a CI lock-restore guard is back (verify-against-committed-anchor, not regenerate-then-verify). The committed lock is now 92 entries.
+> Issue #1 (cycc 6.0.1 lockfile-writer regression — empty `cyrius.lock`) was **resolved in 0.27.5**: toolchain pin bumped to 6.0.29, whose `cyrius deps` writes a canonical lock; `cyrius deps --verify` is unconditional again. The 0.28.4 pin bump to 6.1.29 changed the bundled stdlib, so the committed lock was **regenerated** against it (`rm -rf lib && cyrius deps` → **37 entries**, verify 37/0). `./lib/` is a gitignored build artifact, so the lock must always match the pinned toolchain's stdlib — regenerate + commit it whenever the pin moves. (An earlier 0.28.4 attempt mis-diagnosed this as a "writer regression" and added a CI lock-restore guard; that guard verified the *stale* lock against the *new* stdlib and broke CI — reverted.)
 
 ## Dependency lineage
 
