@@ -10,6 +10,8 @@
 
 ## Slot map (forward)
 
+> ⚠️ **Stale numbering (2026-06-10):** the v0.28.1–.4 version numbers were consumed by AGNOS bring-up (.1–.3) and the 0.28.4 gameplay-correctness pass — **not** by the parity/perf themes listed below, which are still pending but mis-numbered. `CHANGELOG.md` + `completed-phases.md` are authoritative for what actually shipped. Re-slot this table at the next cycle-open: the Visplane / sprite-clip / sky-parity / structural-perf (F12/F15) work below needs fresh numbers ≥ 0.28.5. F22 already shipped in 0.28.4.
+
 | Slot | Theme | Status |
 |---|---|---|
 | **v0.28.1** | Visplane pool rewrite (Black Book ch.9 / F08); rides the `lib/test.cyr` `test_each` refactor | next |
@@ -18,7 +20,7 @@
 | **v0.28.4** | Structural perf — sidedef/sector index + thing-sector caches (F12 / F15) | queued, bench-gated |
 | **v0.28.5–.7** | Original Black Book sub-audits re-slotted: BSP+collision, game-state, security-refresh | queued |
 | **v0.28.x** | yukti `sys_stat` dup-fn cleanup | gated on yukti rebundle (likely moot) |
-| **v0.29.x** | O4 micro-perf pass + deep renderer fidelity (F06 native-scale midtex, F22 perspective-correct U/depth) | gated on Cyrius O4 regalloc (v6.4.x) |
+| **v0.29.x** | O4 micro-perf pass + deep renderer fidelity (F06 native-scale midtex) — **F22 perspective-correct U/depth shipped early in 0.28.4** | gated on Cyrius O4 regalloc (v6.4.x) |
 | **v1.0.0** | Ship: full E1 + multiple display backends + AGNOS integration | future |
 
 > **v0.28.0 shipped 2026-06-07** (graphics review/hardening/audit/performance) — moved to [`completed-phases.md`](completed-phases.md). At the user's direction this graphics pass *became* 0.28.0, and the previously-roadmapped Black Book audit + lingering 0.27.x housekeeping were pushed **behind** it (re-slotted below).
@@ -117,7 +119,7 @@ Re-targeted from the original 0.27.0 thesis. Cyrius's compiler-optimization trac
 | 4 | Re-bench hot paths on O2 / O3 / O4-enabled toolchain | Pending | `bench-history.csv` row per upstream phase landing, with A/B before/after to confirm the compiler wins stick. |
 | 5 | Revisit manual patterns only after O4 | Pending | Any remaining 5–10 % wins from column-loop restructure are worth chasing at that point; before then, no. |
 | 6 | Native-scale midtexture w/ peg anchoring | Needs an `rw_scale` path | F06 — deep renderer fidelity; the engine is uniformly stretch-to-section today, so there's no scale path to hook onto |
-| 7 | Perspective-correct U / depth across segs | Renderer rework | F22 — engine is consistently affine (screen-linear frac/depth/U); a half-fix is worse than none |
+| 7 | Perspective-correct U / depth across segs | ✅ **DONE — 0.28.4** | F22 — shipped: interpolate scale (∝ 1/z) for depth and u·scale for U, both ÷ the interpolated scale, in `render_seg` + `render_masked_segs`. Depth + U landed together (the "half-fix worse than none" concern is exactly why both, not just depth, were corrected in one pass). |
 
 ---
 

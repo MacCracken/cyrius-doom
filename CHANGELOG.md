@@ -52,6 +52,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the structured `[ts] [INFO]` log. All three now route through `sakshi_info`
   (the two stat lines via `fmt_sprintf`), so they carry the standard prefix.
 
+### Changed
+
+- **Toolchain pin → `cycc 6.1.29`** (`cyrius.cyml`, was 6.0.83). The local
+  toolchain launchers resolve the newest installed `cycc` regardless of the
+  versioned path, so the pin now matches the only compiler that actually runs
+  and the build is no longer "drift"-warned. Build 597,368 B; 37/37 + 73/73;
+  `render_frame` 2.594 ms (cross-version perf vs 0.28.0 is not comparable — the
+  codegen changed with the pin).
+- **CI lockfile gate hardened against the 6.1.29 `cyrius deps` writer.** Under
+  6.1.29 the lock *writer* emits an incomplete lock on a cold cache (writes only
+  the already-fetched subset, e.g. 51 of 92 entries), which would fail the
+  `cyrius deps --verify` gate. CI now restores the committed `cyrius.lock` (the
+  92-entry supply-chain anchor) after the dep-fetch resolve and before verify;
+  `--verify` is 92/0 against it. The committed lock is hand-preserved — not
+  regenerated under 6.1.29 (same class as the cycc 6.0.1 writer regression
+  resolved in 0.27.5). See `docs/development/state.md` Known issue #3.
+
 ## [0.28.3] - 2026-06-09
 
 ### Added

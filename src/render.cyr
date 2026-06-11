@@ -634,6 +634,18 @@ fn render_seg(seg_idx): i64 {
     var wscale1 = fixed_div(PROJ_DIST, ty1);
     var wscale2 = fixed_div(PROJ_DIST, ty2);
 
+    # Perspective-correct texture-U (F22): interpolate u*scale (proportional to
+    # u/z) and the scale (proportional to 1/z) separately, then U = (u/z)/(1/z)
+    # = lerp(uow) / col_scale. Interpolating u linearly in screen-x (affine)
+    # sheared textures on oblique walls; a perspective-correct DEPTH paired with
+    # an affine U is exactly the "half fix worse than none" the roadmap warned
+    # about, so depth and U are corrected together. u_left/u_right are the texel
+    # U at the sx1/sx2 endpoints (same mapping the old affine line used).
+    var u_left  = sd_xoff + seg_offset;
+    var u_right = sd_xoff + seg_offset + fixed_to_int(seg_len);
+    var uow1 = u_left * wscale1;
+    var uow2 = u_right * wscale2;
+
     # Draw columns from sx1 to sx2
     for (var col = sx1; col <= sx2; col += 1) {
         # Skip fully occluded columns
@@ -734,9 +746,9 @@ fn render_seg(seg_idx): i64 {
             }
         }
 
-        # Texture U coordinate for this column
-        # Interpolate along seg length, add sidedef x offset
-        var tex_u = fixed_to_int(fixed_mul(frac, seg_len)) + sd_xoff + seg_offset;
+        # Texture U coordinate for this column (perspective-correct, F22):
+        # (u/z interpolated) / (1/z interpolated) = lerp(uow) / col_scale.
+        var tex_u = fixed_lerp(uow1, uow2, frac) / col_scale;
 
         if (is_twosided != 0) {
             var back_ceil_screen = HALF_HEIGHT - fixed_to_int(
@@ -1005,6 +1017,11 @@ fn render_masked_segs(): i64 {
 
         var mscale1 = fixed_div(PROJ_DIST, mty1);
         var mscale2 = fixed_div(PROJ_DIST, mty2);
+        # Perspective-correct U endpoints (F22), matching render_seg.
+        var mu_left  = mxoff + mseg_off;
+        var mu_right = mxoff + mseg_off + fixed_to_int(mseg_len);
+        var muow1 = mu_left * mscale1;
+        var muow2 = mu_right * mscale2;
         for (var col = sx1; col <= sx2; col += 1) {
             # frac linear in screen-x (texture-U). Depth is perspective-correct.
             var frac = 0;
@@ -1029,8 +1046,8 @@ fn render_masked_segs(): i64 {
 
             var col_lv = render_wall_light(mlight, col_scale);
 
-            # Texture U coordinate
-            var tex_u = fixed_to_int(fixed_mul(frac, mseg_len)) + mxoff + mseg_off;
+            # Texture U coordinate (perspective-correct, F22)
+            var tex_u = fixed_lerp(muow1, muow2, frac) / col_scale;
 
             # Get texture column
             var th = texture_get_column(mtex, tex_u, tex_col_buf);

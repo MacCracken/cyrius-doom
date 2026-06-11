@@ -1,6 +1,6 @@
 # Documentation Health — cyrius-doom
 
-> **Last refresh**: 2026-06-07 (v0.28.0 — graphics hardening/audit/perf + toolchain → 6.0.83; CHANGELOG / state.md / roadmap.md / completed-phases.md / CLAUDE.md / overview.md rows touched, new audit doc added). Prior refresh: 2026-05-21 v0.27.3. | **Refresh cadence**: opportunistic — update the affected row when the underlying doc is touched. No periodic sweep cron.
+> **Last refresh**: 2026-06-10 (v0.28.4 — gameplay correctness + toolchain → 6.1.29; CHANGELOG / state.md / CLAUDE.md rows touched. **NB:** doc-health + state.md skipped their 0.28.1–.3 refreshes — CHANGELOG is authoritative for those). Prior refresh: 2026-06-07 v0.28.0. | **Refresh cadence**: opportunistic — update the affected row when the underlying doc is touched. No periodic sweep cron.
 >
 > **Scope**: this repo only (`cyrius-doom`) — the entire `docs/` tree plus root-level docs (README, CHANGELOG, CLAUDE.md, CONTRIBUTING, SECURITY, CODE_OF_CONDUCT). VERSION is tracked as a structural artifact, not a doc.
 >
@@ -32,8 +32,8 @@ This is a **ledger**, not a one-time audit. Rewrite-in-place as docs change.
 | File | Last touched | Status | Action |
 |---|---|---|---|
 | `README.md` | 2026-04-30 | ✅ Fresh | Top-level project README. Verify in passing at next minor closeout — pre-dates the v0.27.x cycle but content is durable. |
-| `CHANGELOG.md` | 2026-06-07 | ✅ Fresh | **Source of truth per CLAUDE.md.** Through v0.28.0 (graphics hardening/audit/perf). Refreshed every release. |
-| `CLAUDE.md` | 2026-06-07 | ✅ Fresh | Durable content only (state delegated to `state.md`). Illustrative toolchain ref bumped to `cycc 6.0.83` at v0.28.0. Project-identity / Goal / Process / Rules / Cyrius Conventions all durable. |
+| `CHANGELOG.md` | 2026-06-10 | ✅ Fresh | **Source of truth per CLAUDE.md.** Through v0.28.4 (gameplay correctness: angle-convention/collision/termios/perspective-depth/logging + toolchain 6.1.29 + CI lock guard). Refreshed every release. |
+| `CLAUDE.md` | 2026-06-10 | ✅ Fresh | Durable content only (state delegated to `state.md`). Toolchain ref → `cycc 6.1.29` and the Lockfile (Work-Loop §7) + CI `cyrius.lock` notes rewritten for the 6.1.29 writer re-regression (verify-against-committed-anchor, restore guard) at v0.28.4. Project-identity / Goal / Process / Rules / Cyrius Conventions all durable. |
 | `CONTRIBUTING.md` | 2026-04-30 | ✅ Fresh | Verify in passing at next minor closeout — durable content. |
 | `SECURITY.md` | 2026-04-30 | ✅ Fresh | Public reporting policy. Durable; pre-dates v0.27.x but no surface change. |
 | `CODE_OF_CONDUCT.md` | 2026-04-30 | ✅ Fresh | Standard CoC. Durable. |
@@ -65,7 +65,7 @@ No numbered architecture notes yet — the convention is `NNN-kebab-case-title.m
 
 | File | Last touched | Status | Action |
 |---|---|---|---|
-| `state.md` | 2026-06-07 | ✅ Fresh | **Rotates every release.** Through v0.28.0 — binary 592,456 B, `render_frame` ~1.78 ms, toolchain 6.0.83, 0.28.0 slot shipped, forward 0.28.1–.7 slots listed, known-issue #2 re-confirmed under 6.0.83. |
+| `state.md` | 2026-06-10 | 🟡 Partial | **Rotates every release.** Brought current to v0.28.4 — binary 597,368 B, `render_frame` 2.594 ms, toolchain 6.1.29, 0.28.4 slot row added, lock-writer Known issue #3 added. **Gap:** the 0.28.1–.3 slot rows were never recorded (those refreshes were skipped) — CHANGELOG is authoritative for .1–.3; backfill the slot map + completed-phases when convenient. |
 | `roadmap.md` | 2026-06-07 | ✅ Fresh | **Updated at v0.28.0 ship** — graphics arc re-anchored: 0.28.0 moved to completed-phases; the previously-roadmapped Black Book audit + 0.27.x housekeeping re-slotted **behind** it as 0.28.1–.7. Slot map leads with 0.28.1. |
 | `completed-phases.md` | 2026-06-07 | ✅ Fresh | **Updated at v0.28.0 ship** — new v0.28.x section + v0.28.0 row; v0.27.x arc marked complete. Chronological one-line index. |
 | `roadmap-crossover.md` | 2026-04-30 | 🟠 Read-through | AgentWorld / secureyeoman crossover doc — spatial threat visualization via the DOOM engine. Not touched during the v0.27.x cycle; status against current secureyeoman scope not verified. Read-through at next minor closeout. |
