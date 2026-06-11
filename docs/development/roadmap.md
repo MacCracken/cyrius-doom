@@ -10,22 +10,22 @@
 
 ## Slot map (forward)
 
-> ⚠️ **Stale numbering (2026-06-10):** the v0.28.1–.4 version numbers were consumed by AGNOS bring-up (.1–.3) and the 0.28.4 gameplay-correctness pass — **not** by the parity/perf themes listed below, which are still pending but mis-numbered. `CHANGELOG.md` + `completed-phases.md` are authoritative for what actually shipped. Re-slot this table at the next cycle-open: the Visplane / sprite-clip / sky-parity / structural-perf (F12/F15) work below needs fresh numbers ≥ 0.28.5. F22 already shipped in 0.28.4.
+> **Re-slotted at the 0.28.4 cut (2026-06-10):** v0.28.1–.3 shipped the AGNOS bring-up arc (target support → renders on AGNOS → keyboard input) and v0.28.4 shipped gameplay correctness — see `completed-phases.md` for all four. The Black Book parity / perf themes below therefore start at **v0.28.5**. F22 (perspective-correct U/depth) was pulled forward and shipped in 0.28.4, so it is off the v0.29.x list.
 
 | Slot | Theme | Status |
 |---|---|---|
-| **v0.28.1** | Visplane pool rewrite (Black Book ch.9 / F08); rides the `lib/test.cyr` `test_each` refactor | next |
-| **v0.28.2** | Sprite + masked-seg depth-aware clipping (F07 / F05b / F05) | after 0.28.1 |
-| **v0.28.3** | Sky + wall-mapping parity (F09) | queued |
-| **v0.28.4** | Structural perf — sidedef/sector index + thing-sector caches (F12 / F15) | queued, bench-gated |
-| **v0.28.5–.7** | Original Black Book sub-audits re-slotted: BSP+collision, game-state, security-refresh | queued |
+| **v0.28.5** | Visplane pool rewrite (Black Book ch.9 / F08, subsumes F13); rides the `lib/test.cyr` `test_each` refactor | next |
+| **v0.28.6** | Sprite + masked-seg depth-aware clipping (F07 / F05b / F05) | after 0.28.5 |
+| **v0.28.7** | Sky + wall-mapping parity (F09) | queued |
+| **v0.28.8** | Structural perf — sidedef/sector index + thing-sector caches (F12 / F15) | queued, bench-gated |
+| **v0.28.9–.11** | Original Black Book sub-audits: BSP+collision (.9), game-state (.10), security-refresh (.11) | queued |
 | **v0.28.x** | yukti `sys_stat` dup-fn cleanup | gated on yukti rebundle (likely moot) |
 | **v0.29.x** | O4 micro-perf pass + deep renderer fidelity (F06 native-scale midtex) — **F22 perspective-correct U/depth shipped early in 0.28.4** | gated on Cyrius O4 regalloc (v6.4.x) |
 | **v1.0.0** | Ship: full E1 + multiple display backends + AGNOS integration | future |
 
 > **v0.28.0 shipped 2026-06-07** (graphics review/hardening/audit/performance) — moved to [`completed-phases.md`](completed-phases.md). At the user's direction this graphics pass *became* 0.28.0, and the previously-roadmapped Black Book audit + lingering 0.27.x housekeeping were pushed **behind** it (re-slotted below).
 
-The current arc is **v0.28.x — graphics** (review / hardening / parity / performance). The language-adoption arc (v0.27.x) is complete. v0.28.0 was anchored on a multi-agent audit of the render path (`docs/audit/2026-06-07-v0.28-graphics-hardening.md`); it shipped the memory-safety hardening + safe perf, and the parity items it surfaced now drive 0.28.1–0.28.7. The O4-gated perf micro-pass and the deepest renderer-fidelity work remain at v0.29.x.
+The current arc is **v0.28.x — graphics** (review / hardening / parity / performance). The language-adoption arc (v0.27.x) is complete. v0.28.0 was anchored on a multi-agent audit of the render path (`docs/audit/2026-06-07-v0.28-graphics-hardening.md`); it shipped the memory-safety hardening + safe perf, and the parity items it surfaced now drive 0.28.5–0.28.11 (0.28.1–.4 were consumed by the AGNOS bring-up arc and the 0.28.4 gameplay-correctness cut). The O4-gated perf micro-pass and the deepest renderer-fidelity work remain at v0.29.x.
 
 ---
 
@@ -33,7 +33,7 @@ The current arc is **v0.28.x — graphics** (review / hardening / parity / perfo
 
 The graphics review/hardening/audit/performance pass **became v0.28.0** (shipped — see `completed-phases.md`). The previously-roadmapped DOOM Black Book audit (originally v0.25.0, re-anchored to v0.28.x) and the lingering language-arc housekeeping were pushed **behind** it, re-slotted below. Scope across the arc: close the render-path parity gaps the 0.28.0 audit surfaced, chapter-by-chapter against Fabien Sanglard's *Game Engine Black Book: DOOM* + the Unofficial DOOM Specs, with PPM diffs as ground truth. Finding IDs (Fnn) reference [`docs/audit/2026-06-07-v0.28-graphics-hardening.md`](../audit/2026-06-07-v0.28-graphics-hardening.md).
 
-### v0.28.1 — Visplane pool rewrite (keystone parity)
+### v0.28.5 — Visplane pool rewrite (keystone parity)
 
 The per-row single-`(x1,x2,flat,light)` visplane model can't represent two flats on one screen row, and the farthest seg to touch a row wins (BSP is front-to-back) — so a farther sector's flat can overwrite a nearer one. Replace with a real visplane pool.
 
@@ -44,7 +44,7 @@ The per-row single-`(x1,x2,flat,light)` visplane model can't represent two flats
 | 3 | `lib/test.cyr` `test_each` refactor (rides along) | v5.7.43 stdlib | ~32 asserts collapsed; the rewrite needs a healthy PPM-diff harness |
 | 4 | Span shape + count vs reference | E1M1 / E1M3 / E1M5 | flag-gated, PPM-diffed |
 
-### v0.28.2 — Sprite + masked-seg depth-aware clipping
+### v0.28.6 — Sprite + masked-seg depth-aware clipping
 
 The single collapsed `clip_top`/`clip_bottom` pair holds the *farthest* opening at draw time, so sprites and masked midtextures can't be clipped against walls at the right depth. Build the per-drawseg silhouette infrastructure, then the dependent fixes.
 
@@ -55,14 +55,14 @@ The single collapsed `clip_top`/`clip_bottom` pair holds the *farthest* opening 
 | 3 | Masked-seg `clip_solid` over-paint guard | — | F05 — correct **only** once F07/F05b land; the bare guard over-clips the "near grate / far wall" case (probed no-op on E1M1–E1M7, so 0.28.0 correctly skipped it) |
 | 4 | Sprite-vs-sprite + sprite-vs-masked clipping | Black Book ch. 11 | completeness |
 
-### v0.28.3 — Sky + wall-mapping parity
+### v0.28.7 — Sky + wall-mapping parity
 
 | # | Item | Reference | Detail |
 |---|------|-----------|--------|
 | 1 | Sky horizon anchoring + corrected angular scale | Black Book ch. 8 (R_DrawSkyColumn) | F09; sky-Y to the horizon (not per-column `ct`), per-column view-angle table; never lit |
 | 2 | Brightness / lighting A-B vs reference | Black Book ch. 8 (COLORMAP) | per-light-level PPM diff (carries the F25 verification forward) |
 
-### v0.28.4 — Structural performance (O4-independent, bench-gated)
+### v0.28.8 — Structural performance (O4-independent, bench-gated)
 
 | # | Item | Detail |
 |---|------|--------|
@@ -70,7 +70,7 @@ The single collapsed `clip_top`/`clip_bottom` pair holds the *farthest* opening 
 | 2 | Per-thing sector/floor-height cache | F15 — re-walk BSP only when the thing moves |
 | 3 | Automap line pre-clip | F26 — optional; negligible (overlay, not hot path) |
 
-### v0.28.5 — BSP + collision audit (original Black Book sub-phase)
+### v0.28.9 — BSP + collision audit (original Black Book sub-phase)
 
 | # | Item | Reference | Detail |
 |---|------|-----------|--------|
@@ -79,7 +79,7 @@ The single collapsed `clip_top`/`clip_bottom` pair holds the *farthest* opening 
 | 3 | Wall-slide collision | Black Book ch. 12 | slide against angled walls matches reference |
 | 4 | Blockmap query correctness (+ C3 BLOCKMAP bounds) | Unofficial Specs §4.7 | cell-list parity on E1M6; re-verify the 2026-04-13 C3 finding |
 
-### v0.28.6 — Game state audit (original Black Book sub-phase)
+### v0.28.10 — Game state audit (original Black Book sub-phase)
 
 | # | Item | Reference | Detail |
 |---|------|-----------|--------|
@@ -87,7 +87,7 @@ The single collapsed `clip_top`/`clip_bottom` pair holds the *farthest* opening 
 | 2 | Episode-end intermission | Unofficial Specs §1.10 | E1M8 boss kill → text → bunny scroll |
 | 3 | Visplane budget under stress | Unofficial Specs §10.4 | E1M9 + max things: no overflow (bounded by the F08 pool) |
 
-### v0.28.7 — Security audit refresh
+### v0.28.11 — Security audit refresh
 
 Partly discharged early by 0.28.0 (F01/F02/F03/F19 patch-decode propagation + F17 OOB-write fix). Remaining:
 
@@ -100,7 +100,7 @@ Partly discharged early by 0.28.0 (F01/F02/F03/F19 patch-decode propagation + F1
 ### Gated / watch (carried forward)
 
 - **yukti `sys_stat` dup-fn cleanup** — strike known-issue #2 once yukti re-bundles without `sys_stat`. Did not fire under 6.0.29 or 6.0.83; likely already moot. Gated on a yukti rebundle. Does not block any 0.28.x graphics slot.
-- **`texture.cyr` Result adoption** — `texture_get_column` typed errors; revisit alongside the 0.28.1 visplane rewrite.
+- **`texture.cyr` Result adoption** — `texture_get_column` typed errors; revisit alongside the 0.28.5 visplane rewrite.
 - **`lib/random.cyr`** (v5.9.x) — deterministic per-tick PRNG; not adopted unless wanted for intermission/menu polish.
 - **`#io` effect annotations** (v5.11.x) — defer until Cyrius pins the annotation surface as stable.
 - **mabda 3.0 fold / bayan-ganita carve** — doom uses no JSON/TOML, no-op for us.

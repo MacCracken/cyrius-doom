@@ -1,6 +1,6 @@
 # Documentation Health — cyrius-doom
 
-> **Last refresh**: 2026-06-10 (v0.28.4 — gameplay correctness + toolchain → 6.1.29; CHANGELOG / state.md / CLAUDE.md rows touched. **NB:** doc-health + state.md skipped their 0.28.1–.3 refreshes — CHANGELOG is authoritative for those). Prior refresh: 2026-06-07 v0.28.0. | **Refresh cadence**: opportunistic — update the affected row when the underlying doc is touched. No periodic sweep cron.
+> **Last refresh**: 2026-06-10 (v0.28.4 — gameplay correctness + toolchain → 6.1.29; CHANGELOG / state.md / roadmap.md / completed-phases.md / CLAUDE.md rows touched; the 0.28.1–.3 (AGNOS bring-up arc) slot rows were backfilled from CHANGELOG and the forward parity/perf themes re-slotted to ≥ 0.28.5). Prior refresh: 2026-06-07 v0.28.0. | **Refresh cadence**: opportunistic — update the affected row when the underlying doc is touched. No periodic sweep cron.
 >
 > **Scope**: this repo only (`cyrius-doom`) — the entire `docs/` tree plus root-level docs (README, CHANGELOG, CLAUDE.md, CONTRIBUTING, SECURITY, CODE_OF_CONDUCT). VERSION is tracked as a structural artifact, not a doc.
 >
@@ -65,9 +65,9 @@ No numbered architecture notes yet — the convention is `NNN-kebab-case-title.m
 
 | File | Last touched | Status | Action |
 |---|---|---|---|
-| `state.md` | 2026-06-10 | 🟡 Partial | **Rotates every release.** Brought current to v0.28.4 — binary 597,368 B, `render_frame` 2.594 ms, toolchain 6.1.29, 0.28.4 slot row added, lock-writer Known issue #3 added. **Gap:** the 0.28.1–.3 slot rows were never recorded (those refreshes were skipped) — CHANGELOG is authoritative for .1–.3; backfill the slot map + completed-phases when convenient. |
-| `roadmap.md` | 2026-06-07 | ✅ Fresh | **Updated at v0.28.0 ship** — graphics arc re-anchored: 0.28.0 moved to completed-phases; the previously-roadmapped Black Book audit + 0.27.x housekeeping re-slotted **behind** it as 0.28.1–.7. Slot map leads with 0.28.1. |
-| `completed-phases.md` | 2026-06-07 | ✅ Fresh | **Updated at v0.28.0 ship** — new v0.28.x section + v0.28.0 row; v0.27.x arc marked complete. Chronological one-line index. |
+| `state.md` | 2026-06-10 | ✅ Fresh | **Rotates every release.** Current to v0.28.4 — binary 597,608 B, `render_frame` 2.486 ms, toolchain 6.1.29, lock-writer Known issue #3. 0.28.1–.3 (AGNOS arc) slot rows backfilled from CHANGELOG; 0.28.4 row added; forward parity/perf themes re-slotted to 0.28.5–.11. |
+| `roadmap.md` | 2026-06-10 | ✅ Fresh | **Re-slotted at v0.28.4 cut** — 0.28.1–.4 consumed by the AGNOS arc + gameplay correctness, so the Black Book parity/perf themes (visplane F08, sprite-clip F07/F05, sky F09, structural perf F12/F15, sub-audits) shifted to **0.28.5–.11**; F22 retired from v0.29.x (shipped early in 0.28.4). Slot map + all detail-section headers renumbered. |
+| `completed-phases.md` | 2026-06-10 | ✅ Fresh | **Updated at v0.28.4 cut** — added v0.28.1/.2/.3 (AGNOS bring-up arc) + v0.28.4 (gameplay correctness) rows under the v0.28.x section. Chronological one-line index. |
 | `roadmap-crossover.md` | 2026-04-30 | 🟠 Read-through | AgentWorld / secureyeoman crossover doc — spatial threat visualization via the DOOM engine. Not touched during the v0.27.x cycle; status against current secureyeoman scope not verified. Read-through at next minor closeout. |
 
 ---
@@ -128,7 +128,7 @@ Scheduled doc decisions surfaced here so they aren't forgotten when the trigger 
 |---|---|---|---|---|
 | 1 | **`state.md` refresh per release** — current version / binary / dep pins / in-flight slot map updated every time `VERSION` bumps. | Every release | [`CLAUDE.md`](../CLAUDE.md) "Closeout Pass" §8 | Manual today; future: add a release post-hook once the script exists. |
 | 2 | **`completed-phases.md` row append per release** — move the shipped slot's row in from `state.md`'s slot map. | Every release | [`CLAUDE.md`](../CLAUDE.md) "Closeout Pass" §8 | One-line entry; CHANGELOG is the detail. |
-| 3 | **`docs/audit.md` archive / fold-in** — v0.11.0-era gap analysis. The visplane/parity gaps it lists are now tracked as 0.28.1–.3 roadmap slots; fold the remaining rows into the 0.28.1 visplane work and archive. | v0.28.1 visplane work | `docs/development/roadmap.md` v0.28.x | 0.28.0's audit was hardening/perf-scoped; the Black-Book gap fold-in lands with the visplane rewrite. |
+| 3 | **`docs/audit.md` archive / fold-in** — v0.11.0-era gap analysis. The visplane/parity gaps it lists are now tracked as 0.28.5–.7 roadmap slots; fold the remaining rows into the 0.28.5 visplane work and archive. | v0.28.5 visplane work | `docs/development/roadmap.md` v0.28.x | 0.28.0's audit was hardening/perf-scoped; the Black-Book gap fold-in lands with the visplane rewrite. |
 | 4 | **`docs/architecture/overview.md` perf-table refresh** — stale 0.11.0-era table replaced with a pointer to `state.md` + `bench-history.csv`; dead `rgb_buf` row corrected. | ✅ done 2026-06-07 | Tier 3 ledger row | Completed at v0.28.0 closeout. |
 | 5 | **Periodic security audit** — full source scan before major releases. | Before major releases; ~every 2–3 minors | [`CLAUDE.md`](../CLAUDE.md) P(-1) §5 | Last: 2026-06-07 (v0.28.0 graphics hardening — partial, patch decoders + visplane). Prior full: 2026-04-13 (v0.24.0). Next full pinned: v0.28.7. |
 

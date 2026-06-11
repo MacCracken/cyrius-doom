@@ -45,7 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   but for a flat wall it is the scale (`PROJ_DIST / z`), not `z`, that is linear
   in screen-x. Both loops now interpolate scale and derive per-column depth,
   straightening wall top/bottom edges and texture-height scaling on angled walls.
-  `render_frame` 2.594 ms (unchanged within noise; 22 ms budget).
+  `render_frame` 2.486 ms (perf-neutral; 22 ms budget).
 - **Boot diagnostics bypassed sakshi.** The `loading map` / `map: <name>`,
   `map: V=… L=…` stats, and `things: N total (…)` lines were bare
   `syscall(1, …)` writes, rendering as un-prefixed bare lines interleaved with
@@ -57,8 +57,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Toolchain pin → `cycc 6.1.29`** (`cyrius.cyml`, was 6.0.83). The local
   toolchain launchers resolve the newest installed `cycc` regardless of the
   versioned path, so the pin now matches the only compiler that actually runs
-  and the build is no longer "drift"-warned. Build 597,368 B; 37/37 + 73/73;
-  `render_frame` 2.594 ms (cross-version perf vs 0.28.0 is not comparable — the
+  and the build is no longer "drift"-warned. Build 597,608 B; 37/37 + 73/73;
+  `render_frame` 2.486 ms (cross-version perf vs 0.28.0 is not comparable — the
   codegen changed with the pin).
 - **CI lockfile gate hardened against the 6.1.29 `cyrius deps` writer.** Under
   6.1.29 the lock *writer* emits an incomplete lock on a cold cache (writes only
