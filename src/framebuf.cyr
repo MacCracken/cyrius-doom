@@ -72,14 +72,16 @@ fn framebuf_init(): i64 {
     fb_scale = asx;
     if (asy < fb_scale) { fb_scale = asy; }
     if (fb_scale < 1) { fb_scale = 1; }
-    if (fb_scale > 3) { fb_scale = 3; }   # cap the blit-buffer size (heap budget)
+    if (fb_scale > 16) { fb_scale = 16; }  # the kernel's blit#39 scale cap (agnos 1.44.20)
     fb_xoff = (fb_xres - SCREEN_WIDTH * fb_scale) / 2;
     fb_yoff = (fb_yres - SCREEN_HEIGHT * fb_scale) / 2;
     if (fb_xoff < 0) { fb_xoff = 0; }
     if (fb_yoff < 0) { fb_yoff = 0; }
-    # tightly-packed scaled 32bpp blit buffer; the kernel blit(#39) places it at
-    # (fb_xoff,fb_yoff) honoring the real FB pitch, so no pitch stride here.
-    fb_buf = alloc(SCREEN_WIDTH * fb_scale * SCREEN_HEIGHT * fb_scale * 4);
+    # UNSCALED 320x200 32bpp conversion buffer — the kernel scales (blit#39 a4[39:32],
+    # agnos 1.44.20), so the old scale-3 heap cap is gone: the panel's natural integer
+    # scale applies (e.g. 7 on 2560x1440), ring 3 writes 64K pixels/frame instead of
+    # scale^2 * 64K, and the buffer is a fixed 256 KB instead of scale^2 * 256 KB.
+    fb_buf = alloc(SCREEN_WIDTH * SCREEN_HEIGHT * 4);
     return 0;
     #endif
 
@@ -239,28 +241,22 @@ fn framebuf_blit(): i64 {
     return 0;
 }
 
-# agnos: expand the 320x200 paletted frame into a tightly-packed scaled 32bpp
-# buffer (stride = scaled_w*4, no FB pitch), then the kernel blit(#39) places it
-# at (fb_xoff,fb_yoff) honoring the real pitch + clipping. Byte order B,G,R,X
-# matches the typical GOP BGRX FB (same expansion the Linux 32bpp path uses).
+# agnos: palette-convert the 320x200 frame into a tightly-packed UNSCALED 32bpp
+# buffer; the kernel blit(#39) scales (a4[39:32], agnos 1.44.20), places it at
+# (fb_xoff,fb_yoff), honors the real pitch, and clips. Byte order B,G,R,X matches
+# the typical GOP BGRX FB. (Pre-0.29.0 this loop ALSO expanded scale^2 pixels in
+# ring 3 — the kernel does that now, in cached RAM, once per src row.)
 #ifdef CYRIUS_TARGET_AGNOS
 fn framebuf_blit_agnos(): i64 {
-    var sw = SCREEN_WIDTH * fb_scale;
     for (var sy = 0; sy < SCREEN_HEIGHT; sy += 1) {
         var src_row = screen_buf + sy * SCREEN_WIDTH;
+        var dst = fb_buf + sy * SCREEN_WIDTH * 4;
         for (var sx = 0; sx < SCREEN_WIDTH; sx += 1) {
             var po = load8(src_row + sx) * 3;
             var r = load8(palette + po);
             var g = load8(palette + po + 1);
             var b = load8(palette + po + 2);
-            var p32 = 0xFF000000 | (r << 16) | (g << 8) | b;
-            for (var ry = 0; ry < fb_scale; ry += 1) {
-                var dst = fb_buf + (sy * fb_scale + ry) * sw * 4 + (sx * fb_scale) * 4;
-                for (var rx = 0; rx < fb_scale; rx += 1) {
-                    store32(dst, p32);
-                    dst += 4;
-                }
-            }
+            store32(dst + sx * 4, 0xFF000000 | (r << 16) | (g << 8) | b);
         }
     }
     return 0;
@@ -271,10 +267,12 @@ fn framebuf_flip(): i64 {
     #ifdef CYRIUS_TARGET_AGNOS
     if (fb_fd >= 0) {
         framebuf_blit_agnos();
-        var asw = SCREEN_WIDTH * fb_scale;
-        var ash = SCREEN_HEIGHT * fb_scale;
-        # blit(src, w, h, dstxy = (dst_y<<16)|dst_x)
-        syscall(39, fb_buf, asw, ash, (fb_yoff << 16) | fb_xoff);
+        # blit(src, w, h, a4 = (scale<<32)|(dst_y<<16)|dst_x) — the kernel expands each
+        # pixel to a scale x scale block (agnos 1.44.20). On an OLDER kernel the scale
+        # bits are simply ignored (unscaled 320x200 at the centered offset — degraded
+        # but harmless); ship this doom with kernel >= 1.44.20.
+        syscall(39, fb_buf, SCREEN_WIDTH, SCREEN_HEIGHT,
+                (fb_scale << 32) | (fb_yoff << 16) | fb_xoff);
     }
     return 0;
     #endif

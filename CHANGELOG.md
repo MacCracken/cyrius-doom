@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-06-11
+
+### Changed
+
+- **agnos: the kernel scales now** — `framebuf_blit_agnos` no longer expands scale² pixels in
+  ring 3; it palette-converts the raw 320×200 frame into a FIXED 256 KB 32bpp buffer and passes
+  the integer scale to the kernel via `blit`(#39) a4 bits [39:32] (agnos 1.44.20). Per frame,
+  ring 3 writes **64 K pixels instead of scale²·64 K**, and the old heap-budget scale cap (3)
+  is gone — the panel's natural integer scale applies (e.g. **7 on 2560×1440**, capped at the
+  kernel's 16). On an older kernel the scale bits are ignored (unscaled centered placement —
+  degraded but harmless); ship with agnos ≥ 1.44.20.
+
 ## [0.28.4] - 2026-06-10
 
 ### Fixed
