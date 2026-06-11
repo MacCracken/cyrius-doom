@@ -641,14 +641,15 @@ fn things_print_stats(): i64 {
         if (cat == CAT_KEY) { items += 1; }
         if (cat == CAT_DECOR) { decor += 1; }
     }
-    syscall(1, 1, "things: ", 8);
-    fmt_int(thing_count);
-    syscall(1, 1, " total (", 8);
-    fmt_int(monsters);
-    syscall(1, 1, " monsters, ", 11);
-    fmt_int(items);
-    syscall(1, 1, " items, ", 8);
-    fmt_int(decor);
-    syscall(1, 1, " decor)\n", 8);
+    # Structured sakshi line (was bare syscall(1,...) writes interleaved with
+    # the [ts] [INFO] boot log).
+    var sb[96];
+    var args = vec_new();
+    vec_push(args, thing_count);
+    vec_push(args, monsters);
+    vec_push(args, items);
+    vec_push(args, decor);
+    var n = fmt_sprintf(&sb, 96, "things: %d total (%d monsters, %d items, %d decor)", args);
+    sakshi_info(&sb, n);
     return 0;
 }

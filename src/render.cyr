@@ -453,11 +453,15 @@ fn render_transform_vertex(wx, wy): i64 {
     var dx = wx - view_x;
     var dy = wy - view_y;
 
-    # Rotate by negative view angle:
-    # tx = dx * cos + dy * sin
-    # ty = -dx * sin + dy * cos
-    var tx = fixed_mul(dx, view_cos) + fixed_mul(dy, view_sin);
-    var ty = fixed_mul(dy, view_cos) - fixed_mul(dx, view_sin);
+    # View-space rotation matching the movement / floor-span / map angle
+    # convention (BAM 0 = +x = east = forward). Pre-0.28.4 this computed
+    # depth as (dy*cos - dx*sin), orienting "forward" 90 deg off (north at
+    # angle 0) from movement/hitscan/flats — so walking forward slid you
+    # sideways and walls disagreed with floors. Now:
+    #   ty (depth)   = forward axis (cos, sin)
+    #   tx (lateral) = screen-right axis (sin, -cos)  [matches render_flat_spans]
+    var tx = fixed_mul(dx, view_sin) - fixed_mul(dy, view_cos);
+    var ty = fixed_mul(dx, view_cos) + fixed_mul(dy, view_sin);
 
     return (tx, ty);
 }
@@ -623,6 +627,13 @@ fn render_seg(seg_idx): i64 {
         }
     }
 
+    # Perspective-correct depth: for a flat wall, scale (= PROJ_DIST / z) is
+    # linear in screen-x while z is NOT. Interpolate scale across the span and
+    # derive z per column. Pre-0.28.4 lerp'd z directly, bowing wall top/bottom
+    # edges and mis-scaling texture height on oblique walls.
+    var wscale1 = fixed_div(PROJ_DIST, ty1);
+    var wscale2 = fixed_div(PROJ_DIST, ty2);
+
     # Draw columns from sx1 to sx2
     for (var col = sx1; col <= sx2; col += 1) {
         # Skip fully occluded columns
@@ -632,12 +643,15 @@ fn render_seg(seg_idx): i64 {
         var cb = load64(clip_bottom + col * 8);
         if (ct > cb) { continue; }
 
-        # Interpolate depth for this column
+        # frac is linear in screen-x (used for the texture-U interpolation below).
         var frac = 0;
         if (sx2 != sx1) {
             frac = fixed_div((col - sx1) << 16, (sx2 - sx1) << 16);
         }
-        var depth = fixed_lerp(ty1, ty2, frac);
+        # Perspective-correct depth from linearly-interpolated scale.
+        var col_scale = fixed_lerp(wscale1, wscale2, frac);
+        if (col_scale <= 0) { col_scale = 1; }
+        var depth = fixed_div(PROJ_DIST, col_scale);
         if (depth <= 0) { depth = 256; }
 
         # Project floor and ceiling heights to screen Y
@@ -670,8 +684,8 @@ fn render_seg(seg_idx): i64 {
         if (floor_screen < -1) { floor_screen = -1; }
         if (floor_screen > SCREEN_HEIGHT - 1) { floor_screen = SCREEN_HEIGHT - 1; }
 
-        # DOOM-accurate wall lighting: scale = PROJ_DIST / depth
-        var col_scale = fixed_div(PROJ_DIST, depth);
+        # DOOM-accurate wall lighting uses the perspective-correct col_scale
+        # computed above.
         var col_light = render_wall_light(lightnum, col_scale);
 
         # Draw ceiling
@@ -989,13 +1003,17 @@ fn render_masked_segs(): i64 {
         var tex_h = texture_height(mtex);
         if (tex_h <= 0) { continue; }
 
+        var mscale1 = fixed_div(PROJ_DIST, mty1);
+        var mscale2 = fixed_div(PROJ_DIST, mty2);
         for (var col = sx1; col <= sx2; col += 1) {
-            # Interpolate depth
+            # frac linear in screen-x (texture-U). Depth is perspective-correct.
             var frac = 0;
             if (sx2 != sx1) {
                 frac = fixed_div((col - sx1) << 16, (sx2 - sx1) << 16);
             }
-            var depth = fixed_lerp(mty1, mty2, frac);
+            var col_scale = fixed_lerp(mscale1, mscale2, frac);
+            if (col_scale <= 0) { col_scale = 1; }
+            var depth = fixed_div(PROJ_DIST, col_scale);
             if (depth <= 0) { depth = 256; }
 
             var eye_h = (mfloor << 16) + VIEW_HEIGHT;
@@ -1009,7 +1027,6 @@ fn render_masked_segs(): i64 {
             var wh = open_bot - open_top;
             if (wh <= 0) { continue; }
 
-            var col_scale = fixed_div(PROJ_DIST, depth);
             var col_lv = render_wall_light(mlight, col_scale);
 
             # Texture U coordinate

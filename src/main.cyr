@@ -42,10 +42,13 @@ var game_running = 0;
 # Load (or reload) a map
 fn load_map(): i64 {
     var name = level_get_name();
-    sakshi_info("loading map", 11);
-    syscall(1, 1, "map: ", 5);
-    syscall(1, 1, name, strlen(name));
-    syscall(1, 1, "\n", 1);
+    # Single structured line instead of sakshi "loading map" + bare "map: <name>".
+    var lm[96];
+    memcpy(&lm, "loading map: ", 13);
+    var nlen = strlen(name);
+    if (nlen > 80) { nlen = 80; }
+    memcpy(&lm + 13, name, nlen);
+    sakshi_info(&lm, 13 + nlen);
 
     if (map_load(name) != 0) {
         sakshi_error("cannot load map", 15);
@@ -102,7 +105,7 @@ fn doom_main(): i64 {
     # non-identity arena top (0x3FC00000); no warm-up needed.
     alloc_init();
     args_init();
-    sakshi_info("cyrius-doom v0.28.3", 19);
+    sakshi_info("cyrius-doom v0.28.4", 19);
 
     # WAD path: argv[1] on Linux. On agnos, agnsh `run /bin/doom` passes no argv
     # beyond the path, so default to /DOOM1.WAD (staged on the ext2 root).

@@ -196,8 +196,8 @@ fn sprite_render_all(): i64 {
         # Transform to view space
         var dx = tx - view_x;
         var dy = ty - view_y;
-        var vx = fixed_mul(dx, view_cos) + fixed_mul(dy, view_sin);
-        var vy = fixed_mul(dy, view_cos) - fixed_mul(dx, view_sin);
+        var vx = fixed_mul(dx, view_sin) - fixed_mul(dy, view_cos);
+        var vy = fixed_mul(dx, view_cos) + fixed_mul(dy, view_sin);
 
         # Behind viewer?
         if (vy <= 4096) { continue; }
@@ -258,8 +258,8 @@ fn sprite_render_all(): i64 {
         if (top_off >= 0x8000) { top_off -= 0x10000; }
         var dx = tx - view_x;
         var dy = ty - view_y;
-        var vx = fixed_mul(dx, view_cos) + fixed_mul(dy, view_sin);
-        var vy = fixed_mul(dy, view_cos) - fixed_mul(dx, view_sin);
+        var vx = fixed_mul(dx, view_sin) - fixed_mul(dy, view_cos);
+        var vy = fixed_mul(dx, view_cos) + fixed_mul(dy, view_sin);
 
         # Project to screen
         var screen_x = HALF_WIDTH + fixed_to_int(fixed_div(fixed_mul(vx, PROJ_DIST), vy));

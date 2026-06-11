@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.28.4] - 2026-06-10
+
+### Fixed
+
+- **Player movement was 90° out of phase with the rendered view.**
+  `render_transform_vertex` and the two `sprite.cyr` transforms computed
+  view-space depth as `dy·cos − dx·sin`, orienting "forward / into-screen"
+  toward north (BAM 256), while player movement, hitscan, the floor-span pass
+  (`render_flat_spans`), and the map's thing-angle convention all use
+  `(cos, sin)` = east (BAM 0, `degrees·1024/360`). Pressing forward therefore
+  slid the player sideways relative to what was on screen, and walls disagreed
+  with floors by 90°. Walls + sprites now use the same `(cos, sin)` convention:
+  `ty = dx·cos + dy·sin` (depth), `tx = dx·sin − dy·cos` (lateral — the
+  screen-right axis `(sin, −cos)` that `render_flat_spans` already used, verified
+  against it so left/right is not mirrored). The `--ppm` view now faces the
+  map-intended direction (the canonical E1M1 opening). Latent since the renderer
+  was validated only via still `--ppm` screenshots; surfaced once the engine was
+  driven interactively.
+- **Player walked straight through solid walls.** `player_check_linedef`
+  early-returned "passable" for any line that was neither `ML_BLOCKING` nor
+  `ML_TWOSIDED` — i.e. every ordinary one-sided wall, which carries no
+  `ML_BLOCKING` flag in the WAD (it is implicitly solid by having no back
+  sidedef). One-sided lines (`!ML_TWOSIDED` / `side_left < 0`) are now solid at
+  the distance test; two-sided step-up (≤24) / ceiling-fit logic unchanged.
+- **35 Hz loop stalled between keystrokes on the Linux `/dev/fb0` path.** The
+  raw-mode termios setup wrote `VMIN`/`VTIME` at byte offsets 22/21, assuming
+  `c_cc` began at offset 16 — but the kernel `struct termios` carries a `c_line`
+  byte at 16, so `c_cc` starts at 17 (`VTIME`=22, `VMIN`=23). `VMIN` was never
+  zeroed and kept the terminal's inherited value of 1, making `read(stdin)`
+  blocking; the game loop — and therefore `things_tick` / `doors_tick` — only
+  advanced when a key arrived (monsters/doors froze when standing still).
+  Corrected to offsets 23/22. (Linux path only; the AGNOS path uses `kbscan#42`
+  and is unaffected.)
+- **Oblique walls bowed (perspective distortion).** `render_seg` and
+  `render_masked_segs` interpolated depth (`z`) linearly across screen columns,
+  but for a flat wall it is the scale (`PROJ_DIST / z`), not `z`, that is linear
+  in screen-x. Both loops now interpolate scale and derive per-column depth,
+  straightening wall top/bottom edges and texture-height scaling on angled walls.
+  `render_frame` 2.594 ms (unchanged within noise; 22 ms budget).
+- **Boot diagnostics bypassed sakshi.** The `loading map` / `map: <name>`,
+  `map: V=… L=…` stats, and `things: N total (…)` lines were bare
+  `syscall(1, …)` writes, rendering as un-prefixed bare lines interleaved with
+  the structured `[ts] [INFO]` log. All three now route through `sakshi_info`
+  (the two stat lines via `fmt_sprintf`), so they carry the standard prefix.
+
 ## [0.28.3] - 2026-06-09
 
 ### Added

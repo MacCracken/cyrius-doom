@@ -183,9 +183,11 @@ fn player_check_position(nx, ny): i64 {
 fn player_check_linedef(nx, ny, radius, i): i64 {
     var flags = map_linedef_flags(i);
 
-    if ((flags & ML_BLOCKING) == 0) {
-        if ((flags & ML_TWOSIDED) == 0) { return 1; }
-    }
+    # One-sided solid walls are handled at the distance test below: in the
+    # WAD format they carry NO ML_BLOCKING flag (they are implicitly solid by
+    # having no back sidedef) but must still block. The pre-0.28.4 early-out
+    # "return 1 when neither ML_BLOCKING nor ML_TWOSIDED" made every ordinary
+    # one-sided wall passable, so the player walked straight through walls.
 
     var v1 = map_linedef_v1(i);
     var v2 = map_linedef_v2(i);
@@ -226,6 +228,12 @@ fn player_check_linedef(nx, ny, radius, i): i64 {
     if (dist < radius) {
         # Blocking line -- reject this position
         if ((flags & ML_BLOCKING) != 0) { return 0; }
+
+        # One-sided wall (no back sector) is implicitly solid in the WAD
+        # format and must block even without ML_BLOCKING set. The
+        # authoritative signal is "no back sidedef".
+        if ((flags & ML_TWOSIDED) == 0) { return 0; }
+        if (map_linedef_side_left(i) < 0) { return 0; }
 
         # Two-sided: check if player can step over height difference
         if ((flags & ML_TWOSIDED) != 0) {

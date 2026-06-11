@@ -408,14 +408,20 @@ fn player_start_angle(): i64 { return load64(player_start + 16); }
 # use `bsp_point_on_side(map_nodes, node_idx, x, y)`.
 
 fn map_print_stats(): i64 {
-    syscall(1, 1, "map: V=", 7); fmt_int(map_num_vertexes);
-    syscall(1, 1, " L=", 3); fmt_int(map_num_linedefs);
-    syscall(1, 1, " SD=", 4); fmt_int(map_num_sidedefs);
-    syscall(1, 1, " S=", 3); fmt_int(map_num_sectors);
-    syscall(1, 1, " SG=", 4); fmt_int(map_num_segs);
-    syscall(1, 1, " SS=", 4); fmt_int(map_num_ssectors);
-    syscall(1, 1, " N=", 3); fmt_int(map_num_nodes);
-    syscall(1, 1, " T=", 3); fmt_int(map_num_things);
-    syscall(1, 1, "\n", 1);
+    # Route through sakshi (structured) instead of bare syscall(1,...) writes,
+    # so this carries the same [ts] [INFO] prefix as the rest of the boot log
+    # rather than rendering as an un-prefixed bare line interleaved with it.
+    var sb[96];
+    var args = vec_new();
+    vec_push(args, map_num_vertexes);
+    vec_push(args, map_num_linedefs);
+    vec_push(args, map_num_sidedefs);
+    vec_push(args, map_num_sectors);
+    vec_push(args, map_num_segs);
+    vec_push(args, map_num_ssectors);
+    vec_push(args, map_num_nodes);
+    vec_push(args, map_num_things);
+    var n = fmt_sprintf(&sb, 96, "map: V=%d L=%d SD=%d S=%d SG=%d SS=%d N=%d T=%d", args);
+    sakshi_info(&sb, n);
     return 0;
 }

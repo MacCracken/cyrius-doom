@@ -78,13 +78,14 @@ enum TermConst {
     TCSETS = 0x5402;
 }
 
-# termios offsets (Linux x86_64):
+# termios offsets (Linux x86_64 kernel struct termios):
 # c_iflag = 0 (4 bytes)
 # c_oflag = 4 (4 bytes)
 # c_cflag = 8 (4 bytes)
 # c_lflag = 12 (4 bytes)
-# c_cc[VMIN] = 16 + 6 = 22
-# c_cc[VTIME] = 16 + 5 = 21
+# c_line  = 16 (1 byte)  -- the c_cc array starts AFTER this byte, at offset 17
+# c_cc[VTIME] = 17 + 5 = 22
+# c_cc[VMIN]  = 17 + 6 = 23
 
 fn input_enable_raw_mode(): i64 {
     #ifdef CYRIUS_TARGET_AGNOS
@@ -115,9 +116,14 @@ fn input_enable_raw_mode(): i64 {
     iflag &= -1331;
     store32(&raw, iflag);
 
-    # Set VMIN=0 (non-blocking), VTIME=0 (no timeout)
-    store8(&raw + 22, 0);
-    store8(&raw + 21, 0);
+    # Set VMIN=0 (non-blocking), VTIME=0 (no timeout).
+    # Pre-0.28.4 these used offsets 22/21 (assuming c_cc began at 16, ignoring
+    # the c_line byte), so VMIN at offset 23 was never zeroed and kept the
+    # terminal's inherited VMIN=1 -> read(stdin) BLOCKED until a key arrived,
+    # freezing the 35 Hz loop between keystrokes (monsters/doors only advanced
+    # while a key was held).
+    store8(&raw + 23, 0);   # c_cc[VMIN]
+    store8(&raw + 22, 0);   # c_cc[VTIME]
 
     # Apply
     syscall(16, 0, TCSETS, &raw);
