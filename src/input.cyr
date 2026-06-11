@@ -72,6 +72,9 @@ enum KeyCode {
 
 var orig_termios[64];
 var raw_mode_active = 0;
+# Saved stdin O_NONBLOCK/flags so input_disable_raw_mode can restore the shell's
+# blocking mode on exit (a leaked O_NONBLOCK breaks the parent shell's reads).
+var orig_stdin_flags = 0;
 
 enum TermConst {
     TCGETS = 0x5401;
@@ -127,6 +130,22 @@ fn input_enable_raw_mode(): i64 {
 
     # Apply
     syscall(16, 0, TCSETS, &raw);
+
+    # Belt-and-suspenders: force fd 0 itself non-blocking via fcntl. VMIN=0 only
+    # affects a real tty whose TCSETS succeeded; if stdin is a pipe / FIFO /
+    # redirect / the x11view bridge (or the ioctl above silently failed because
+    # stdin is not a tty), the terminal flags are ignored and read(0) BLOCKS,
+    # which stalls the entire 35 Hz loop in input_poll BEFORE any world tick runs
+    # (verified: a no-data stdin freezes the game on its very first frame). With
+    # O_NONBLOCK, read(0) returns -1/EAGAIN immediately when no byte is ready;
+    # input_poll's `if (n > 0)` guard already treats that as "no input this
+    # frame", so the world keeps ticking regardless of stdin type or tty state.
+    # fcntl=72, F_GETFL=3, F_SETFL=4, O_NONBLOCK=0x800 (Linux x86_64).
+    orig_stdin_flags = syscall(72, 0, 3, 0);   # F_GETFL (arg ignored, but fcntl takes 3)
+    var fl = orig_stdin_flags;
+    if (fl < 0) { fl = 0; orig_stdin_flags = 0; }
+    syscall(72, 0, 4, fl | 0x800);             # F_SETFL, flags | O_NONBLOCK
+
     raw_mode_active = 1;
     return 0;
 }
@@ -138,6 +157,7 @@ fn input_disable_raw_mode(): i64 {
     #endif
     if (raw_mode_active == 1) {
         syscall(16, 0, TCSETS, &orig_termios);
+        syscall(72, 0, 4, orig_stdin_flags);   # F_SETFL: restore the shell's blocking mode
         raw_mode_active = 0;
     }
     return 0;

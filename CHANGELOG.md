@@ -7,6 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.29.1] - 2026-06-11
+
+### Fixed
+
+- **Game world tick froze without player input — two distinct, platform-specific
+  root causes, both found by *reproducing* the freeze (Linux locally, AGNOS in
+  QEMU via `agnos/scripts/doom-smoke.sh`), not by static reading.** The world-tick
+  calls (`player_tick`/`doors_tick`/`things_tick`/`texture_animate`) are
+  unconditional in the loop, so both bugs sat upstream of them and stalled the
+  whole 35 Hz loop.
+  - **Linux: `read(stdin)` blocked the loop.** `input_poll`'s `read(0)` only polls
+    non-blocking when stdin is a real tty whose raw-mode `TCSETS` honored `VMIN=0`
+    (the 0.28.4 fix). For any *other* stdin — pipe, FIFO, redirect, the `x11view`
+    GTK bridge, or when the `ioctl` silently failed because stdin is not a tty —
+    `VMIN`/`VTIME` are ignored and `read(0)` BLOCKS until a byte arrives, freezing
+    the loop in `input_poll` before any world tick. Fix: `input_enable_raw_mode`
+    now also forces `O_NONBLOCK` on fd 0 via `fcntl` (a non-blocking guarantee
+    independent of tty/`VMIN` state); `input_poll`'s existing `if (n > 0)` guard
+    already treats `EAGAIN`/`n<=0` as "no input this frame". `input_disable_raw_mode`
+    restores the saved flags on exit so the parent shell's stdin is not left
+    non-blocking. Reproduced: a no-data stdin froze the game on its first frame
+    (0 iterations); after the fix the world advances at ~33 Hz with zero input
+    (103 frames / 3 s).
+  - **AGNOS: a 255 KB per-frame heap overflow corrupted the render tables.**
+    `framebuf_init` sized the blit conversion buffer as
+    `alloc(SCREEN_WIDTH * SCREEN_HEIGHT * 4)` — a compile-time-constant **3-operand
+    chained multiply that cycc's `--agnos` backend miscompiles** (`320*200*4` folds
+    to **800**, not 256000; the 2-operand `320*200=64000` and runtime 3-operand
+    multiplies are correct, and the Linux target folds it correctly). The resulting
+    800-byte `fb_buf` vs the 256000 bytes `framebuf_blit_agnos` writes every frame
+    stomped `colormap` / `zlight` / `flat_cache` (allocated just above `fb_buf`).
+    Frame 1 rendered with intact tables; frame 1's `framebuf_flip` corrupted them;
+    frame 2's `render_flat_spans` read a corrupted `zlight` → wild `colormap`
+    pointer → ring-3 page fault → "frozen after one frame". Fix: size `fb_buf` as
+    `SCREEN_SIZE * 4` (2-operand), and split the two light-table allocations
+    (`scalelight` / `zlight` in `render_init_light_tables`) into a 2-operand entry
+    count × 8 — all avoiding the miscompiled pattern. Reproduced + fixed in QEMU:
+    idle world-advance went from 1 frame to continuous (105+ frames, no input).
+    **Iron burn on archaemenid still pending.**
+
+### Notes
+
+- **cycc `--agnos` toolchain bug (report upstream):** compile-time-constant
+  3-operand chained integer multiplies (`A * B * C`, all constant-folded)
+  miscompile on the `--agnos` target only (confirmed cycc 6.1.29 + 6.1.35).
+  Worked around in `framebuf.cyr` + `render.cyr`; audit any new all-constant
+  `alloc(X * Y * Z)` site for the same trap.
+- `--ppm` screenshot mode renders a single static frame and never enters the
+  world-tick loop, so neither freeze was reachable through any PPM/CI gate — the
+  reproductions had to drive the interactive loop.
+
 ## [0.29.0] - 2026-06-11
 
 ### Changed

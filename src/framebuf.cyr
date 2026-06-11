@@ -81,7 +81,15 @@ fn framebuf_init(): i64 {
     # agnos 1.44.20), so the old scale-3 heap cap is gone: the panel's natural integer
     # scale applies (e.g. 7 on 2560x1440), ring 3 writes 64K pixels/frame instead of
     # scale^2 * 64K, and the buffer is a fixed 256 KB instead of scale^2 * 256 KB.
-    fb_buf = alloc(SCREEN_WIDTH * SCREEN_HEIGHT * 4);
+    # NB: size is SCREEN_SIZE*4, NOT SCREEN_WIDTH*SCREEN_HEIGHT*4. cycc's --agnos
+    # backend miscompiles compile-time-constant THREE-operand chained multiplies
+    # (320*200*4 folds to 800, not 256000 — confirmed on cycc 6.1.29 AND 6.1.35;
+    # the Linux target folds it correctly). An 800-byte fb_buf vs the 256000 bytes
+    # framebuf_blit_agnos writes was a 255 KB heap overflow that stomped
+    # colormap/zlight/flat_cache → 2nd-frame render_flat_spans read a corrupted
+    # zlight → wild colormap pointer → page fault → "world frozen after one frame".
+    # SCREEN_SIZE (=64000) * 4 is a TWO-operand fold and is correct on --agnos.
+    fb_buf = alloc(SCREEN_SIZE * 4);
     return 0;
     #endif
 
