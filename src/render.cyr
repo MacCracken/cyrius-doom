@@ -332,6 +332,11 @@ var vp_floor_flat = 0;
 var vp_ceil_flat = 0;
 var vp_floor_light = 0;
 var vp_ceil_light = 0;
+# Per-row ceiling height above the eye (16.16): the wall pass projects ceiling
+# rows with the true ceil-floor-41 delta, so the span pass must invert with the
+# same value. Floors are always exactly VIEW_HEIGHT below the eye (per-seg eye
+# model) and need no per-row height.
+var vp_ceil_h = 0;
 
 # ================================================================
 # Masked midtexture drawsegs: deferred two-sided middle textures
@@ -385,6 +390,7 @@ fn render_init_visplanes(): i64 {
         vp_ceil_flat = alloc(200 * 8);
         vp_floor_light = alloc(200 * 8);
         vp_ceil_light = alloc(200 * 8);
+        vp_ceil_h = alloc(200 * 8);
     }
     for (var y = 0; y < SCREEN_HEIGHT; y += 1) {
         store64(vp_floor_x1 + y * 8, SCREEN_WIDTH);
@@ -395,6 +401,7 @@ fn render_init_visplanes(): i64 {
         store64(vp_ceil_flat + y * 8, -1);
         store64(vp_floor_light + y * 8, 16);
         store64(vp_ceil_light + y * 8, 16);
+        store64(vp_ceil_h + y * 8, VIEW_HEIGHT);
     }
     return 0;
 }
@@ -555,6 +562,12 @@ fn render_seg(seg_idx): i64 {
     if (lightnum < 0) { lightnum = 0; }
     if (lightnum >= LIGHTLEVELS) { lightnum = LIGHTLEVELS - 1; }
 
+    # Planes use the raw sector light: DOOM applies fake contrast to walls
+    # only (R_StoreWallRange), never to floor/ceiling visplanes. Captured
+    # before the +-1 contrast adjustment below so vp_*_light rows don't
+    # inherit the wall orientation of whichever seg marked them last.
+    var flat_lightnum = lightnum;
+
     # Fake contrast: horizontal walls (same Y) darker, vertical walls (same X) brighter
     var seg_dx = fixed_abs(map_vertex_x(v2_idx) - map_vertex_x(v1_idx));
     var seg_dy = fixed_abs(map_vertex_y(v2_idx) - map_vertex_y(v1_idx));
@@ -595,9 +608,6 @@ fn render_seg(seg_idx): i64 {
         is_sky = 1;
     }
 
-    # Eye height for floor plane distance calculation
-    var plane_eye_h = VIEW_HEIGHT;
-
     # Seg offset along linedef (for texture U coordinate)
     var seg_offset = map_seg_offset(seg_idx);
 
@@ -629,6 +639,14 @@ fn render_seg(seg_idx): i64 {
             floor_h, ceil_h, back_floor_h, back_ceil_h, dont_peg_bottom);
         }
     }
+
+    # Ceiling plane height above the eye for this seg (eye = front floor + 41).
+    # Stored per marked row so the span pass can invert the same projection the
+    # wall pass used (pre-0.29.3 the span pass assumed every ceiling was
+    # exactly VIEW_HEIGHT from the eye — mis-scaling/mis-lighting any room not
+    # exactly 82 tall). Floors need no equivalent: their delta is always
+    # exactly -VIEW_HEIGHT under the per-seg eye model.
+    var ceil_delta = ((ceil_h - floor_h) << 16) - VIEW_HEIGHT;
 
     # Perspective-correct depth: for a flat wall, scale (= PROJ_DIST / z) is
     # linear in screen-x while z is NOT. Interpolate scale across the span and
@@ -724,13 +742,19 @@ fn render_seg(seg_idx): i64 {
                     framebuf_vline(col, ct, ceil_screen - 1, render_shade(ceil_base_pal, col_light));
                 }
             }
-            for (var cy = ct; cy < ceil_screen; cy += 1) {
-                var cx1 = load64(vp_ceil_x1 + cy * 8);
-                if (col < cx1) { store64(vp_ceil_x1 + cy * 8, col); }
-                var cx2 = load64(vp_ceil_x2 + cy * 8);
-                if (col > cx2) { store64(vp_ceil_x2 + cy * 8, col); }
-                store64(vp_ceil_flat + cy * 8, ceil_flat);
-                store64(vp_ceil_light + cy * 8, lightnum);
+            # Sky rows are NOT registered for the span pass: F_SKY1 is a real
+            # 4096-byte flat lump (so ceil_flat >= 0 here), and the span pass
+            # would overdraw the just-drawn sky with its noise texture.
+            if (is_sky == 0) {
+                for (var cy = ct; cy < ceil_screen; cy += 1) {
+                    var cx1 = load64(vp_ceil_x1 + cy * 8);
+                    if (col < cx1) { store64(vp_ceil_x1 + cy * 8, col); }
+                    var cx2 = load64(vp_ceil_x2 + cy * 8);
+                    if (col > cx2) { store64(vp_ceil_x2 + cy * 8, col); }
+                    store64(vp_ceil_flat + cy * 8, ceil_flat);
+                    store64(vp_ceil_light + cy * 8, flat_lightnum);
+                    store64(vp_ceil_h + cy * 8, ceil_delta);
+                }
             }
         }
 
@@ -745,7 +769,7 @@ fn render_seg(seg_idx): i64 {
                 var fx2 = load64(vp_floor_x2 + fy * 8);
                 if (col > fx2) { store64(vp_floor_x2 + fy * 8, col); }
                 store64(vp_floor_flat + fy * 8, floor_flat);
-                store64(vp_floor_light + fy * 8, lightnum);
+                store64(vp_floor_light + fy * 8, flat_lightnum);
             }
         }
 
@@ -899,7 +923,20 @@ fn render_flat_spans(): i64 {
             if (cf >= 0) {
                 var cdy = HALF_HEIGHT - y;
                 if (cdy > 0) {
-                    var cdist = fixed_div(VIEW_HEIGHT, cdy << 16);
+                    # Horizontal distance to the plane point at this row:
+                    # dist = plane_height * PROJ_DIST / dy  (DOOM r_plane.c:
+                    # distance = planeheight * yslope[y], yslope = 160<<16/dy).
+                    # Pre-0.29.3 this omitted the PROJ_DIST factor, leaving the
+                    # distance 160x too small: the per-pixel world step below
+                    # collapsed to ~0 (one texel smeared across the whole row,
+                    # so flats showed no texture) and zlight indexed at ~0
+                    # (flats stuck fullbright, no distance fade).
+                    # Plane height comes from the per-row value the wall pass
+                    # stored (the ceil-floor-41 delta it projected with); the
+                    # below-eye degenerate case falls back to VIEW_HEIGHT.
+                    var ch = load64(vp_ceil_h + y * 8);
+                    if (ch <= 0) { ch = VIEW_HEIGHT; }
+                    var cdist = fixed_div(fixed_mul(ch, PROJ_DIST), cdy << 16);
                     var cl = load64(vp_ceil_light + y * 8);
                     var clv = render_flat_light(cl, cdist);
 
@@ -945,7 +982,8 @@ fn render_flat_spans(): i64 {
             if (ff >= 0) {
                 var fdy = y - HALF_HEIGHT;
                 if (fdy > 0) {
-                    var fdist = fixed_div(VIEW_HEIGHT, fdy << 16);
+                    # dist = eye_height * PROJ_DIST / dy (see ceiling above).
+                    var fdist = fixed_div(fixed_mul(VIEW_HEIGHT, PROJ_DIST), fdy << 16);
                     var fl = load64(vp_floor_light + y * 8);
                     var flv = render_flat_light(fl, fdist);
 

@@ -7,6 +7,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Floor/ceiling flats rendered as untextured gray smears** (user-reported from
+  AGNOS hardware; reproduced identically on Linux `--ppm` — the smear color just
+  lands on different texels per viewpoint). Root cause: `render_flat_spans`
+  computed the per-row plane distance as `fixed_div(VIEW_HEIGHT, dy<<16)` =
+  `41/dy`, omitting the `PROJ_DIST` projection factor (true distance =
+  `41·160/dy`, DOOM's `planeheight·yslope[y]`). The distance being 160× too
+  small collapsed the per-pixel world step to ~0 — **one texel smeared across
+  each row**, so flats showed no texture — and pinned the zlight index to ~0,
+  so flats never light-faded with distance. Fixed:
+  `dist = fixed_div(fixed_mul(plane_h, PROJ_DIST), dy << 16)`. Adversarially
+  verified (units/overflow audit, DOOM-fidelity audit, refutation attempt
+  failed on all vectors): the span mapping is now the exact algebraic inverse
+  of the wall projection, and zlight indexing matches the documented
+  `r_main.c` scheme. Three follow-up defects from the same multi-agent review,
+  fixed in the same cut:
+  - **Sky overdrawn by the span pass (regression-by-unmasking)**: `F_SKY1` is a
+    real 4096-byte flat lump (shareware flat index 53), and sky-ceiling rows
+    were still registered into `vp_ceil_*` — so once flats actually textured,
+    the span pass overdrew the wall-pass sky with F_SKY1's noise content. Sky
+    rows no longer register. (Full sky correctness still pends the visplane
+    pool rewrite: a non-sky ceiling sharing a row can still bridge its x-union
+    across sky columns.)
+  - **Wall fake-contrast leaked into plane lighting**: the ±1 axis-orientation
+    lightnum adjustment was applied *before* the `vp_*_light` stores, so a
+    flat's brightness inherited the orientation of whichever seg last marked
+    the row (DOOM applies fake contrast to walls only). Planes now store the
+    pre-contrast sector lightnum.
+  - **Ceiling spans mapped/lit at constant plane height 41**: the wall pass
+    projects ceiling rows with the true `ceil−floor−41` delta, but the span
+    pass inverted with `41` — ceilings in any room not exactly 82 tall were
+    radially mis-scaled (≈2.1× in a 128-tall room) and mis-lit. New per-row
+    `vp_ceil_h` stores the wall-pass delta for the span pass to invert with
+    (floors need no equivalent: their delta is always exactly `VIEW_HEIGHT`
+    under the per-seg eye model). Below-eye degenerate deltas fall back to
+    `VIEW_HEIGHT`, preserving prior behavior.
+  - Dead `plane_eye_h` removed.
+
+  Verification: 37/37 WAD-free + 73/73 full suite; all nine shareware maps
+  PPM-rendered (192,015 B each) and visually verified — floor rows now carry
+  16–33 distinct colors vs 1–3 pre-fix, with correct perspective convergence
+  and distance fade. `--agnos` build (580,640 B) QEMU-verified: serial probe
+  `fixed_mul(VIEW_HEIGHT, PROJ_DIST) = 429916160` identical to Linux (no
+  backend fold regression), and an in-game E1M1 sendkey harness screendump
+  shows textured tiled floors with depth lighting on AGNOS. Bench:
+  `render_frame` 2.471 ms (prior 2.492 ms — variance-level; binary 601,936 B,
+  +320 B for the `vp_ceil_h` plumbing).
+
+### Notes
+
+- The review confirmed the **per-row single-visplane model** as the largest
+  remaining flat defect (farthest-seg-wins flat/light per row; `x1..x2` union
+  bridges interposed walls and sky columns) — already slotted as the visplane
+  pool rewrite. The review adds to that slot's motivation: no global `viewz`
+  (eye is per-seg `front_floor+41`, flattening elevation), the E1M5 step-down
+  back-floor bleed, and portal clip updates ignoring front-sector plane bounds.
+- New wall-path bugs surfaced (separate from flats, now on the roadmap):
+  closed-door faces render as black holes (BIGDOOR2/4 — E1M3/E1M4/E1M7);
+  near-view-parallel one-sided walls dropped entirely (E1M9 spawn corridor,
+  ~70% of the view black); SLADRIP wall animation is a no-op (rotates the name
+  hash together with the entry, so by-name lookup follows the rotation);
+  `FLAT_MAX=64` silently truncates full-IWAD flats (shareware's 54 fit); flat V
+  axis mirrored vs vanilla (`+worldY` instead of `−worldY`); vendored bsp
+  `asr()` is round-toward-zero rather than floor (one-texel flat mis-wrap in
+  negative-coordinate map regions).
+
 ## [0.29.2] - 2026-06-11
 
 ### Changed

@@ -15,6 +15,7 @@
 | Slot | Theme | Status |
 |---|---|---|
 | **v0.28.5** | Visplane pool rewrite (Black Book ch.9 / F08, subsumes F13); rides the `lib/test.cyr` `test_each` refactor | next |
+| **(unslotted)** | Wall-path correctness: closed-door black holes (E1M3/4/7), near-parallel one-sided wall drop (E1M9), SLADRIP anim no-op, FLAT_MAX full-IWAD truncation, vendored-bsp `asr()` trunc-vs-floor | new — 2026-06-12 floor-render review |
 | **v0.28.6** | Sprite + masked-seg depth-aware clipping (F07 / F05b / F05) | after 0.28.5 |
 | **v0.28.7** | Sky + wall-mapping parity (F09) | queued |
 | **v0.28.8** | Structural perf — sidedef/sector index + thing-sector caches (F12 / F15) | queued, bench-gated |
@@ -37,12 +38,28 @@ The graphics review/hardening/audit/performance pass **became v0.28.0** (shipped
 
 The per-row single-`(x1,x2,flat,light)` visplane model can't represent two flats on one screen row, and the farthest seg to touch a row wins (BSP is front-to-back) — so a farther sector's flat can overwrite a nearer one. Replace with a real visplane pool.
 
+> **2026-06-12 floor-render review** (the flat-distance fix cut, CHANGELOG `[Unreleased]`) re-confirmed this slot as the keystone and added concrete evidence: the `x1..x2` row union paints the last seg's flat across interposed walls **and across sky columns** (sky rows no longer self-register, but a non-sky ceiling sharing the row still bridges); E1M5 shows back-floor flat bleed over the front floor strip at a step-down edge; flats/lights bleed across sectors sharing rows. Items 5–6 added from the same review.
+
 | # | Item | Reference | Detail |
 |---|------|-----------|--------|
 | 1 | Visplane pool keyed by (flat, lightnum, height) | Black Book ch. 9 (R_FindPlane/R_DrawPlanes) | per-column `top[]`/`bottom[]`; F08 |
 | 2 | Drop redundant per-cell flat/light re-stores | — | folds into the pool; F13 |
 | 3 | `lib/test.cyr` `test_each` refactor (rides along) | v5.7.43 stdlib | ~32 asserts collapsed; the rewrite needs a healthy PPM-diff harness |
 | 4 | Span shape + count vs reference | E1M1 / E1M3 / E1M5 | flag-gated, PPM-diffed |
+| 5 | Global `viewz` (player sector floor + 41, lift/stair-aware) replacing the per-seg `eye_h = front_floor + 41` model | Black Book ch. 9 (viewz) | renderer currently has no view z at all — elevation is flattened (all floors at equal heights project identically); prerequisite for honest per-plane heights in item 1; supersedes the 0.29.x per-row `vp_ceil_h` stopgap |
+| 6 | Portal clip updates bounded by BOTH sectors (`max(ceil, back_ceil)` / `min(floor, back_floor)`) | Black Book ch. 9 (R_RenderSegLoop) | current `clip_top/bottom ← back_*` only; far geometry leaks past near plane edges |
+
+### Wall-path correctness (unslotted — surfaced by the 2026-06-12 floor-render review)
+
+New bugs found while visually verifying the flat-distance fix across E1M1–E1M9. All are in the **wall** path (`render_seg` / texture infra), not flats; user-visible severity suggests slotting ahead of or alongside v0.28.6.
+
+| # | Item | Evidence | Detail |
+|---|------|----------|--------|
+| 1 | Closed-door faces render as black holes (back `ceil == floor` should draw the upper texture across the full opening) | E1M3/E1M4/E1M7 spawn views, BIGDOOR2/BIGDOOR4 (spec=31) | sharp framebuffer-black rectangle where the door face belongs; geometry projection verified correct, draw never happens |
+| 2 | Near-view-parallel one-sided walls dropped entirely | E1M9 spawn corridor (ld83/ld84, BROWN1) | ~70% of the view black; distant geometry/sprites show through solid walls; the floor spans those walls would open never fill |
+| 3 | SLADRIP wall animation is a no-op | `anim_rotate_tex_3` (texture.cyr) | rotates the 32-byte entry **including the name hash**, and `render_seg` re-resolves textures by name every frame — lookup follows the rotation, content never visibly changes; rotate `width/height/def_ptr` only (or resolve indices at map load — F12 cache) |
+| 4 | `FLAT_MAX = 64` silently truncates full-IWAD flats (shareware's 54 fit) | texture.cyr flat scan | full/registered IWADs exceed 64 → `flat_find = -1` fallback paths activate (gray vlines, scalelight-not-zlight shading); raise cap + log truncation |
+| 5 | Vendored bsp `asr()` is round-toward-zero, not floor | lib (bsp dep) | `fixed_to_int` inherits trunc semantics → one-texel flat mis-wrap over negative world coords + doubled texel band straddling world axes; fix upstream in bsp, bump pin |
 
 ### v0.28.6 — Sprite + masked-seg depth-aware clipping
 
@@ -61,6 +78,9 @@ The single collapsed `clip_top`/`clip_bottom` pair holds the *farthest* opening 
 |---|------|-----------|--------|
 | 1 | Sky horizon anchoring + corrected angular scale | Black Book ch. 8 (R_DrawSkyColumn) | F09; sky-Y to the horizon (not per-column `ct`), per-column view-angle table; never lit |
 | 2 | Brightness / lighting A-B vs reference | Black Book ch. 8 (COLORMAP) | per-light-level PPM diff (carries the F25 verification forward) |
+| 3 | Flat V axis parity (vanilla uses `−worldY`; engine uses `+worldY` — all flats vertically mirrored) | Unofficial Specs / r_plane semantics | one-line per span loop; A-B PPM diff (2026-06-12 review) |
+| 4 | Half-pixel (`FRACUNIT/2`) yslope + column-center offsets | Black Book ch. 9 | rows nearest the horizon get up to 1.5× distance; low visual impact (2026-06-12 review) |
+| 5 | F_SKY1 **floors** treated as sky (vanilla: any plane with `picnum == skyflatnum`) | r_plane semantics | rare but legal in PWADs (2026-06-12 review) |
 
 ### v0.28.8 — Structural performance (O4-independent, bench-gated)
 
