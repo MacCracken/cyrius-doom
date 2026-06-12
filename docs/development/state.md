@@ -1,6 +1,6 @@
 # cyrius-doom — Current State
 
-> **Last refresh**: 2026-06-11 (v0.29.2 — toolchain pin → 6.1.37 [fixes the `--agnos` 3-op-multiply miscompile, known issue #3; 0.29.1 2-op workarounds reverted to clean chained form, **QEMU-verified** fb_buf=256000 / scalelight=6144 / zlight=16384]; world-tick aliveness: monster sight-range cap removed [LOS-only wake, DOOM-faithful], idle monsters now animate standing frames. Catches up the 0.29.0/0.29.1 rows the prior refresh missed.) | **Refresh cadence**: every release (ideally bumped by the release post-hook).
+> **Last refresh**: 2026-06-12 (v0.29.3 — **flat rendering fixed**: flat-span distance was missing the ×PROJ_DIST factor [160× too small → one-texel-per-row smear = the "untextured gray floors" bug, both platforms] + three follow-ups [sky-overdraw unmasking, fake-contrast leak into plane lights, per-row `vp_ceil_h` ceiling heights]. Multi-agent-reviewed [refutation failed on all vectors], all 9 maps visually verified, AGNOS QEMU-verified in-game. Review findings folded into roadmap [visplane slot evidence + new unslotted wall-path bug table]. NOTE: built under cycc **6.2.2** — the launcher ignores the 6.1.37 pin, see toolchain row.) | **Refresh cadence**: every release (ideally bumped by the release post-hook).
 >
 > CLAUDE.md is preferences / process / procedures (durable). This file is **state** (volatile — binary sizes, version, in-flight slots, dep tags, gates). Anything that rots within a minor lives here. See [first-party-documentation § CLAUDE.md](https://github.com/MacCracken/agnosticos/blob/main/docs/development/planning/first-party-documentation.md#claudemd).
 
@@ -8,11 +8,11 @@
 
 ## Current version
 
-**[`VERSION`](../../VERSION)** = `0.29.2` (single source of truth — `cyrius.cyml` reads it via `${file:VERSION}`).
+**[`VERSION`](../../VERSION)** = `0.29.3` (single source of truth — `cyrius.cyml` reads it via `${file:VERSION}`).
 
 | Surface | Pin |
 |---|---|
-| Cyrius toolchain | `cycc 6.1.37` (in `cyrius.cyml`; bumped from 6.1.29 — fixes the `--agnos` 3-operand-chained-constant-multiply miscompile, retiring known issue #3 and the 0.29.1 2-operand workarounds. The local launchers resolve newest cycc regardless of pin, so the pin matches the only cycc that runs) |
+| Cyrius toolchain | `cycc 6.1.37` (in `cyrius.cyml`). **Drift warning**: the installed launcher resolves cycc via CYRIUS_HOME/PATH and ignores the pin — even `~/.cyrius/versions/6.1.37/bin/cyrius` ran cycc **6.2.2** at the 0.29.3 cut (PATH-prepend doesn't fix it). 0.29.3 metrics are therefore on 6.2.2; no 6.2.2 `--agnos` fold regression detected (QEMU serial probe `fixed_mul(VIEW_HEIGHT, PROJ_DIST)=429916160` matches Linux + hand-computed). Lockfile unchanged, verifies 37/0. |
 | `[deps.bsp]` | `1.1.3` (git tag) |
 | `[deps.vani]` | `0.9.4` (git tag, `core` profile — `dist/vani-core.cyr`, 22 `audio_*` symbols) |
 | stdlib | `string`, `alloc`, `fmt`, `vec`, `str`, `io`, `fs`, `args`, `syscalls`, `hashmap`, `tagged`, `fnptr`, `freelist`, `process`, `sakshi` |
@@ -21,28 +21,28 @@
 
 | Metric | Value |
 |---|---|
-| `build/doom` | **601,568 B** (cycc 6.1.37, clean `./lib/`). `build/doom_agnos` = 580,592 B. |
-| Unreachable fns (NOP-sled today, real shrink under O3) | 996 / 294,731 B |
+| `build/doom` | **601,936 B** (cycc 6.2.2 — see toolchain drift note). `build/doom_agnos` = 580,960 B. |
+| Unreachable fns (NOP-sled today, real shrink under O3) | 996 / 292,427 B |
 | Recovery target under Cyrius O3 real DCE | ~260 KB |
-| Frame time | `render_frame` 2.557 ms / `+sprites` 2.526 ms (bench-history 2026-06-11, 0.29.2, cycc 6.1.37, clean `./lib/`). Cross-version comparison vs 0.28.x is **not valid** — the cycc pin changed (6.1.29 → 6.1.37) so any delta mixes codegen with code changes; the 0.29.2 changes are AI-path (monster sight/anim), not render path. ~8.6× headroom on the 22 ms budget. |
-| Hot math | `fixed_mul` 6 ns / `asr` 4 ns / `texture_get_column` ~725 ns / `pcache_get_hit` 7 ns |
+| Frame time | `render_frame` 2.451 ms / `+sprites` 2.452 ms (bench-history 2026-06-12, 0.29.3, cycc 6.2.2). The flat fix costs one extra `fixed_mul` + one `load64` per span row, nothing per-pixel — 0.29.2-row delta (2.492 → 2.451) is variance + codegen (cycc moved 6.1.37 → 6.2.2 underneath, so cross-version deltas mix codegen with code). ~9× headroom on the 22 ms budget. |
+| Hot math | `fixed_mul` 7 ns / `asr` 4 ns / `texture_get_column` ~690 ns / `pcache_get_hit` 7 ns |
 
 Frame-time budget: 22 ms per tick @ 35 Hz. Current: ~12× headroom.
 
-## Gates (last green, 2026-06-11)
+## Gates (last green, 2026-06-12)
 
 | Gate | Result |
 |---|---|
-| `cyrius deps --verify` | **37 verified, 0 failed** on a clean resolve (`rm -rf lib && cyrius deps`). `./lib/` is a gitignored build artifact regenerated from the pinned 6.1.37 stdlib + git-override deps; the committed lock (37 entries) matches it. CI runs `cyrius deps` then this gate. |
-| `cyrius build src/main.cyr build/doom` | OK, 601,568 B (cycc 6.1.37 = pin; clean `./lib/`; no drift warning) |
-| `cyrius build --agnos src/main.cyr build/doom_agnos` | OK, 580,592 B. `agnos/scripts/doom-smoke.sh` **PASS** (QEMU gnoboot+OVMF+NVMe; 240-colour framebuffer; reverted 3-op multiplies serial-verified fb_buf=256000 / scalelight=6144 / zlight=16384) |
+| `cyrius deps --verify` | **37 verified, 0 failed** (lock unchanged from 0.29.2 — pin didn't move; no regen performed under the drifted 6.2.2 launcher, by design). CI runs `cyrius deps` then this gate. |
+| `cyrius build src/main.cyr build/doom` | OK, 601,936 B (cycc **6.2.2** — launcher ignores the 6.1.37 pin, see toolchain row) |
+| `cyrius build --agnos src/main.cyr build/doom_agnos` | OK, 580,960 B. `agnos/scripts/doom-smoke.sh` **PASS** on the 0.29.3 distance-fix build (QEMU gnoboot+OVMF+NVMe; serial probe `fixed_mul(VIEW_HEIGHT, PROJ_DIST)=429916160` = Linux); an in-game E1M1 HMP-sendkey harness screendump additionally verified **textured floors with depth lighting on AGNOS** (the stock smoke only reaches TITLEPIC — never exercises the flat renderer). |
 | `cyrius test tests/doom.tcyr` (WAD-free, CI subset) | 37/37 |
 | `./build/test_doom wad/DOOM1.WAD` (full) | 73/73 |
-| `fuzz_wad` / `fuzz_fixed` | **not re-run this cycle** — 0.29.2 touched things AI/animation + alloc-form reverts, not the WAD parser or `fixed.cyr`; last green at 0.28.0 (1k / 50k clean). |
-| `./build/doom wad/DOOM1.WAD --ppm` | E1M1 + automap + intermission PPMs at 192,015 B each; map summary `V=467 L=475 SD=648 S=85 SG=732 SS=237 N=236 T=138`. **View now faces the map-intended direction** (the prior wall transform rendered ~90° rotated). |
+| `fuzz_wad` / `fuzz_fixed` | **not re-run this cycle** — 0.29.3 touched the render span/marking path only, not the WAD parser or `fixed.cyr`; last green at 0.28.0 (1k / 50k clean). |
+| `./build/doom wad/DOOM1.WAD --ppm` | E1M1 + automap + intermission PPMs at 192,015 B each; map summary `V=467 L=475 SD=648 S=85 SG=732 SS=237 N=236 T=138`. **Floor/ceiling flats now render textured with distance fade** (pre-0.29.3: one-texel-per-row gray smears). |
+| All 9 shareware maps (E1M1–E1M9) | PPM-rendered + **visually verified** at the 0.29.3 cut: 16–33 distinct colors per floor row (vs 1–3 pre-fix), correct perspective convergence + light fade. Known non-flat artifacts catalogued on the roadmap (closed-door black holes E1M3/4/7, E1M9 parallel-wall drop). |
 | bsp 1.1.3 standalone (upstream) | 79/79 tests, 13/13 benches sub-μs, 25K fuzz iters |
 | Lint / fmt | clean across all 20 src modules + vendored libs |
-| All 9 shareware maps (E1M1–E1M9) | rendering via bsp library traversal |
 
 ## Architecture surface
 
@@ -70,6 +70,7 @@ Current arc: **v0.28.x graphics** (review/hardening/parity/performance). The v0.
 | **v0.28.1** | shipped 2026-06-08 | **AGNOS target support** — first port. OS interactions branched under `CYRIUS_TARGET_AGNOS`: inlined agnos syscall numbers (collide with Linux), portable timing (`uptime_ms`/`sleep_ms`), fb queries (`fbinfo`#38/`blit`#39), WAD memory-load (no `lseek`), exit/input/sound paths. Linux build byte-identical. |
 | **v0.28.2** | shipped 2026-06-08 | **DOOM renders on AGNOS** — the 584 KB ELF ring-3 exec's from disk, loads the 4.2 MB `DOOM1.WAD`, builds the palette, and blits a 240-colour frame to the hardware framebuffer via `fbinfo`#38 / `blit`#39. (Unblocked by two AGNOS kernel fixes: PMM→24 MB, phys-page zeroing ≥16 MB.) |
 | **v0.28.3** | shipped 2026-06-09 | **AGNOS keyboard input** via `kbscan`#42 (non-blocking raw Set-1 scancode poll, make/break decode, persistent `key_state`) — DOOM playable past the title screen. WASD/arrows/space/E/F/R/Tab/1–7/Q/Esc. |
+| **v0.29.3** | shipped 2026-06-12 | **Flat rendering fixed** — `render_flat_spans` distance was missing the ×`PROJ_DIST` factor (160× too small → world step ~0 → one texel smeared per row = the "untextured gray floors" bug on AGNOS hardware + Linux; same error pinned zlight fullbright). Follow-ups in the same cut: sky rows no longer registered into `vp_ceil` (F_SKY1 is a real flat — span pass was overdrawing the sky once flats textured), fake contrast no longer leaks into plane lights, per-row `vp_ceil_h` so ceiling spans invert the same height the wall pass projected. Multi-agent review (units/fidelity/refutation + 2 sweeps + 9-map visual + AGNOS QEMU in-game). Review findings → roadmap (visplane slot evidence + new unslotted wall-path bug table). |
 | **v0.29.2** | shipped 2026-06-11 | Toolchain pin → **6.1.37** (fixes the `--agnos` 3-op-multiply miscompile; 0.29.1 2-op workarounds reverted to clean chained form in `framebuf.cyr` + `render.cyr`, QEMU-verified fb_buf=256000 / scalelight=6144 / zlight=16384). World-tick **aliveness**: removed the 1000-unit `MONSTER_SIGHT_RANGE` cap (monsters wake on LOS like real DOOM — was keeping all but the nearest asleep), and idle monsters now animate their two standing frames (were pinned to a static frame). Reproduced via a pty harness driving the real-tty input path. |
 | **v0.29.1** | shipped 2026-06-11 | World-tick froze without input — two platform-specific causes (Linux: `read(stdin)` blocked for non-tty stdin → `input_enable_raw_mode` now forces `O_NONBLOCK` via `fcntl`; AGNOS: a 255 KB/frame `fb_buf` heap overflow from a cycc `--agnos` 3-op-multiply miscompile stomped the render tables → 2-operand workaround). Both found by reproducing the freeze, not static reading. |
 | **v0.29.0** | shipped 2026-06-11 | AGNOS: the kernel scales now — `framebuf_blit_agnos` palette-converts a FIXED 256 KB 32bpp frame and passes the integer scale to `blit`#39 a4[39:32] (agnos 1.44.20); ring 3 writes 64K px/frame instead of scale²·64K, old scale-3 heap cap gone. |

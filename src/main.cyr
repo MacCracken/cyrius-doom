@@ -105,7 +105,7 @@ fn doom_main(): i64 {
     # non-identity arena top (0x3FC00000); no warm-up needed.
     alloc_init();
     args_init();
-    sakshi_info("cyrius-doom v0.29.2", 19);
+    sakshi_info("cyrius-doom v0.29.3", 19);
 
     # WAD path: argv[1] on Linux. On agnos, agnsh `run /bin/doom` passes no argv
     # beyond the path, so default to /DOOM1.WAD (staged on the ext2 root).

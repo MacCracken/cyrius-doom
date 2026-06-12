@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.29.3] - 2026-06-12
+
 ### Fixed
 
 - **Floor/ceiling flats rendered as untextured gray smears** (user-reported from
@@ -49,12 +51,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Verification: 37/37 WAD-free + 73/73 full suite; all nine shareware maps
   PPM-rendered (192,015 B each) and visually verified — floor rows now carry
   16–33 distinct colors vs 1–3 pre-fix, with correct perspective convergence
-  and distance fade. `--agnos` build (580,640 B) QEMU-verified: serial probe
-  `fixed_mul(VIEW_HEIGHT, PROJ_DIST) = 429916160` identical to Linux (no
-  backend fold regression), and an in-game E1M1 sendkey harness screendump
-  shows textured tiled floors with depth lighting on AGNOS. Bench:
-  `render_frame` 2.471 ms (prior 2.492 ms — variance-level; binary 601,936 B,
-  +320 B for the `vp_ceil_h` plumbing).
+  and distance fade. `--agnos` QEMU-verified on the distance-fix build
+  (580,640 B): serial probe `fixed_mul(VIEW_HEIGHT, PROJ_DIST) = 429916160`
+  identical to Linux (no backend fold regression), and an in-game E1M1
+  sendkey harness screendump shows textured tiled floors with depth lighting
+  on AGNOS. Final 0.29.3 binaries: Linux 601,936 B, `--agnos` 580,960 B
+  (+320 B each for the `vp_ceil_h` plumbing). Bench: `render_frame`
+  **2.451 ms** (0.29.2 row 2.492 ms — variance-level). NOTE: built under
+  cycc **6.2.2** (the installed launcher resolves cycc via CYRIUS_HOME/PATH
+  and ignores the 6.1.37 pin — even the `versions/6.1.37/bin` path; lockfile
+  unchanged, verifies 37/0).
 
 ### Notes
 
