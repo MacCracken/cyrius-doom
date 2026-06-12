@@ -1,6 +1,6 @@
 # cyrius-doom — Current State
 
-> **Last refresh**: 2026-06-10 (v0.28.4 — gameplay correctness: render+sprite/movement 90° angle-convention unification, one-sided-wall collision, Linux `termios` VMIN blocking-read (loop froze between keystrokes), perspective-correct wall depth (F22, pulled fwd from 0.29.x), sakshi log routing; toolchain pin → 6.1.29. The 0.28.1–.3 slot rows (AGNOS bring-up arc) — skipped during those patches — were backfilled from `CHANGELOG.md` in this refresh.) | **Refresh cadence**: every release (ideally bumped by the release post-hook).
+> **Last refresh**: 2026-06-11 (v0.29.2 — toolchain pin → 6.1.37 [fixes the `--agnos` 3-op-multiply miscompile, known issue #3; 0.29.1 2-op workarounds reverted to clean chained form, **QEMU-verified** fb_buf=256000 / scalelight=6144 / zlight=16384]; world-tick aliveness: monster sight-range cap removed [LOS-only wake, DOOM-faithful], idle monsters now animate standing frames. Catches up the 0.29.0/0.29.1 rows the prior refresh missed.) | **Refresh cadence**: every release (ideally bumped by the release post-hook).
 >
 > CLAUDE.md is preferences / process / procedures (durable). This file is **state** (volatile — binary sizes, version, in-flight slots, dep tags, gates). Anything that rots within a minor lives here. See [first-party-documentation § CLAUDE.md](https://github.com/MacCracken/agnosticos/blob/main/docs/development/planning/first-party-documentation.md#claudemd).
 
@@ -8,11 +8,11 @@
 
 ## Current version
 
-**[`VERSION`](../../VERSION)** = `0.28.4` (single source of truth — `cyrius.cyml` reads it via `${file:VERSION}`).
+**[`VERSION`](../../VERSION)** = `0.29.2` (single source of truth — `cyrius.cyml` reads it via `${file:VERSION}`).
 
 | Surface | Pin |
 |---|---|
-| Cyrius toolchain | `cycc 6.1.29` (in `cyrius.cyml`; bumped from 6.0.83 — the local launchers all resolve newest cycc regardless of pin, so the pin now matches the only cycc that actually runs) |
+| Cyrius toolchain | `cycc 6.1.37` (in `cyrius.cyml`; bumped from 6.1.29 — fixes the `--agnos` 3-operand-chained-constant-multiply miscompile, retiring known issue #3 and the 0.29.1 2-operand workarounds. The local launchers resolve newest cycc regardless of pin, so the pin matches the only cycc that runs) |
 | `[deps.bsp]` | `1.1.3` (git tag) |
 | `[deps.vani]` | `0.9.4` (git tag, `core` profile — `dist/vani-core.cyr`, 22 `audio_*` symbols) |
 | stdlib | `string`, `alloc`, `fmt`, `vec`, `str`, `io`, `fs`, `args`, `syscalls`, `hashmap`, `tagged`, `fnptr`, `freelist`, `process`, `sakshi` |
@@ -21,23 +21,24 @@
 
 | Metric | Value |
 |---|---|
-| `build/doom` | **600,848 B** (cycc 6.1.29, clean `./lib/`; not directly comparable to the 0.28.0 592,456 B — toolchain codegen + bundled stdlib changed between pins) |
-| Unreachable fns (NOP-sled today, real shrink under O3) | 997 / 293,561 B |
+| `build/doom` | **601,568 B** (cycc 6.1.37, clean `./lib/`). `build/doom_agnos` = 580,592 B. |
+| Unreachable fns (NOP-sled today, real shrink under O3) | 996 / 294,731 B |
 | Recovery target under Cyrius O3 real DCE | ~260 KB |
-| Frame time | `render_frame` 2.520 ms / `+sprites` 2.502 ms (bench-history 2026-06-10, 0.28.4, cycc 6.1.29, clean `./lib/`; F22 perspective depth+U complete). Cross-version comparison vs the 0.28.0 ~1.78 ms is **not valid** — the cycc pin changed (6.0.83 → 6.1.29) so the delta mixes codegen + 0.28.1–.4 code; F22 perspective depth+U is per-column ≈neutral. ~8.7× headroom on the 22 ms budget. |
+| Frame time | `render_frame` 2.557 ms / `+sprites` 2.526 ms (bench-history 2026-06-11, 0.29.2, cycc 6.1.37, clean `./lib/`). Cross-version comparison vs 0.28.x is **not valid** — the cycc pin changed (6.1.29 → 6.1.37) so any delta mixes codegen with code changes; the 0.29.2 changes are AI-path (monster sight/anim), not render path. ~8.6× headroom on the 22 ms budget. |
 | Hot math | `fixed_mul` 6 ns / `asr` 4 ns / `texture_get_column` ~725 ns / `pcache_get_hit` 7 ns |
 
 Frame-time budget: 22 ms per tick @ 35 Hz. Current: ~12× headroom.
 
-## Gates (last green, 2026-06-10)
+## Gates (last green, 2026-06-11)
 
 | Gate | Result |
 |---|---|
-| `cyrius deps --verify` | **37 verified, 0 failed** on a clean resolve (`rm -rf lib && cyrius deps`). `./lib/` is a gitignored build artifact regenerated from the pinned 6.1.29 stdlib + git-override deps; the committed lock (37 entries) matches it. CI runs `cyrius deps` then this gate. |
-| `cyrius build src/main.cyr build/doom` | OK, 600,848 B (cycc 6.1.29 = pin; clean `./lib/`; no drift warning) |
+| `cyrius deps --verify` | **37 verified, 0 failed** on a clean resolve (`rm -rf lib && cyrius deps`). `./lib/` is a gitignored build artifact regenerated from the pinned 6.1.37 stdlib + git-override deps; the committed lock (37 entries) matches it. CI runs `cyrius deps` then this gate. |
+| `cyrius build src/main.cyr build/doom` | OK, 601,568 B (cycc 6.1.37 = pin; clean `./lib/`; no drift warning) |
+| `cyrius build --agnos src/main.cyr build/doom_agnos` | OK, 580,592 B. `agnos/scripts/doom-smoke.sh` **PASS** (QEMU gnoboot+OVMF+NVMe; 240-colour framebuffer; reverted 3-op multiplies serial-verified fb_buf=256000 / scalelight=6144 / zlight=16384) |
 | `cyrius test tests/doom.tcyr` (WAD-free, CI subset) | 37/37 |
 | `./build/test_doom wad/DOOM1.WAD` (full) | 73/73 |
-| `fuzz_wad` / `fuzz_fixed` | **not re-run this cycle** — 0.28.4 touched render/player/input/log, not the WAD parser or `fixed.cyr`; last green at 0.28.0 (1k / 50k clean). |
+| `fuzz_wad` / `fuzz_fixed` | **not re-run this cycle** — 0.29.2 touched things AI/animation + alloc-form reverts, not the WAD parser or `fixed.cyr`; last green at 0.28.0 (1k / 50k clean). |
 | `./build/doom wad/DOOM1.WAD --ppm` | E1M1 + automap + intermission PPMs at 192,015 B each; map summary `V=467 L=475 SD=648 S=85 SG=732 SS=237 N=236 T=138`. **View now faces the map-intended direction** (the prior wall transform rendered ~90° rotated). |
 | bsp 1.1.3 standalone (upstream) | 79/79 tests, 13/13 benches sub-μs, 25K fuzz iters |
 | Lint / fmt | clean across all 20 src modules + vendored libs |
@@ -69,6 +70,9 @@ Current arc: **v0.28.x graphics** (review/hardening/parity/performance). The v0.
 | **v0.28.1** | shipped 2026-06-08 | **AGNOS target support** — first port. OS interactions branched under `CYRIUS_TARGET_AGNOS`: inlined agnos syscall numbers (collide with Linux), portable timing (`uptime_ms`/`sleep_ms`), fb queries (`fbinfo`#38/`blit`#39), WAD memory-load (no `lseek`), exit/input/sound paths. Linux build byte-identical. |
 | **v0.28.2** | shipped 2026-06-08 | **DOOM renders on AGNOS** — the 584 KB ELF ring-3 exec's from disk, loads the 4.2 MB `DOOM1.WAD`, builds the palette, and blits a 240-colour frame to the hardware framebuffer via `fbinfo`#38 / `blit`#39. (Unblocked by two AGNOS kernel fixes: PMM→24 MB, phys-page zeroing ≥16 MB.) |
 | **v0.28.3** | shipped 2026-06-09 | **AGNOS keyboard input** via `kbscan`#42 (non-blocking raw Set-1 scancode poll, make/break decode, persistent `key_state`) — DOOM playable past the title screen. WASD/arrows/space/E/F/R/Tab/1–7/Q/Esc. |
+| **v0.29.2** | shipped 2026-06-11 | Toolchain pin → **6.1.37** (fixes the `--agnos` 3-op-multiply miscompile; 0.29.1 2-op workarounds reverted to clean chained form in `framebuf.cyr` + `render.cyr`, QEMU-verified fb_buf=256000 / scalelight=6144 / zlight=16384). World-tick **aliveness**: removed the 1000-unit `MONSTER_SIGHT_RANGE` cap (monsters wake on LOS like real DOOM — was keeping all but the nearest asleep), and idle monsters now animate their two standing frames (were pinned to a static frame). Reproduced via a pty harness driving the real-tty input path. |
+| **v0.29.1** | shipped 2026-06-11 | World-tick froze without input — two platform-specific causes (Linux: `read(stdin)` blocked for non-tty stdin → `input_enable_raw_mode` now forces `O_NONBLOCK` via `fcntl`; AGNOS: a 255 KB/frame `fb_buf` heap overflow from a cycc `--agnos` 3-op-multiply miscompile stomped the render tables → 2-operand workaround). Both found by reproducing the freeze, not static reading. |
+| **v0.29.0** | shipped 2026-06-11 | AGNOS: the kernel scales now — `framebuf_blit_agnos` palette-converts a FIXED 256 KB 32bpp frame and passes the integer scale to `blit`#39 a4[39:32] (agnos 1.44.20); ring 3 writes 64K px/frame instead of scale²·64K, old scale-3 heap cap gone. |
 | **v0.28.4** | shipped 2026-06-10 | Gameplay correctness. (1) render+sprite/movement **90° angle-convention unification** — `render_transform_vertex` + sprite transforms used depth `dy·cos−dx·sin` (north@0) while movement/hitscan/floors/map use `(cos,sin)` (east@0); walls/sprites now match. (2) **one-sided-wall collision** — `player_check_linedef` treated flagless one-sided walls as passable. (3) **Linux `termios` VMIN** offset off-by-one (`c_line` byte) left VMIN=1 → blocking `read` → loop froze between keystrokes. (4) **perspective-correct wall + masked-seg depth** (interpolate scale not z) — this is **F22**, pulled forward from 0.29.x; texture-U half (F22b) also landed. (5) **sakshi log routing** for boot diagnostics. Toolchain pin → 6.1.29 (committed `cyrius.lock` regenerated against the new stdlib → 37 entries). |
 
 ### Forward 0.28.x slots (re-slotted at the 0.28.4 cut — the AGNOS arc consumed 0.28.1–.3 and gameplay correctness took 0.28.4, so the Black Book parity/perf themes shift to ≥ 0.28.5)
@@ -87,8 +91,9 @@ After 0.28.x: **v0.29.x** O4 micro-perf pass + deep renderer fidelity (F06 nativ
 
 | # | Issue | Workaround |
 |---|---|---|
-| 3 | **cycc `--agnos` miscompiles compile-time-constant 3-operand chained multiplies** — `alloc(SCREEN_WIDTH * SCREEN_HEIGHT * 4)` folds `320*200*4` to **800** (not 256000) on the `--agnos` target only (Linux target correct; 2-operand folds + runtime 3-op multiplies correct). Confirmed cycc 6.1.29 + 6.1.35. Root cause of the 0.29.1 AGNOS world-tick freeze (under-sized `fb_buf` → 255 KB blit overflow stomped colormap/zlight/flat_cache → frame-2 page fault). | Use 2-operand forms (`SCREEN_SIZE * 4`) or `var n = A*B; alloc(n*C)`. Fixed in `framebuf.cyr` + `render.cyr` (0.29.1). Report upstream; audit new all-constant `alloc(X*Y*Z)` sites. |
 | 2 | `lib/yukti.cyr:39: duplicate fn 'sys_stat' (last definition wins)` — stdlib defines `sys_stat` and vani's transitively-bundled yukti also defines it (unannotated). | Codegen-identical, warning-only. Did not fire under cycc 6.0.29 or 6.0.83, but kept tracked until yukti drops `sys_stat` from its dist surface. Gated on a yukti rebundle. |
+> Issue #3 (cycc `--agnos` 3-operand-chained-constant-multiply miscompile — `alloc(320*200*4)` folded to 800 not 256000 on `--agnos` only, root cause of the 0.29.1 AGNOS world-tick freeze) was **resolved in 0.29.2** by the toolchain pin bump to cycc 6.1.37. The 0.29.1 2-operand workarounds in `framebuf.cyr` + `render.cyr` were reverted to the clean chained form and the fold **verified on the actual `--agnos` binary in QEMU** (serial: fb_buf=256000, scalelight=6144, zlight=16384). Confirmed broken on cycc 6.1.29 + 6.1.35.
+>
 > Issue #1 (cycc 6.0.1 lockfile-writer regression — empty `cyrius.lock`) was **resolved in 0.27.5**: toolchain pin bumped to 6.0.29, whose `cyrius deps` writes a canonical lock; `cyrius deps --verify` is unconditional again. The 0.28.4 pin bump to 6.1.29 changed the bundled stdlib, so the committed lock was **regenerated** against it (`rm -rf lib && cyrius deps` → **37 entries**, verify 37/0). `./lib/` is a gitignored build artifact, so the lock must always match the pinned toolchain's stdlib — regenerate + commit it whenever the pin moves. (An earlier 0.28.4 attempt mis-diagnosed this as a "writer regression" and added a CI lock-restore guard; that guard verified the *stale* lock against the *new* stdlib and broke CI — reverted.)
 
 ## Dependency lineage

@@ -357,7 +357,6 @@ fn thing_check_sight(mx, my, tx, ty): i64 {
 enum MonsterConst {
     MONSTER_CHASE_SPEED = 65536;
     MONSTER_ATTACK_RANGE = 4194304;
-    MONSTER_SIGHT_RANGE = 65536000;
     MONSTER_MELEE_RANGE = 4194304;
 }
 
@@ -381,7 +380,18 @@ fn thing_animate(idx): i64 {
     # DEAD: L (frame 11)
 
     switch (state) {
-        case 1: { thing_set_frame(idx, 0); }
+        # SPAWN/idle: monsters loop their two standing frames (A<->B) at a slow
+        # ~8-tick cadence, staggered by index so they don't all bob in lockstep
+        # (real DOOM's *_STND states alternate A/B). Non-monster idle things
+        # (decor with a single sprite frame, items) stay on frame 0 — alternating
+        # them would request a B frame many decorations don't have.
+        case 1: {
+            if (thing_category(idx) == CAT_MONSTER) {
+                thing_set_frame(idx, (asr(tick_get_count(), 3) + idx) & 1);
+            } else {
+                thing_set_frame(idx, 0);
+            }
+        }
         case 8: { thing_set_frame(idx, 0); }
         case 2: {
             if (frame < 0) { frame = 0; }
@@ -433,12 +443,15 @@ fn thing_ai_tick(idx): i64 {
 
     # State machine
     if (state == STATE_SPAWN) {
-        # Idle: check if player is visible and in range
-        if (dist < MONSTER_SIGHT_RANGE) {
-            if (thing_check_sight(tx, ty, player_x, player_y) == 1) {
-                thing_set_state(idx, STATE_SEE);
-                thing_set_tics(idx, 10);
-            }
+        # Idle: wake on line-of-sight to the player. Real DOOM gates monster
+        # wake-up on P_CheckSight (LOS) + FOV/sound, with NO distance cap — the
+        # old `dist < MONSTER_SIGHT_RANGE` (1000-unit) cull kept all but the
+        # nearest monsters permanently asleep, so a standing player saw a dead
+        # world. LOS alone is the gate now; thing_check_sight already culls
+        # monsters with a one-sided wall between them and the player.
+        if (thing_check_sight(tx, ty, player_x, player_y) == 1) {
+            thing_set_state(idx, STATE_SEE);
+            thing_set_tics(idx, 10);
         }
     }
 

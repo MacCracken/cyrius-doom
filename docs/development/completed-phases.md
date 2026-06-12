@@ -4,6 +4,14 @@
 
 Each entry: one row, headline only. For the full changelog see [`CHANGELOG.md`](../../CHANGELOG.md).
 
+## v0.29.x — AGNOS scaling + world-tick correctness
+
+| Version | Shipped | Milestone |
+|---------|---------|-----------|
+| v0.29.0 | 2026-06-11 | **AGNOS: the kernel scales.** `framebuf_blit_agnos` stops expanding scale² pixels in ring 3 — it palette-converts the raw 320×200 frame into a FIXED 256 KB 32bpp buffer and passes the integer scale to `blit`#39 a4[39:32] (agnos 1.44.20). Ring 3 writes 64 K px/frame instead of scale²·64 K; the old scale-3 heap cap is gone (panel's natural integer scale, e.g. 7 on 2560×1440, capped at the kernel's 16). Ship with agnos ≥ 1.44.20 (older kernels ignore the scale bits — unscaled centred, degraded but harmless). |
+| v0.29.1 | 2026-06-11 | **World tick froze without input — two platform-specific causes, both reproduced (not static-read).** Linux: `read(stdin)` blocked the loop for any non-tty stdin (pipe/FIFO/redirect/x11view bridge/failed `ioctl`) where `VMIN=0` is ignored — `input_enable_raw_mode` now also forces `O_NONBLOCK` on fd 0 via `fcntl`, restored on exit. AGNOS: `framebuf_init` sized `fb_buf` via `alloc(SCREEN_WIDTH*SCREEN_HEIGHT*4)`, a 3-operand chained constant multiply cycc's `--agnos` backend folded to 800 (not 256000) → a 255 KB/frame heap overflow that stomped `colormap`/`zlight`/`flat_cache` → frame-2 `render_flat_spans` page fault. Worked around with 2-operand forms (`SCREEN_SIZE*4`, split light-table allocs). |
+| v0.29.2 | 2026-06-11 | **Toolchain → cycc 6.1.37 + world-tick aliveness.** 6.1.37 fixes the `--agnos` 3-op-multiply miscompile (retires known-issue #3), so the 0.29.1 2-operand workarounds in `framebuf.cyr` + `render.cyr` revert to the clean chained form — **verified on the real `--agnos` binary in QEMU** (serial probe: fb_buf=256000, scalelight=6144, zlight=16384; `doom-smoke.sh` PASS). Aliveness (the loop already ticked at 35 Hz post-0.29.1; the *world* just wasn't visibly changing): removed the 1000-unit `MONSTER_SIGHT_RANGE` cap — monsters now wake on line-of-sight like real DOOM (the cap kept all but the nearest 936-unit monster asleep at the E1M1 spawn) — and idle monsters now animate their two standing frames (A↔B, ~8-tick, staggered by index) instead of a static frame. Reproduced via a pty harness driving the real-tty input path. `cyrius.lock` regenerated (37 entries). Binary 601,568 B (agnos 580,592 B); `render_frame` 2.557 ms; 37/37 + 73/73. |
+
 ## v0.28.x — Graphics arc (in flight, 0.28.0 shipped)
 
 | Version | Shipped | Milestone |

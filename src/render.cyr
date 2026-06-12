@@ -260,18 +260,13 @@ var scalelight = 0;
 var zlight = 0;
 
 fn render_init_light_tables(): i64 {
-    # NB: each size is split into a 2-operand const fold (entries) then a
-    # var*const multiply — NOT a single LIGHTLEVELS*MAXLIGHT*8 chained constant
-    # multiply. cycc's --agnos backend miscompiles compile-time-constant
-    # 3-operand chained multiplies (it folded 320*200*4 to 800; see
-    # framebuf.cyr), which would under-allocate these light tables and OOB the
-    # render_flat_light reads. 2-operand folds are correct on --agnos.
-    # scalelight: 16 * 48 = 768 entries
-    var sl_entries = LIGHTLEVELS * MAXLIGHTSCALE;
-    scalelight = alloc(sl_entries * 8);
-    # zlight: 16 * 128 = 2048 entries
-    var zl_entries = LIGHTLEVELS * MAXLIGHTZ;
-    zlight = alloc(zl_entries * 8);
+    # scalelight: 16 * 48 = 768 entries; zlight: 16 * 128 = 2048 entries.
+    # The 0.29.1 split into a 2-operand entry-count then a var*const multiply
+    # worked around a cycc ≤ 6.1.35 --agnos miscompile of 3-operand chained
+    # constant multiplies (see framebuf.cyr); cycc 6.1.37 folds them correctly,
+    # so the single chained form is restored.
+    scalelight = alloc(LIGHTLEVELS * MAXLIGHTSCALE * 8);
+    zlight = alloc(LIGHTLEVELS * MAXLIGHTZ * 8);
 
     for (var i = 0; i < LIGHTLEVELS; i += 1) {
         var startmap = ((LIGHTLEVELS - 1 - i) * 2) * NUMCOLORMAPS / LIGHTLEVELS;

@@ -1,6 +1,6 @@
 # Documentation Health — cyrius-doom
 
-> **Last refresh**: 2026-06-10 (v0.28.4 — gameplay correctness + toolchain → 6.1.29; CHANGELOG / state.md / roadmap.md / completed-phases.md / CLAUDE.md rows touched; the 0.28.1–.3 (AGNOS bring-up arc) slot rows were backfilled from CHANGELOG and the forward parity/perf themes re-slotted to ≥ 0.28.5). Prior refresh: 2026-06-07 v0.28.0. | **Refresh cadence**: opportunistic — update the affected row when the underlying doc is touched. No periodic sweep cron.
+> **Last refresh**: 2026-06-11 (v0.29.2 — toolchain → 6.1.37 [retires `--agnos` miscompile known-issue #3]; world-tick aliveness [sight-cap removal + idle-monster animation]; CHANGELOG / state.md / completed-phases.md rows touched, plus the 0.29.0/0.29.1 rows the 0.28.4-era refresh had missed). Prior refresh: 2026-06-10 v0.28.4. | **Refresh cadence**: opportunistic — update the affected row when the underlying doc is touched. No periodic sweep cron.
 >
 > **Scope**: this repo only (`cyrius-doom`) — the entire `docs/` tree plus root-level docs (README, CHANGELOG, CLAUDE.md, CONTRIBUTING, SECURITY, CODE_OF_CONDUCT). VERSION is tracked as a structural artifact, not a doc.
 >
@@ -32,7 +32,7 @@ This is a **ledger**, not a one-time audit. Rewrite-in-place as docs change.
 | File | Last touched | Status | Action |
 |---|---|---|---|
 | `README.md` | 2026-04-30 | ✅ Fresh | Top-level project README. Verify in passing at next minor closeout — pre-dates the v0.27.x cycle but content is durable. |
-| `CHANGELOG.md` | 2026-06-10 | ✅ Fresh | **Source of truth per CLAUDE.md.** Through v0.28.4 (gameplay correctness: angle-convention/collision/termios/perspective-depth/logging + toolchain 6.1.29 + CI lock guard). Refreshed every release. |
+| `CHANGELOG.md` | 2026-06-11 | ✅ Fresh | **Source of truth per CLAUDE.md.** Through v0.29.2 (toolchain → 6.1.37 + 3-op-workaround reverts QEMU-verified; world-tick aliveness: sight-cap removal + idle-monster animation). 0.29.0/0.29.1 already present. Refreshed every release. |
 | `CLAUDE.md` | 2026-06-10 | ✅ Fresh | Durable content only (state delegated to `state.md`). Toolchain ref → `cycc 6.1.29`; the Lockfile (Work-Loop §7) + CI `cyrius.lock` notes updated for the 6.1.29 pin (regenerate the lock against the pinned stdlib; `./lib/` is a gitignored build artifact) at v0.28.4. Project-identity / Goal / Process / Rules / Cyrius Conventions all durable. |
 | `CONTRIBUTING.md` | 2026-04-30 | ✅ Fresh | Verify in passing at next minor closeout — durable content. |
 | `SECURITY.md` | 2026-04-30 | ✅ Fresh | Public reporting policy. Durable; pre-dates v0.27.x but no surface change. |
@@ -65,7 +65,7 @@ No numbered architecture notes yet — the convention is `NNN-kebab-case-title.m
 
 | File | Last touched | Status | Action |
 |---|---|---|---|
-| `state.md` | 2026-06-10 | ✅ Fresh | **Rotates every release.** Current to v0.28.4 — binary 600,848 B, `render_frame` 2.520 ms, toolchain 6.1.29, `cyrius.lock` regenerated (37 entries). 0.28.1–.3 (AGNOS arc) slot rows backfilled from CHANGELOG; 0.28.4 row added; forward parity/perf themes re-slotted to 0.28.5–.11. |
+| `state.md` | 2026-06-11 | ✅ Fresh | **Rotates every release.** Current to v0.29.2 — binary 601,568 B (agnos 580,592 B), `render_frame` 2.557 ms, toolchain 6.1.37, `cyrius.lock` regenerated (37 entries). 0.29.0/0.29.1/0.29.2 slot rows added (the 0.28.4-era refresh had missed 0.29.0/.1); known-issue #3 (`--agnos` 3-op miscompile) retired + resolution-footnoted. |
 | `roadmap.md` | 2026-06-10 | ✅ Fresh | **Re-slotted at v0.28.4 cut** — 0.28.1–.4 consumed by the AGNOS arc + gameplay correctness, so the Black Book parity/perf themes (visplane F08, sprite-clip F07/F05, sky F09, structural perf F12/F15, sub-audits) shifted to **0.28.5–.11**; F22 retired from v0.29.x (shipped early in 0.28.4). Slot map + all detail-section headers renumbered. |
 | `completed-phases.md` | 2026-06-10 | ✅ Fresh | **Updated at v0.28.4 cut** — added v0.28.1/.2/.3 (AGNOS bring-up arc) + v0.28.4 (gameplay correctness) rows under the v0.28.x section. Chronological one-line index. |
 | `roadmap-crossover.md` | 2026-04-30 | 🟠 Read-through | AgentWorld / secureyeoman crossover doc — spatial threat visualization via the DOOM engine. Not touched during the v0.27.x cycle; status against current secureyeoman scope not verified. Read-through at next minor closeout. |

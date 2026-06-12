@@ -7,6 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.29.2] - 2026-06-11
+
+### Changed
+
+- **Toolchain pin `6.1.29` → `6.1.37`** (`cyrius.cyml`). cycc 6.1.37 fixes the
+  `--agnos` 3-operand-chained-constant-multiply miscompile (known issue #3), so
+  the 0.29.1 2-operand workarounds are reverted to the clean chained form:
+  `framebuf.cyr` `fb_buf = alloc(SCREEN_WIDTH * SCREEN_HEIGHT * 4)` and
+  `render.cyr` `scalelight`/`zlight = alloc(LIGHTLEVELS * MAXLIGHT* * 8)`.
+  **Verified the fold on the actual `--agnos` binary in QEMU** (serial probe):
+  `fb_buf=256000`, `scalelight=6144`, `zlight=16384` — all correct (would be 800
+  / undersized under cycc ≤ 6.1.35). `doom-smoke.sh` PASS — DOOM renders on AGNOS,
+  240-colour framebuffer, no heap overflow. `cyrius.lock` regenerated for the new
+  pin (clean `rm -rf lib && cyrius deps` → **37 entries**, verify 37/0). Linux
+  build 601,568 B; 37/37 + 73/73; `render_frame` 2.557 ms (perf-neutral; codegen
+  changed with the pin so cross-version comparison is not valid).
+
+### Fixed
+
+- **Standing still showed a dead world — monsters never woke and idle monsters
+  never animated.** Two root causes, both reproduced via a pseudo-terminal
+  harness driving the real-tty input path (the 35 Hz loop itself was already live
+  at a verified 35.3 Hz after 0.29.1 — the *world* just wasn't visibly changing):
+  - **Monster sight was capped at 1000 units.** `thing_ai_tick`'s SPAWN→SEE gate
+    required `dist < MONSTER_SIGHT_RANGE` (1000 units), so all but the nearest
+    monsters stayed permanently asleep — a probe at the E1M1 spawn found the
+    nearest monster 936 units away and only 1 of 29 inside the cap. Real DOOM
+    gates wake-up on line-of-sight (P_CheckSight) with **no distance cap**; the
+    cap and the `MONSTER_SIGHT_RANGE` constant are removed. Monsters now wake on
+    LOS as the player advances (verified: holding forward, `chase` count climbs
+    0→1→2 and `see`→2 as line-of-sight opens). `thing_check_sight` already culls
+    monsters with a one-sided wall between them and the player.
+  - **Idle monsters rendered a single static frame.** `thing_animate`'s SPAWN
+    case pinned monsters to frame 0; real DOOM's `*_STND` states alternate the
+    two standing frames. Idle monsters now loop frames A↔B at an ~8-tick cadence,
+    staggered by thing index (verified: idle frame-sum oscillates with zero
+    input). Non-monster idle things (single-frame decor, items) stay on frame 0 —
+    alternating them would request a B sprite many decorations don't have.
+
+### Notes
+
+- The E1M1 *spawn point itself* stays quiet with zero input even after these
+  fixes — no monster anywhere has line-of-sight into the spawn alcove (faithful
+  to DOOM). Visible ambient life now comes from idle-monster animation of any
+  monster in view, and from monsters waking as the player moves. Sector light
+  specials (flicker/strobe/glow) remain unimplemented — a future ambient-life
+  item, not in this cut.
+
 ## [0.29.1] - 2026-06-11
 
 ### Fixed
