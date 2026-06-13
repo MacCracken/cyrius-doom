@@ -7,6 +7,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.30.1] - 2026-06-13
+
+Player-feedback patch — four rendering/animation bugs reported from live play:
+the weapon stuck dead-center with its firing animation "totally off" and no
+muzzle flash, walls warping/mirroring when turning, and enemies appearing to
+always face the player. Closes the **U-swap-mirror** and **muzzle-flash-overlay**
+items deferred from 0.29.4 / 0.30.0. Binary **610,576 B** (+2,232 over 0.30.0).
+`render_frame` **2.957 ms** / `+sprites` **2.952 ms** (E1M1, cycc 6.2.2) — render
+path effectively unchanged from 0.30.0 (within run-to-run variance); the extra
+combined-rotation lump lookups don't register at the E1M1 spawn sprite count.
+~7× headroom on the 22 ms budget.
+
+### Added
+
+- **Muzzle flash overlay** — firing now draws DOOM's separate `ps_flash` psprite
+  (`PISF` / `SHTF` / `CHGF` / `MISF`) fullbright over the gun
+  (`render_draw_flash`; per-weapon flash family + frame count set in
+  `render_set_weapon`). 0.30.0 only lit the *gun* fullbright on fire — the actual
+  flash sprite was never drawn. Melee weapons (fist/chainsaw) have no flash;
+  plasma's `PLSF` is absent in the shareware WAD (guarded by `wad_find_lump < 0`).
+  Closes the 0.30.0-deferred "separate muzzle-flash overlay sprite" roadmap item.
+
+### Fixed
+
+- **Weapon psprite position + firing animation.** The gun was placed at
+  `sx = 253 + leftoffset`, `sy = 228 + topoffset`, which equals the correct
+  DOOM `sx = 1 − leftoffset`, `sy = 16 − topoffset` **only when
+  leftoffset == −126 and topoffset == −106** — i.e. exactly the pistol ready
+  frame (`PISGA0`), by coincidence. Every other weapon and every other animation
+  frame (each lump has its own offsets) was mispositioned, so the fist sat
+  dead-center (should be lower-right) and the gun lurched across the screen as it
+  fired. Replaced with the DOOM-accurate hotspot formula via a shared
+  `render_blit_psprite` blitter. (roadmap reference-parity #1, `R_DrawPSprite`)
+- **Wall texture mirrored when turning.** `render_seg`'s `sx1 > sx2` swap
+  reordered the screen-X / depth endpoints but **not** the texture-U endpoints,
+  so any seg projecting right-to-left rendered its texture mirrored — and flipped
+  the instant a turn crossed that screen-order threshold ("walls warp when
+  turning"). The U endpoints now swap with screen order, in both the wall pass
+  and the deferred masked-midtexture pass (`render_masked_segs`). (roadmap
+  wall-path #7, MED)
+- **Enemies always faced the player.** `sprite_find_frame` only looked up the
+  6-char single-rotation lump (`TROOA1`); DOOM packs rotations 2/3/4/6/7/8 into
+  combined 8-char lumps (`TROOA2A8` = rotation 2, and rotation 8 mirrored), so
+  every rotation but 1 and 5 missed and fell back to the front view. It now
+  resolves the combined lumps and returns a flip flag; `sprite_render_all`
+  mirrors the patch columns when set. Verified against the WAD: 1→`TROOA1`,
+  2→`TROOA2A8`, 3→`TROOA3A7`, 4→`TROOA4A6`, 5→`TROOA5`, 6→`TROOA4A6`(flip),
+  7→`TROOA3A7`(flip), 8→`TROOA2A8`(flip). `_spr_prefix` scratch grown 8 → 16 B
+  to hold the 8-char names.
+- **Monster walk strobe.** SEE/CHASE flipped the two walk frames every 35 Hz
+  tick (`thing_animate` runs each tick), ~10× too fast. Now gated to a ~4-tick
+  cadence, staggered by thing index (matches DOOM `*_RUN` ≈3-tic frames).
+
+### Notes
+
+- No control changes: fire stays on **F**; **Space** = use and **Enter** keep
+  their roles (a brief experiment binding fire to Space/Enter was reverted at the
+  user's request — those keys are meant to be other buttons).
+
 ## [0.30.0] - 2026-06-13
 
 Shooting-mechanics overhaul — a multi-agent review of the full path (input →

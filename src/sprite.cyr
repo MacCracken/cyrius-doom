@@ -89,7 +89,7 @@ fn sprite_build_lookup(): i64 {
 var _spr_prefix = 0;
 
 fn sprite_find_lump(thing_type): i64 {
-    if (_spr_prefix == 0) { _spr_prefix = alloc(8); }
+    if (_spr_prefix == 0) { _spr_prefix = alloc(16); }
     var prefix = _spr_prefix;
     store64(prefix, 0);
 
@@ -117,18 +117,27 @@ fn sprite_find_lump(thing_type): i64 {
     return wad_find_lump(prefix);
 }
 
-# Find sprite lump with rotation based on viewer angle
-# rotation: 1-8, where 1=front, 5=back
+# Find sprite lump with rotation based on viewer angle (dead helper kept for
+# API symmetry; discards the flip flag). rotation: 1-8, 1=front, 5=back.
 fn sprite_find_rotated(thing_type, rotation): i64 {
-    return sprite_find_frame(thing_type, rotation, 0);
+    var l, fl = sprite_find_frame(thing_type, rotation, 0);
+    return l;
 }
 
-# Find sprite lump for a thing type with specific frame and rotation
-# frame: 0=A, 1=B, 2=C, ...
+# Find sprite lump for a thing type with a specific frame and rotation.
+# Returns (lump_index, flip): flip==1 means draw the patch columns mirrored
+# horizontally.
+#
+# DOOM packs two opposite rotations into one lump named <PREF><F><r1><F><r2>
+# (smaller rotation first; mirror pairs 2&8, 3&7, 4&6); the r2 view is the r1
+# graphic flipped. The old code only looked up the 6-char "<PREF><F><R>", which
+# exists for rotations 1 and 5 but NOT for 2/3/4/6/7/8 (those live in combined
+# 8-char lumps like TROOA2A8). So every non-1/5 rotation fell through to the
+# rotation-1 fallback and monsters appeared to permanently face the player.
+# frame: 0=A, 1=B, ...   rotation: 1..8 (or 0 for a symmetric sprite).
 fn sprite_find_frame(thing_type, rotation, frame): i64 {
-    if (_spr_prefix == 0) { _spr_prefix = alloc(8); }
+    if (_spr_prefix == 0) { _spr_prefix = alloc(16); }
     var prefix = _spr_prefix;
-    store64(prefix, 0);
 
     var found = 0;
     for (var i = 0; i < spr_lookup_count; i += 1) {
@@ -138,31 +147,58 @@ fn sprite_find_frame(thing_type, rotation, frame): i64 {
             break;
         }
     }
-    if (found == 0) { return -1; }
+    if (found == 0) { return (-1, 0); }
 
-    var frame_char = 65 + frame;
+    var fc = 65 + frame;
 
-    # Try rotation 0 (symmetric) first
-    store8(prefix + 4, frame_char);
+    # 1) Symmetric sprite (rotation 0): <PREF><F>0 — items / single-view decor.
+    store8(prefix + 4, fc);
     store8(prefix + 5, 48);
     store8(prefix + 6, 0);
     var lump = wad_find_lump(prefix);
-    if (lump >= 0) { return lump; }
+    if (lump >= 0) { return (lump, 0); }
 
-    # Try specific rotation
+    # 2) Direct single-rotation lump: <PREF><F><R> (exists for rotations 1, 5).
     store8(prefix + 5, 48 + rotation);
+    store8(prefix + 6, 0);
     lump = wad_find_lump(prefix);
-    if (lump >= 0) { return lump; }
+    if (lump >= 0) { return (lump, 0); }
 
-    # Fallback to frame A rotation 0
+    # 3) Combined mirrored lump (partner = 10 - R: 2&8, 3&7, 4&6). Rotations
+    #    2..4 are the first (unflipped) pair; 6..8 the second (flipped).
+    var partner = 10 - rotation;
+    if (rotation >= 2 && rotation <= 4) {
+        store8(prefix + 5, 48 + rotation);
+        store8(prefix + 6, fc);
+        store8(prefix + 7, 48 + partner);
+        store8(prefix + 8, 0);
+        lump = wad_find_lump(prefix);
+        if (lump >= 0) { return (lump, 0); }
+    }
+    if (rotation >= 6 && rotation <= 8) {
+        store8(prefix + 5, 48 + partner);
+        store8(prefix + 6, fc);
+        store8(prefix + 7, 48 + rotation);
+        store8(prefix + 8, 0);
+        lump = wad_find_lump(prefix);
+        if (lump >= 0) { return (lump, 1); }
+    }
+
+    # 4) Fallbacks: this frame's rotation 1, then frame A rotation 1 / 0.
+    store8(prefix + 5, 49);
+    store8(prefix + 6, 0);
+    lump = wad_find_lump(prefix);
+    if (lump >= 0) { return (lump, 0); }
+
     store8(prefix + 4, 65);
+    store8(prefix + 5, 49);
+    store8(prefix + 6, 0);
+    lump = wad_find_lump(prefix);
+    if (lump >= 0) { return (lump, 0); }
+
     store8(prefix + 5, 48);
     lump = wad_find_lump(prefix);
-    if (lump >= 0) { return lump; }
-
-    # Fallback to frame A rotation 1
-    store8(prefix + 5, 49);
-    return wad_find_lump(prefix);
+    return (lump, 0);
 }
 
 # Calculate sprite rotation (1-8) from viewer angle and thing angle
@@ -241,7 +277,7 @@ fn sprite_render_all(): i64 {
         var thing_ang = thing_angle(thing_idx);
         var rot = sprite_calc_rotation(tx, ty, thing_ang);
         var frame = thing_frame(thing_idx);
-        var lump = sprite_find_frame(ttype, rot, frame);
+        var lump, flip = sprite_find_frame(ttype, rot, frame);
         if (lump < 0) { continue; }
 
         var psz = wad_lump_size(lump);
@@ -328,9 +364,12 @@ fn sprite_render_all(): i64 {
             var clip_t = load64(clip_top + scr_x * 8);
             var clip_b = load64(clip_bottom + scr_x * 8);
 
-            # Source column in patch
+            # Source column in patch (mirrored when this rotation came from the
+            # flipped half of a combined lump).
             var src_col = c * pw / sprite_w;
+            if (flip == 1) { src_col = pw - 1 - src_col; }
             if (src_col >= pw) { src_col = pw - 1; }
+            if (src_col < 0) { src_col = 0; }
 
             # Bound the column directory + post walk (mirrors texture_get_column).
             # Same missing C2 hardening as the weapon decoder. (0.28.0 F02)

@@ -78,6 +78,16 @@ var weapon_bob_time = 0;
 # rule (review #6). One guarded buffer, overwritten each call.
 var weapon_name_buf = 0;
 
+# Muzzle flash: a SECOND psprite overlaid on the gun during firing, drawn
+# fullbright (DOOM's ps_flash). The flash graphic is a separate lump family
+# (PISF/SHTF/CHGF/MISF) keyed off the weapon — never drawn before, so the gun
+# fired with no visible flash. Set per-weapon in render_set_weapon; the fist
+# and chainsaw have no flash (weapon_flash_max == 0).
+var weapon_flash_prefix = 0;
+var weapon_flash_max = 0;
+var weapon_flash_buf = 0;
+var weapon_flash_name_buf = 0;
+
 enum WeaponConst {
     WEAPON_BUF_SIZE = 16384;
     FIRE_TICKS = 2;
@@ -87,22 +97,36 @@ enum WeaponConst {
 fn render_set_weapon(weapon_id): i64 {
     if (weapon_patch_buf == 0) { weapon_patch_buf = alloc(WEAPON_BUF_SIZE); }
     if (weapon_prefix == 0) { weapon_prefix = alloc(8); }
+    if (weapon_flash_prefix == 0) { weapon_flash_prefix = alloc(8); }
     store64(weapon_prefix, 0);
+    store64(weapon_flash_prefix, 0);
 
-    # Map weapon ID to sprite prefix, frame count, and per-frame tick budget.
+    # Map weapon ID to sprite prefix, frame count, per-frame tick budget, and
+    # the muzzle-flash family + flash-frame count.
     # weapon_fire_ticks * (weapon_fire_max-1) ~= refire period (the shot is
     # gated on the animation returning to frame 0), so tune cadence here:
     # 1=fist, 2=pistol, 3=shotgun, 4=chaingun, 5=rocket, 6=chainsaw, 7=plasma
+    # weapon_flash_max == 0 => no flash (fist/chainsaw are melee).
     weapon_fire_ticks = 2;
+    weapon_flash_max = 0;
     switch (weapon_id) {
         case 1: { memcpy(weapon_prefix, "PUNG", 4); weapon_fire_max = 4; weapon_fire_ticks = 3; }
-        case 2: { memcpy(weapon_prefix, "PISG", 4); weapon_fire_max = 5; weapon_fire_ticks = 3; }
-        case 3: { memcpy(weapon_prefix, "SHTG", 4); weapon_fire_max = 4; weapon_fire_ticks = 6; }
-        case 4: { memcpy(weapon_prefix, "CHGG", 4); weapon_fire_max = 2; weapon_fire_ticks = 4; }
-        case 5: { memcpy(weapon_prefix, "MISG", 4); weapon_fire_max = 2; weapon_fire_ticks = 20; }
+        case 2: { memcpy(weapon_prefix, "PISG", 4); weapon_fire_max = 5; weapon_fire_ticks = 3;
+                  memcpy(weapon_flash_prefix, "PISF", 4); weapon_flash_max = 1; }
+        case 3: { memcpy(weapon_prefix, "SHTG", 4); weapon_fire_max = 4; weapon_fire_ticks = 6;
+                  memcpy(weapon_flash_prefix, "SHTF", 4); weapon_flash_max = 2; }
+        # Chaingun/rocket guns have only 2 frames (A,B), so weapon_fire_frame
+        # only ever reaches 1 — flash_max is capped at 1 to match (their CHGFB0 /
+        # MISFB0-D0 frames need an independent flash counter; tracked on roadmap).
+        case 4: { memcpy(weapon_prefix, "CHGG", 4); weapon_fire_max = 2; weapon_fire_ticks = 4;
+                  memcpy(weapon_flash_prefix, "CHGF", 4); weapon_flash_max = 1; }
+        case 5: { memcpy(weapon_prefix, "MISG", 4); weapon_fire_max = 2; weapon_fire_ticks = 20;
+                  memcpy(weapon_flash_prefix, "MISF", 4); weapon_flash_max = 1; }
         case 6: { memcpy(weapon_prefix, "SAWG", 4); weapon_fire_max = 4; weapon_fire_ticks = 2; }
-        case 7: { memcpy(weapon_prefix, "PLSG", 4); weapon_fire_max = 2; weapon_fire_ticks = 2; }
-        default: { memcpy(weapon_prefix, "PISG", 4); weapon_fire_max = 5; weapon_fire_ticks = 3; }
+        case 7: { memcpy(weapon_prefix, "PLSG", 4); weapon_fire_max = 2; weapon_fire_ticks = 2;
+                  memcpy(weapon_flash_prefix, "PLSF", 4); weapon_flash_max = 1; }
+        default: { memcpy(weapon_prefix, "PISG", 4); weapon_fire_max = 5; weapon_fire_ticks = 3;
+                  memcpy(weapon_flash_prefix, "PISF", 4); weapon_flash_max = 1; }
     }
 
     weapon_fire_frame = 0;
@@ -164,6 +188,99 @@ fn weapon_bob_tick(is_moving): i64 {
     return 0;
 }
 
+# Blit one decoded psprite patch (gun or flash) at the DOOM player-sprite
+# screen anchor, applying the current weapon bob and a COLORMAP light level.
+#
+# Positioning (the long-standing "weapon stuck center / animation jumps around"
+# bug): DOOM places a psprite so its leftoffset/topoffset hotspot lands at the
+# screen anchor — screen_x = anchor_x - leftoffset, screen_y = anchor_y -
+# topoffset. The old code used `253 + leftoffset` / `228 + topoffset`, which
+# equals the correct `1 - leftoffset` / `16 - topoffset` ONLY when
+# leftoffset == -126 and topoffset == -106 — i.e. exactly the pistol's ready
+# frame (PISGA0). Every other weapon AND every other animation frame (each has
+# its own offsets) was mispositioned, so the gun sat centered and lurched
+# across the screen as it fired. anchor_x = 1, anchor_y = 16 reproduce the
+# (correct) PISGA0 placement while staying correct for all frames.
+fn render_blit_psprite(buf, psz, light): i64 {
+    var pw = read_le16(buf);
+    var loff = read_le16(buf + 4);
+    var toff = read_le16(buf + 6);
+    if (loff >= 0x8000) { loff -= 0x10000; }
+    if (toff >= 0x8000) { toff -= 0x10000; }
+
+    var sx = 1 - loff + weapon_bob_x;
+    var sy = 16 - toff + weapon_bob_y;
+    var pend = buf + psz;
+
+    for (var col = 0; col < pw; col += 1) {
+        var scr_x = sx + col;
+        if (scr_x < 0) { continue; }
+        if (scr_x >= SCREEN_WIDTH) { continue; }
+
+        # Bound the column directory + post walk (mirrors texture_get_column).
+        # The weapon/sprite/HUD patch decoders never got the C2 hardening that
+        # texture_get_column has, so a malformed/short patch lump could read
+        # past buf. Latent on the trusted IWAD, reachable under future PWAD
+        # support. (0.28.0 F01)
+        if (8 + col * 4 + 4 > psz) { continue; }
+        var col_off = read_le32(buf + 8 + col * 4);
+        if (col_off >= psz) { continue; }
+        var post = buf + col_off;
+
+        var safety = 0;
+        while (safety < 128) {
+            if (post + 1 >= pend) { break; }
+            var td = load8(post);
+            if (td == 255) { break; }
+            var length = load8(post + 1);
+            if (post + 4 + length > pend) { break; }
+            var pixels = post + 3;
+
+            for (var py = 0; py < length; py += 1) {
+                var scr_y = sy + td + py;
+                if (scr_y < 0) { continue; }
+                if (scr_y >= SCREEN_HEIGHT) { continue; }
+                var pal = load8(pixels + py);
+                if (pal != 0) {
+                    framebuf_pixel(scr_x, scr_y, render_shade(pal, light));
+                }
+            }
+            post += 4 + length;
+            safety += 1;
+        }
+    }
+    return 0;
+}
+
+# Overlay the muzzle flash during firing (DOOM's ps_flash psprite). Drawn
+# fullbright (light 0) on top of the gun, on the flash frame matching the
+# weapon's current fire frame. Silently no-ops for melee weapons (no flash
+# family) and when the flash lump is absent (e.g. plasma in the shareware WAD).
+fn render_draw_flash(): i64 {
+    if (weapon_flash_max <= 0) { return 0; }
+    if (weapon_fire_frame < 1) { return 0; }
+    if (weapon_fire_frame > weapon_flash_max) { return 0; }
+    if (weapon_flash_prefix == 0) { return 0; }
+    if (weapon_flash_buf == 0) { weapon_flash_buf = alloc(WEAPON_BUF_SIZE); }
+    if (weapon_flash_name_buf == 0) { weapon_flash_name_buf = alloc(8); }
+
+    var name = weapon_flash_name_buf;
+    memcpy(name, weapon_flash_prefix, 4);
+    store8(name + 4, 65 + (weapon_fire_frame - 1));
+    store8(name + 5, 48);
+    store8(name + 6, 0);
+    store8(name + 7, 0);
+    var lump = wad_find_lump(name);
+    if (lump < 0) { return 0; }
+
+    var psz = wad_lump_size(lump);
+    if (psz < 8) { return 0; }
+    if (psz > WEAPON_BUF_SIZE) { return 0; }
+    wad_read_lump_into(lump, weapon_flash_buf, psz);
+    render_blit_psprite(weapon_flash_buf, psz, 0);
+    return 0;
+}
+
 fn render_draw_weapon(light_level): i64 {
     if (weapon_lump < 0) { return 0; }
     if (weapon_patch_buf == 0) { weapon_patch_buf = alloc(WEAPON_BUF_SIZE); }
@@ -190,62 +307,11 @@ fn render_draw_weapon(light_level): i64 {
         wad_read_lump_into(weapon_lump, weapon_patch_buf, psz);
         weapon_lump_cached = weapon_lump;
     }
-    var pend = weapon_patch_buf + psz;
 
-    var pw = read_le16(weapon_patch_buf);
-    var ph = read_le16(weapon_patch_buf + 2);
-    var loff = read_le16(weapon_patch_buf + 4);
-    var toff = read_le16(weapon_patch_buf + 6);
-    if (loff >= 0x8000) { loff -= 0x10000; }
-    if (toff >= 0x8000) { toff -= 0x10000; }
+    render_blit_psprite(weapon_patch_buf, psz, wlight);
 
-    # DOOM psprite positioning:
-    # psp->sx = 128 (pistol ready), centered at 160
-    # screen_x = (psp_sx - leftoffset) = 128 - (-126) = 254 → right side
-    # screen_y = WEAPONTOP(32) - topoffset = 32 - (-106) = 138 → lower screen
-    # The sprite extends from (254, 138) to (311, 200)
-    # Pistol: center-right, hand visible from bottom-right
-    # Adjusted from DOOM psprite coords to match original appearance
-    var sx = 253 + loff + weapon_bob_x;
-    var sy = 228 + toff + weapon_bob_y;
-
-    for (var col = 0; col < pw; col += 1) {
-        var scr_x = sx + col;
-        if (scr_x < 0) { continue; }
-        if (scr_x >= SCREEN_WIDTH) { continue; }
-
-        # Bound the column directory + post walk (mirrors texture_get_column).
-        # The weapon/sprite/HUD patch decoders never got the C2 hardening that
-        # texture_get_column has, so a malformed/short patch lump could read
-        # past weapon_patch_buf. Latent on the trusted IWAD, reachable under
-        # future PWAD support. (0.28.0 F01)
-        if (8 + col * 4 + 4 > psz) { continue; }
-        var col_off = read_le32(weapon_patch_buf + 8 + col * 4);
-        if (col_off >= psz) { continue; }
-        var post = weapon_patch_buf + col_off;
-
-        var safety = 0;
-        while (safety < 128) {
-            if (post + 1 >= pend) { break; }
-            var td = load8(post);
-            if (td == 255) { break; }
-            var length = load8(post + 1);
-            if (post + 4 + length > pend) { break; }
-            var pixels = post + 3;
-
-            for (var py = 0; py < length; py += 1) {
-                var scr_y = sy + td + py;
-                if (scr_y < 0) { continue; }
-                if (scr_y >= SCREEN_HEIGHT) { continue; }
-                var pal = load8(pixels + py);
-                if (pal != 0) {
-                    framebuf_pixel(scr_x, scr_y, render_shade(pal, wlight));
-                }
-            }
-            post += 4 + length;
-            safety += 1;
-        }
-    }
+    # Muzzle flash overlay (drawn after the gun so it sits on top).
+    render_draw_flash();
     return 0;
 }
 
@@ -372,7 +438,7 @@ var vp_ceil_h = 0;
 # Stored during BSP wall pass, rendered after walls before sprites
 # Each entry: 13 fields * 8 = 104 bytes
 #   0: sx1   8: sx2   16: mid_tex  24: lightnum
-#  32: ty1  40: ty2   48: seg_len  56: seg_offset
+#  32: ty1  40: ty2   48: u_left   56: u_right   (screen-ordered texture-U)
 #  64: sd_xoff  72: sd_yoff  80: floor_h  88: ceil_h
 #  96: back_floor_h  104: back_ceil_h  112: dont_peg_bottom
 # ================================================================
@@ -385,7 +451,7 @@ var masked_segs = 0;
 var masked_count = 0;
 
 fn render_store_masked(sx1, sx2, mid_tex, lightnum_val, ty1_val, ty2_val,
-seg_len_val, seg_offset_val, sd_xoff_val, sd_yoff_val,
+u_left_val, u_right_val, sd_xoff_val, sd_yoff_val,
 floor_h_val, ceil_h_val, back_floor_h_val, back_ceil_h_val, dpb): i64 {
     if (masked_segs == 0) { masked_segs = alloc(MASKED_MAX * MASKED_ENTRY_SIZE); }
     if (masked_count >= MASKED_MAX) { return 0; }
@@ -396,8 +462,8 @@ floor_h_val, ceil_h_val, back_floor_h_val, back_ceil_h_val, dpb): i64 {
     store64(base + 24, lightnum_val);
     store64(base + 32, ty1_val);
     store64(base + 40, ty2_val);
-    store64(base + 48, seg_len_val);
-    store64(base + 56, seg_offset_val);
+    store64(base + 48, u_left_val);
+    store64(base + 56, u_right_val);
     store64(base + 64, sd_xoff_val);
     store64(base + 72, sd_yoff_val);
     store64(base + 80, floor_h_val);
@@ -558,6 +624,7 @@ fn render_seg(seg_idx): i64 {
     var sx2 = HALF_WIDTH + fixed_to_int(fixed_div(fixed_mul(tx2, PROJ_DIST), ty2));
 
     # Ensure left-to-right order
+    var seg_u_swapped = 0;
     if (sx1 > sx2) {
         # Swap endpoints
         var tmp = sx1;
@@ -566,6 +633,10 @@ fn render_seg(seg_idx): i64 {
         tmp = ty1;
         ty1 = ty2;
         ty2 = tmp;
+        # The seg's texture-U endpoints are keyed to v1→v2; flag that screen
+        # order no longer matches vertex order so the U endpoints get swapped
+        # to match (else the texture mirrors — "walls warp when turning").
+        seg_u_swapped = 1;
     }
 
     # Clip to screen bounds
@@ -645,6 +716,18 @@ fn render_seg(seg_idx): i64 {
     var world_dy = map_vertex_y(v2_idx) - map_vertex_y(v1_idx);
     var seg_len = fixed_approx_dist(world_dx, world_dy);
 
+    # Texture-U at the seg endpoints, in SCREEN left→right order. u at v1 is the
+    # sidedef x-offset plus the seg's running offset along the linedef; u at v2
+    # is that plus the seg's world length. When the projection swapped sx1/sx2
+    # (v1 projected to the right of v2), the left screen column is v2 and the
+    # right is v1, so the U endpoints swap to match — otherwise the wall texture
+    # renders mirrored, and flips the instant a turn crosses that threshold.
+    var u_v1 = sd_xoff + seg_offset;
+    var u_v2 = sd_xoff + seg_offset + fixed_to_int(seg_len);
+    var u_left = u_v1;
+    var u_right = u_v2;
+    if (seg_u_swapped == 1) { u_left = u_v2; u_right = u_v1; }
+
     # Check for two-sided linedef (portal to another sector)
     var is_twosided = map_linedef_flags(line_idx) & ML_TWOSIDED;
     var back_floor_h = floor_h;
@@ -660,11 +743,14 @@ fn render_seg(seg_idx): i64 {
         }
     }
 
-    # Store masked midtexture for deferred rendering (two-sided with mid texture)
+    # Store masked midtexture for deferred rendering (two-sided with mid texture).
+    # Pass the screen-ordered U endpoints (already swap-corrected) so the
+    # deferred pass mirrors the wall pass — masked midtextures had the same
+    # screen-order U-swap mirror bug.
     if (is_twosided != 0) {
         if (mid_tex >= 0) {
             render_store_masked(sx1, sx2, mid_tex, lightnum, ty1, ty2,
-            seg_len, seg_offset, sd_xoff, sd_yoff,
+            u_left, u_right, sd_xoff, sd_yoff,
             floor_h, ceil_h, back_floor_h, back_ceil_h, dont_peg_bottom);
         }
     }
@@ -689,10 +775,8 @@ fn render_seg(seg_idx): i64 {
     # = lerp(uow) / col_scale. Interpolating u linearly in screen-x (affine)
     # sheared textures on oblique walls; a perspective-correct DEPTH paired with
     # an affine U is exactly the "half fix worse than none" the roadmap warned
-    # about, so depth and U are corrected together. u_left/u_right are the texel
-    # U at the sx1/sx2 endpoints (same mapping the old affine line used).
-    var u_left  = sd_xoff + seg_offset;
-    var u_right = sd_xoff + seg_offset + fixed_to_int(seg_len);
+    # about, so depth and U are corrected together. u_left/u_right (computed
+    # above, screen-ordered) are the texel U at the sx1/sx2 endpoints.
     var uow1 = u_left * wscale1;
     var uow2 = u_right * wscale2;
 
@@ -1066,9 +1150,8 @@ fn render_masked_segs(): i64 {
         var mlight = load64(base + 24);
         var mty1 = load64(base + 32);
         var mty2 = load64(base + 40);
-        var mseg_len = load64(base + 48);
-        var mseg_off = load64(base + 56);
-        var mxoff = load64(base + 64);
+        var mu_left = load64(base + 48);
+        var mu_right = load64(base + 56);
         var myoff = load64(base + 72);
         var mfloor = load64(base + 80);
         var mceil = load64(base + 88);
@@ -1087,9 +1170,9 @@ fn render_masked_segs(): i64 {
 
         var mscale1 = fixed_div(PROJ_DIST, mty1);
         var mscale2 = fixed_div(PROJ_DIST, mty2);
-        # Perspective-correct U endpoints (F22), matching render_seg.
-        var mu_left  = mxoff + mseg_off;
-        var mu_right = mxoff + mseg_off + fixed_to_int(mseg_len);
+        # Perspective-correct U endpoints (F22), matching render_seg. mu_left /
+        # mu_right are the screen-ordered texel-U the wall pass stored (already
+        # swap-corrected and inclusive of the sidedef x-offset).
         var muow1 = mu_left * mscale1;
         var muow2 = mu_right * mscale2;
         for (var col = sx1; col <= sx2; col += 1) {

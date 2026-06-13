@@ -16,7 +16,8 @@
 |---|---|---|
 | **v0.28.5** | Visplane pool rewrite (Black Book ch.9 / F08, subsumes F13); rides the `lib/test.cyr` `test_each` refactor | next |
 | **(unslotted)** | Wall-path correctness: closed-door black holes (E1M3/4/7), near-parallel one-sided wall drop (E1M9), SLADRIP anim no-op, FLAT_MAX full-IWAD truncation, vendored-bsp `asr()` trunc-vs-floor | new — 2026-06-12 floor-render review |
-| **(unslotted)** | Shooting cosmetics deferred from **0.30.0**: BEXP rocket-explosion frames (detonation is instant), separate muzzle-flash overlay sprite (currently fullbright-on-fire), full xdeath giblet animation on overkill (currently a faster death); precise missile-vs-wall trace (reuses `player_check_position`, so a rocket can clip on tall steps in 2.5D) | new — 2026-06-13 shooting overhaul |
+| **(unslotted)** | Shooting cosmetics deferred from **0.30.0**: BEXP rocket-explosion frames (detonation is instant), ~~separate muzzle-flash overlay sprite~~ (**shipped 0.30.1**), full xdeath giblet animation on overkill (currently a faster death); precise missile-vs-wall trace (reuses `player_check_position`, so a rocket can clip on tall steps in 2.5D) | new — 2026-06-13 shooting overhaul |
+| **(unslotted)** | **Animated multi-frame muzzle flash** for chaingun (CHGFB0) + rocket (MISFB0–D0): the 0.30.1 flash overlay shows only frame A because those guns have a 2-frame animation (`weapon_fire_frame` only ever reaches 1). Needs an independent flash-frame counter in `weapon_tick` decoupled from `weapon_fire_max`. | new — 2026-06-13 0.30.1 review (confirmed cosmetic finding) |
 | **v0.28.6** | Sprite + masked-seg depth-aware clipping (F07 / F05b / F05) | after 0.28.5 |
 | **v0.28.7** | Sky + wall-mapping parity (F09) | queued |
 | **v0.28.8** | Structural perf — sidedef/sector index + thing-sector caches (F12 / F15) | queued, bench-gated |
@@ -59,7 +60,7 @@ The per-row single-`(x1,x2,flat,light)` visplane model can't represent two flats
 | 1 | ~~Closed-door faces render as black holes~~ **RESOLVED 0.29.4** | E1M3/E1M7 — BIGDOOR2 = patch `DOOR2_4` (17544 B) | NOT a geometry/draw bug — the patch cache truncated `DOOR2_4` past byte 8192 (cols 58–127 lost → black). Fixed by `PCACHE_DATA_SIZE` 8192→40960. |
 | 2 | ~~Near-view-parallel one-sided walls dropped entirely~~ **RESOLVED 0.29.4** | E1M9 spawn corridor (BROWN1) | NOT a geometry drop — the BROWN1 texture's patches are 8-char PNAMES names that `wad_name_eq`→`strlen` over-read and rejected → `patch_lumps=-1` → walls composited to all-black (looked like void). Fixed by null-terminating the PNAMES field in `texture_init`. |
 | 6 | **NEW (HIGH):** closed-sector clip inversion | survived refutation; not in the 4 spawn views | a two-sided line backing a closed/zero-height sector is never promoted to a solid wall, so its projected back-floor crosses back-ceiling and **inverts `clip_top`/`clip_bottom`**, permanently blacking the column. Reproduces facing a **closed door during play** (stage a viewpoint to confirm). |
-| 7 | **NEW (MED):** wall texture-U swap mirror | survived refutation | the `sx1>sx2` swap in `render_seg` reorders `sx`/`ty` but **not** the texture-U endpoints (`u_left`/`u_right`, `uow1`/`uow2`), mirroring textures on segs that project right-to-left. Verify during play; swap the U/scale endpoints alongside sx/ty. |
+| 7 | ~~wall texture-U swap mirror~~ **RESOLVED 0.30.1** | reported as "walls warp when turning"; multi-agent-verified correct | the `sx1>sx2` swap in `render_seg` reordered `sx`/`ty` but not the texture-U endpoints, mirroring segs that project right-to-left (and flipping the instant a turn crossed the threshold). Fixed via a `seg_u_swapped` flag that swaps `u_left`/`u_right` in both the wall pass and `render_masked_segs`. |
 | 3 | SLADRIP wall animation is a no-op | `anim_rotate_tex_3` (texture.cyr) | rotates the 32-byte entry **including the name hash**, and `render_seg` re-resolves textures by name every frame — lookup follows the rotation, content never visibly changes; rotate `width/height/def_ptr` only (or resolve indices at map load — F12 cache) |
 | 4 | `FLAT_MAX = 64` silently truncates full-IWAD flats (shareware's 54 fit) | texture.cyr flat scan | full/registered IWADs exceed 64 → `flat_find = -1` fallback paths activate (gray vlines, scalelight-not-zlight shading); raise cap + log truncation |
 | 5 | Vendored bsp `asr()` is round-toward-zero, not floor | lib (bsp dep) | `fixed_to_int` inherits trunc semantics → one-texel flat mis-wrap over negative world coords + doubled texel band straddling world axes; fix upstream in bsp, bump pin |
@@ -106,7 +107,7 @@ The single collapsed `clip_top`/`clip_bottom` pair holds the *farthest* opening 
 
 | # | Item | Reference | Detail |
 |---|------|-----------|--------|
-| 1 | `R_DrawPSprite` weapon-sprite coords | Black Book ch. 11 | weapon bob `psprite_x`/`psprite_y` vs reference |
+| 1 | ~~`R_DrawPSprite` weapon-sprite coords~~ **RESOLVED 0.30.1** | Black Book ch. 11 | psprite hotspot `sx=1−leftoffset / sy=16−topoffset` (was `253+loff/228+toff`, pistol-only by coincidence) — all weapons/frames now anchored; muzzle-flash overlay added. Bob still rides the same `weapon_bob_x/y` deltas. |
 | 2 | Episode-end intermission | Unofficial Specs §1.10 | E1M8 boss kill → text → bunny scroll |
 | 3 | Visplane budget under stress | Unofficial Specs §10.4 | E1M9 + max things: no overflow (bounded by the F08 pool) |
 

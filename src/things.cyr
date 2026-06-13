@@ -412,14 +412,15 @@ fn thing_animate(idx): i64 {
             }
         }
         case 8: { thing_set_frame(idx, 0); }
+        # SEE/CHASE walk cycle: alternate the two walk frames (A<->B) on a
+        # ~4-tick cadence, staggered by index. The old `1 - frame` toggled every
+        # 35Hz tick (thing_animate runs each tick), strobing the sprite ~10x too
+        # fast — the "enemy animation is off" jitter. (DOOM *_RUN frames ~3 tic.)
         case 2: {
-            if (frame < 0) { frame = 0; }
-            if (frame > 1) { frame = 0; }
-            thing_set_frame(idx, 1 - frame);
+            thing_set_frame(idx, (asr(tick_get_count(), 2) + idx) & 1);
         }
         case 3: {
-            if (frame > 1) { frame = 0; }
-            thing_set_frame(idx, 1 - frame);
+            thing_set_frame(idx, (asr(tick_get_count(), 2) + idx) & 1);
         }
         case 4: {
             if (frame < 2) { thing_set_frame(idx, 2); }
