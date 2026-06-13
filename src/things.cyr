@@ -398,51 +398,59 @@ fn thing_animate(idx): i64 {
     # DIE: cycle H-K once (frames 7-10), then stop
     # DEAD: L (frame 11)
 
-    switch (state) {
+    # NB: an `if/else` ladder, NOT a `switch (state)`. cycc's jump-table codegen
+    # for the original switch (sparse/out-of-order labels — case 8 sat between 1
+    # and 2 — plus `var` decls inside case bodies) emitted a frame that smashed
+    # this function's return address: shooting a monster (-> STATE_PAIN/CHASE
+    # animation) crashed with a corrupted `ret` (SIGSEGV @ RIP=1 / SIGILL).
+    # Isolated by bisection: removing the switch eliminated the crash; this
+    # equivalent if-ladder is clean under sustained combat. See field_notes.
+    if (state == STATE_SPAWN) {
         # SPAWN/idle: monsters loop their two standing frames (A<->B) at a slow
         # ~8-tick cadence, staggered by index so they don't all bob in lockstep
         # (real DOOM's *_STND states alternate A/B). Non-monster idle things
-        # (decor with a single sprite frame, items) stay on frame 0 — alternating
-        # them would request a B frame many decorations don't have.
-        case 1: {
-            if (thing_category(idx) == CAT_MONSTER) {
-                thing_set_frame(idx, (asr(tick_get_count(), 3) + idx) & 1);
+        # (single-frame decor, items) stay on frame 0.
+        if (thing_category(idx) == CAT_MONSTER) {
+            var f1 = (asr(tick_get_count(), 3) + idx) & 1;
+            thing_set_frame(idx, f1);
+        } else {
+            thing_set_frame(idx, 0);
+        }
+    } else {
+        if (state == STATE_SEE || state == STATE_CHASE) {
+            # SEE/CHASE walk cycle: alternate the two walk frames (A<->B) on a
+            # ~4-tick cadence, staggered by index. (DOOM *_RUN frames ~3 tic.)
+            var f2 = (asr(tick_get_count(), 2) + idx) & 1;
+            thing_set_frame(idx, f2);
+        } else {
+            if (state == STATE_ATTACK) {
+                if (frame < 2) { thing_set_frame(idx, 2); }
+                else {
+                    if (frame >= 3) { thing_set_frame(idx, 2); }
+                    else { thing_set_frame(idx, 3); }
+                }
             } else {
-                thing_set_frame(idx, 0);
+                if (state == STATE_PAIN) {
+                    if (frame < 4) { thing_set_frame(idx, 4); }
+                    else {
+                        if (frame >= 5) { thing_set_frame(idx, 4); }
+                        else { thing_set_frame(idx, 5); }
+                    }
+                } else {
+                    if (state == STATE_DIE) {
+                        if (frame < 7) { thing_set_frame(idx, 7); }
+                        else {
+                            if (frame < 10) { thing_set_frame(idx, frame + 1); }
+                        }
+                    } else {
+                        if (state == STATE_DEAD) { thing_set_frame(idx, 11); }
+                        else {
+                            if (state == STATE_ITEM) { thing_set_frame(idx, 0); }
+                        }
+                    }
+                }
             }
         }
-        case 8: { thing_set_frame(idx, 0); }
-        # SEE/CHASE walk cycle: alternate the two walk frames (A<->B) on a
-        # ~4-tick cadence, staggered by index. The old `1 - frame` toggled every
-        # 35Hz tick (thing_animate runs each tick), strobing the sprite ~10x too
-        # fast — the "enemy animation is off" jitter. (DOOM *_RUN frames ~3 tic.)
-        case 2: {
-            thing_set_frame(idx, (asr(tick_get_count(), 2) + idx) & 1);
-        }
-        case 3: {
-            thing_set_frame(idx, (asr(tick_get_count(), 2) + idx) & 1);
-        }
-        case 4: {
-            if (frame < 2) { thing_set_frame(idx, 2); }
-            else {
-                if (frame >= 3) { thing_set_frame(idx, 2); }
-                else { thing_set_frame(idx, 3); }
-            }
-        }
-        case 5: {
-            if (frame < 4) { thing_set_frame(idx, 4); }
-            else {
-                if (frame >= 5) { thing_set_frame(idx, 4); }
-                else { thing_set_frame(idx, 5); }
-            }
-        }
-        case 6: {
-            if (frame < 7) { thing_set_frame(idx, 7); }
-            else {
-                if (frame < 10) { thing_set_frame(idx, frame + 1); }
-            }
-        }
-        case 7: { thing_set_frame(idx, 11); }
     }
     return 0;
 }

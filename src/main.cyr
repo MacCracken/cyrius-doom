@@ -203,6 +203,18 @@ fn doom_main(): i64 {
         menu_draw_lump("M_SKULL1", 6, 92);
         framebuf_write_ppm("/tmp/doom_skill.ppm");
         sakshi_info("wrote /tmp/doom_skill.ppm", 25);
+
+        framebuf_clear(0);
+        menu_draw_lump("M_OPTTTL", 108, 15);
+        menu_draw_lump("M_ENDGAM", 60, 37);
+        menu_draw_lump("M_MESSG", 60, 53);
+        menu_draw_lump("M_DETAIL", 60, 69);
+        menu_draw_lump("M_SCRNSZ", 60, 85);
+        menu_draw_lump("M_MSENS", 60, 101);
+        menu_draw_lump("M_SVOL", 60, 117);
+        menu_draw_lump("M_SKULL1", 44, 34);
+        framebuf_write_ppm("/tmp/doom_options.ppm");
+        sakshi_info("wrote /tmp/doom_options.ppm", 27);
         wad_close();
         doom_exit(0);
     }

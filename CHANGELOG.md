@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Player-feedback patch — two crashes/dead-ends reported from live play: the game
+coredumped during combat (shooting a monster), and the main-menu "Options" item
+did nothing. Binary **611,888 B** (+1,312 over 0.30.1). Tests **63/63** WAD-free,
+**101/101** full.
+
+### Fixed
+
+- **Combat coredump (`thing_animate` switch miscompile)** — shooting a monster
+  crashed the game with a corrupted return (`SIGSEGV` @ `RIP=0x1`, sometimes
+  `SIGILL`). Root cause: cycc's jump-table codegen for `thing_animate`'s
+  `switch (state)` emitted a frame that smashed the function's own return
+  address. The switch had sparse/out-of-order case labels (`case 8` sat between
+  `1` and `2`) and `var` declarations inside case bodies; the smash detonated at
+  a later `ret` (e.g. a `STATE_PAIN` thing's `thing_set_frame`), which is why it
+  presented as a "death" crash. Reproduced deterministically (force-damage
+  monsters → pain/die animation) and isolated by bisection — removing the switch
+  eliminated the crash. **Fix:** rewrote the state→frame mapping as an
+  equivalent `if/else` ladder (cycc's if-codegen is solid); clean under sustained
+  combat. Not toolchain-specific — identical miscompiled binary under both the
+  pinned cycc 6.1.37 and 6.2.2. (`src/things.cyr`)
+
+### Added
+
+- **Options menu screen** — selecting "Options" on the main menu opened nothing
+  (the case was unhandled, a silent no-op). Added a navigable `MENU_OPTIONS`
+  screen (`M_OPTTTL` heading + End Game / Messages / Graphic Detail / Screen Size
+  / Mouse Sensitivity / Sound Volume, original DOOM `OptionsDef` layout, skull
+  cursor). The individual settings are display-only stubs for now; `ESC` / `Q`
+  returns to the main menu. Also added the screen to `--ppm-menu`
+  (`/tmp/doom_options.ppm`). (`src/menu.cyr`, `src/main.cyr`)
+
 ## [0.30.1] - 2026-06-13
 
 Player-feedback patch — four rendering/animation bugs reported from live play:
