@@ -15,10 +15,40 @@ var sine_table = 0;
 var viewangle_to_x = 0;
 var x_to_viewangle = 0;
 
+# ================================================================
+# Pseudo-random number generator (P_Random analogue)
+# ================================================================
+# Original DOOM uses a fixed 256-entry rndtable for demo determinism. We use
+# a clean-room LCG (Numerical-Recipes multiplier) seeded to a fixed constant
+# in tables_init — deterministic across runs (good for replays + tests) and
+# decorrelated from the frame counter, unlike the old `tick_get_count() % N`
+# damage rolls. Drives weapon damage spread, monster painchance, shotgun
+# pellet scatter, and splash falloff. i64 multiply wraps (two's complement) —
+# that wraparound IS the generator.
+var rng_state = 0;
+
+fn p_random_seed(s): i64 { rng_state = s; return 0; }
+
+# Returns a pseudo-random byte 0..255.
+fn p_random(): i64 {
+    rng_state = rng_state * 1103515245 + 12345;
+    # Bits 16..23 — the low byte of an LCG has poor entropy, so shift first.
+    return asr(rng_state, 16) & 255;
+}
+
+# Returns a pseudo-random value in 0..n-1 (0 if n <= 0).
+fn p_random_range(n): i64 {
+    if (n <= 0) { return 0; }
+    return p_random() % n;
+}
+
 fn tables_init(): i64 {
     sine_table = alloc(8192);
     viewangle_to_x = alloc(2560);
     x_to_viewangle = alloc(2560);
+
+    # Fixed seed: deterministic combat RNG (demo/test reproducibility).
+    p_random_seed(0x13572468);
 
     # Build sine table using Bhaskara I approximation
     # First quadrant: indices 0..256 (0..90 degrees)

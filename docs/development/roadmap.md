@@ -16,6 +16,7 @@
 |---|---|---|
 | **v0.28.5** | Visplane pool rewrite (Black Book ch.9 / F08, subsumes F13); rides the `lib/test.cyr` `test_each` refactor | next |
 | **(unslotted)** | Wall-path correctness: closed-door black holes (E1M3/4/7), near-parallel one-sided wall drop (E1M9), SLADRIP anim no-op, FLAT_MAX full-IWAD truncation, vendored-bsp `asr()` trunc-vs-floor | new — 2026-06-12 floor-render review |
+| **(unslotted)** | Shooting cosmetics deferred from **0.30.0**: BEXP rocket-explosion frames (detonation is instant), separate muzzle-flash overlay sprite (currently fullbright-on-fire), full xdeath giblet animation on overkill (currently a faster death); precise missile-vs-wall trace (reuses `player_check_position`, so a rocket can clip on tall steps in 2.5D) | new — 2026-06-13 shooting overhaul |
 | **v0.28.6** | Sprite + masked-seg depth-aware clipping (F07 / F05b / F05) | after 0.28.5 |
 | **v0.28.7** | Sky + wall-mapping parity (F09) | queued |
 | **v0.28.8** | Structural perf — sidedef/sector index + thing-sector caches (F12 / F15) | queued, bench-gated |

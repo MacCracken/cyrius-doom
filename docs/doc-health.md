@@ -1,6 +1,6 @@
 # Documentation Health — cyrius-doom
 
-> **Last refresh**: 2026-06-12 (v0.29.3 — flat-rendering cut: CHANGELOG / state.md / completed-phases.md / roadmap.md rows touched; roadmap gains the floor-render-review fold-in [visplane-slot evidence + unslotted wall-path bug table]). Prior refresh: 2026-06-11 v0.29.2. | **Refresh cadence**: opportunistic — update the affected row when the underlying doc is touched. No periodic sweep cron.
+> **Last refresh**: 2026-06-13 (v0.30.0 — shooting-mechanics overhaul: CHANGELOG / state.md / roadmap.md rows touched; new audit `2026-06-13-shooting-hitscan.md`; CLAUDE.md test-count refs bumped 37/73 → 63/101. completed-phases.md unchanged — 0.30.0 prepared but not yet tagged, same as 0.29.4). Prior refresh: 2026-06-12 v0.29.3. | **Refresh cadence**: opportunistic — update the affected row when the underlying doc is touched. No periodic sweep cron.
 >
 > **Scope**: this repo only (`cyrius-doom`) — the entire `docs/` tree plus root-level docs (README, CHANGELOG, CLAUDE.md, CONTRIBUTING, SECURITY, CODE_OF_CONDUCT). VERSION is tracked as a structural artifact, not a doc.
 >
@@ -32,8 +32,8 @@ This is a **ledger**, not a one-time audit. Rewrite-in-place as docs change.
 | File | Last touched | Status | Action |
 |---|---|---|---|
 | `README.md` | 2026-04-30 | ✅ Fresh | Top-level project README. Verify in passing at next minor closeout — pre-dates the v0.27.x cycle but content is durable. |
-| `CHANGELOG.md` | 2026-06-12 | ✅ Fresh | **Source of truth per CLAUDE.md.** Through **v0.29.3** (flat-rendering cut: flat-span distance ×PROJ_DIST root-cause fix + sky-overdraw / fake-contrast-leak / per-row-ceiling-height follow-ups; multi-agent-reviewed, AGNOS QEMU-verified; cycc 6.2.2 drift noted). Refreshed every release. |
-| `CLAUDE.md` | 2026-06-10 | ✅ Fresh | Durable content only (state delegated to `state.md`). Toolchain ref → `cycc 6.1.29`; the Lockfile (Work-Loop §7) + CI `cyrius.lock` notes updated for the 6.1.29 pin (regenerate the lock against the pinned stdlib; `./lib/` is a gitignored build artifact) at v0.28.4. Project-identity / Goal / Process / Rules / Cyrius Conventions all durable. |
+| `CHANGELOG.md` | 2026-06-13 | ✅ Fresh | **Source of truth per CLAUDE.md.** Through **v0.30.0** (shooting overhaul: fire-cadence gate, hitscan LOS, pain-lock/painchance, corpse visibility, psprite leak, rocket projectile + splash, barrel explosions, shotgun spread, per-weapon cadence, dynamic weapon light, p_random; +26 combat tests + fuzz_weapon; AGNOS QEMU-verified). Refreshed every release. |
+| `CLAUDE.md` | 2026-06-13 | ✅ Fresh | Durable content only (state delegated to `state.md`). Closeout/CI test-count refs bumped 37/73 → **63/101** at v0.30.0 (combat tests added). Toolchain ref → `cycc 6.1.29`; Lockfile (Work-Loop §7) + CI `cyrius.lock` notes for the pin (regenerate against the pinned stdlib; `./lib/` is a gitignored build artifact). Project-identity / Goal / Process / Rules / Cyrius Conventions all durable. |
 | `CONTRIBUTING.md` | 2026-04-30 | ✅ Fresh | Verify in passing at next minor closeout — durable content. |
 | `SECURITY.md` | 2026-04-30 | ✅ Fresh | Public reporting policy. Durable; pre-dates v0.27.x but no surface change. |
 | `CODE_OF_CONDUCT.md` | 2026-04-30 | ✅ Fresh | Standard CoC. Durable. |
@@ -65,8 +65,8 @@ No numbered architecture notes yet — the convention is `NNN-kebab-case-title.m
 
 | File | Last touched | Status | Action |
 |---|---|---|---|
-| `state.md` | 2026-06-12 | ✅ Fresh | **Rotates every release.** Current to v0.29.3 — binary 601,936 B (agnos 580,960 B), `render_frame` 2.451 ms, lock unchanged (37/0). Flat-rendering gates updated (9-map visual verification, AGNOS in-game QEMU). **Toolchain row now carries the drift warning**: launcher resolves cycc via CYRIUS_HOME/PATH and ignores the 6.1.37 pin — 0.29.3 built on 6.2.2. |
-| `roadmap.md` | 2026-06-12 | ✅ Fresh | **Re-slotted at v0.28.4 cut** (0.28.5–.11 carry the Black Book parity/perf themes). 2026-06-12 floor-render review folded in: visplane slot gains viewz + portal-clip items and fresh union-bridging evidence; sky slot gains flat-V-mirror / half-pixel / sky-floor items; new **unslotted wall-path correctness** table (closed-door black holes, E1M9 parallel-wall drop, SLADRIP no-op, FLAT_MAX truncation, bsp `asr()` trunc-vs-floor). Slot numbers vs shipped 0.29.x acknowledged stale — renumbering deferred to the next re-slot. |
+| `state.md` | 2026-06-13 | ✅ Fresh | **Rotates every release.** Current to v0.30.0 — binary 608,344 B (agnos 587,432 B), `render_frame` 3.10 ms (render path unchanged), lock unchanged (37/0). Shooting-overhaul gates updated (combat tests 37→63 / 75→101, fuzz_weapon, AGNOS QEMU doom-smoke + in-game PASS on the final 0.30.0 binary). v0.30.0 slot row added (prepared, not yet tagged). Toolchain drift warning retained (built on cycc 6.2.2 vs 6.1.37 pin). |
+| `roadmap.md` | 2026-06-13 | ✅ Fresh | **Re-slotted at v0.28.4 cut** (0.28.5–.11 carry the Black Book parity/perf themes). Floor-render review (2026-06-12) + **shooting-overhaul deferrals (2026-06-13)** folded in as unslotted rows: wall-path correctness (closed-door black holes, E1M9 parallel-wall drop, SLADRIP no-op, FLAT_MAX, bsp `asr()`) and shooting cosmetics (BEXP explosion frames, muzzle-flash overlay sprite, xdeath giblets, precise missile-vs-wall trace). Slot numbers vs shipped 0.29.x/0.30.0 acknowledged stale — renumbering deferred to the next re-slot. |
 | `completed-phases.md` | 2026-06-12 | ✅ Fresh | **Updated at v0.29.3 cut** — added the v0.29.3 flat-rendering row; 0.29.x arc header extended (+ flat rendering). Chronological one-line index. |
 | `roadmap-crossover.md` | 2026-04-30 | 🟠 Read-through | AgentWorld / secureyeoman crossover doc — spatial threat visualization via the DOOM engine. Not touched during the v0.27.x cycle; status against current secureyeoman scope not verified. Read-through at next minor closeout. |
 
@@ -81,6 +81,7 @@ Dated artifacts; supersede with a new audit doc rather than refresh in place.
 | `2026-04-13-security-cve-audit.md` | 2026-04-30 | 🔵 Dated artifact | v0.24.0 CVE audit (C1–C3, H1–H2). Re-verified in the 2026-06-07 graphics audit: C2 propagated to all patch decoders (F01/F02/F03/F19), visplane OOB-**write** closed (F17). C3 (BLOCKMAP) + H1 (lump size) re-confirm pending v0.28.7. |
 | `2026-04-15-black-book-handoff.md` | 2026-04-30 | 🔵 Dated artifact | Black Book handoff notes — surface map for the v0.28.x audit. Cited from `roadmap.md` v0.28.x section. |
 | `2026-06-07-v0.28-graphics-hardening.md` | 2026-06-07 | 🔵 Dated artifact | v0.28.0 graphics review/hardening/audit/perf. 67→27→20 findings; 8 shipped, rest re-slotted across 0.28.1–.7. Patch-decoder bounds propagation + visplane OOB-write fix + flat-fill inline. |
+| `2026-06-13-shooting-hitscan.md` | 2026-06-13 | 🔵 Dated artifact | v0.30.0 P(-1) security research for the shooting path (hitscan/projectile/psprite). Reviewed DOOM-family CVE classes (patch over-read, P_LineAttack state, autoaim, projectile DoS, damage overflow); posture green — `fuzz_weapon` 20k clean, projectile spawn bounded, splash recursion bounded. |
 
 ---
 

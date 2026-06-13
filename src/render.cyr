@@ -63,9 +63,20 @@ var weapon_prefix = 0;
 var weapon_fire_frame = 0;
 var weapon_fire_timer = 0;
 var weapon_fire_max = 0;
+# Per-frame tick budget for the current weapon's fire animation. Set in
+# render_set_weapon so each weapon has its own cadence (the shot is gated on
+# weapon_fire_frame==0 in player_tick, so animation length == refire rate):
+# chaingun fast, shotgun slow, rocket slowest. Replaces the single global
+# FIRE_TICKS that made every weapon fire at the same rate (0.30.0).
+var weapon_fire_ticks = 2;
 var weapon_bob_x = 0;
 var weapon_bob_y = 0;
 var weapon_bob_time = 0;
+# Reusable lump-name scratch (8 bytes). render_update_weapon_lump used to
+# alloc(8) on every call — i.e. every firing frame advance and every weapon
+# switch — and never free it, leaking against the project's lazy-init-guard
+# rule (review #6). One guarded buffer, overwritten each call.
+var weapon_name_buf = 0;
 
 enum WeaponConst {
     WEAPON_BUF_SIZE = 16384;
@@ -78,16 +89,20 @@ fn render_set_weapon(weapon_id): i64 {
     if (weapon_prefix == 0) { weapon_prefix = alloc(8); }
     store64(weapon_prefix, 0);
 
-    # Map weapon ID to sprite prefix and frame count
-    # 1=fist, 2=pistol, 3=shotgun, 4=chaingun, 5=rocket, 6=chainsaw
+    # Map weapon ID to sprite prefix, frame count, and per-frame tick budget.
+    # weapon_fire_ticks * (weapon_fire_max-1) ~= refire period (the shot is
+    # gated on the animation returning to frame 0), so tune cadence here:
+    # 1=fist, 2=pistol, 3=shotgun, 4=chaingun, 5=rocket, 6=chainsaw, 7=plasma
+    weapon_fire_ticks = 2;
     switch (weapon_id) {
-        case 1: { memcpy(weapon_prefix, "PUNG", 4); weapon_fire_max = 4; }
-        case 2: { memcpy(weapon_prefix, "PISG", 4); weapon_fire_max = 5; }
-        case 3: { memcpy(weapon_prefix, "SHTG", 4); weapon_fire_max = 4; }
-        case 4: { memcpy(weapon_prefix, "CHGG", 4); weapon_fire_max = 2; }
-        case 5: { memcpy(weapon_prefix, "MISG", 4); weapon_fire_max = 2; }
-        case 6: { memcpy(weapon_prefix, "SAWG", 4); weapon_fire_max = 4; }
-        default: { memcpy(weapon_prefix, "PISG", 4); weapon_fire_max = 5; }
+        case 1: { memcpy(weapon_prefix, "PUNG", 4); weapon_fire_max = 4; weapon_fire_ticks = 3; }
+        case 2: { memcpy(weapon_prefix, "PISG", 4); weapon_fire_max = 5; weapon_fire_ticks = 3; }
+        case 3: { memcpy(weapon_prefix, "SHTG", 4); weapon_fire_max = 4; weapon_fire_ticks = 6; }
+        case 4: { memcpy(weapon_prefix, "CHGG", 4); weapon_fire_max = 2; weapon_fire_ticks = 4; }
+        case 5: { memcpy(weapon_prefix, "MISG", 4); weapon_fire_max = 2; weapon_fire_ticks = 20; }
+        case 6: { memcpy(weapon_prefix, "SAWG", 4); weapon_fire_max = 4; weapon_fire_ticks = 2; }
+        case 7: { memcpy(weapon_prefix, "PLSG", 4); weapon_fire_max = 2; weapon_fire_ticks = 2; }
+        default: { memcpy(weapon_prefix, "PISG", 4); weapon_fire_max = 5; weapon_fire_ticks = 3; }
     }
 
     weapon_fire_frame = 0;
@@ -98,7 +113,8 @@ fn render_set_weapon(weapon_id): i64 {
 
 # Build lump name from prefix + frame letter + "0" and look it up
 fn render_update_weapon_lump(): i64 {
-    var name = alloc(8);
+    if (weapon_name_buf == 0) { weapon_name_buf = alloc(8); }
+    var name = weapon_name_buf;
     memcpy(name, weapon_prefix, 4);
     store8(name + 4, 65 + weapon_fire_frame);
     store8(name + 5, 48);
@@ -111,7 +127,7 @@ fn render_update_weapon_lump(): i64 {
 fn weapon_fire(): i64 {
     if (weapon_fire_frame != 0) { return 0; }
     weapon_fire_frame = 1;
-    weapon_fire_timer = FIRE_TICKS;
+    weapon_fire_timer = weapon_fire_ticks;
     render_update_weapon_lump();
     return 0;
 }
@@ -125,7 +141,7 @@ fn weapon_tick(): i64 {
         if (weapon_fire_frame >= weapon_fire_max) {
             weapon_fire_frame = 0;
         }
-        weapon_fire_timer = FIRE_TICKS;
+        weapon_fire_timer = weapon_fire_ticks;
         render_update_weapon_lump();
     }
     return 0;
@@ -150,10 +166,23 @@ fn weapon_bob_tick(is_moving): i64 {
 
 fn render_draw_weapon(light_level): i64 {
     if (weapon_lump < 0) { return 0; }
-    if (weapon_patch_buf == 0) { weapon_patch_buf = alloc(16384); }
+    if (weapon_patch_buf == 0) { weapon_patch_buf = alloc(WEAPON_BUF_SIZE); }
 
     var psz = wad_lump_size(weapon_lump);
-    if (psz < 8 || psz > 16384) { return 0; }
+    if (psz < 8 || psz > WEAPON_BUF_SIZE) { return 0; }
+
+    # Weapon brightness tracks the player's sector instead of a hardcoded mid
+    # level (review #11): dark rooms dim the gun. During the fire animation the
+    # muzzle flash lights it full-bright, restoring the discharge glow. The
+    # light_level argument is only the fallback when no sector resolves.
+    var wlight = light_level;
+    if (map_num_sectors > 0) {
+        var wsector = player_find_sector();
+        if (wsector >= 0) { wlight = 31 - asr(map_sector_light(wsector), 3); }
+    }
+    if (weapon_fire_frame > 0) { wlight = 0; }
+    if (wlight < 0) { wlight = 0; }
+    if (wlight > 31) { wlight = 31; }
     # Cache the decoded lump: the weapon patch only changes when the firing
     # frame advances, so the per-frame WAD read was pure waste. Guarded after
     # the size check so a rejected lump is never cached. (0.28.0 F14)
@@ -210,7 +239,7 @@ fn render_draw_weapon(light_level): i64 {
                 if (scr_y >= SCREEN_HEIGHT) { continue; }
                 var pal = load8(pixels + py);
                 if (pal != 0) {
-                    framebuf_pixel(scr_x, scr_y, render_shade(pal, light_level));
+                    framebuf_pixel(scr_x, scr_y, render_shade(pal, wlight));
                 }
             }
             post += 4 + length;

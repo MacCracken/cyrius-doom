@@ -47,6 +47,10 @@ var player_ammo_rockets = 0;
 var player_ammo_cells = 0;
 var player_keys = 0;
 
+# Edge latch so the out-of-ammo dry-fire click plays once per trigger pull,
+# not every tick the (held) fire key is down. Reset on release. (0.30.0)
+var weapon_dry_latch = 0;
+
 enum KeyBit {
     KEY_CARD_BLUE = 1;
     KEY_CARD_YELLOW = 2;
@@ -357,14 +361,13 @@ fn player_try_fire(): i64 {
 # Hitscan: trace ray from player, damage first monster hit
 # ================================================================
 
-fn player_hitscan(): i64 {
-    var range = 2048 << 16;
-    # Fist/chainsaw: melee range
-    if (player_weapon == 1) { range = 64 << 16; }
-    if (player_weapon == 6) { range = 64 << 16; }
-
-    var cos_a = fixed_cos(player_angle);
-    var sin_a = fixed_sin(player_angle);
+# Trace a single hitscan ray from the player along `ang`, damaging the nearest
+# shootable thing within `range` that the ray actually reaches. Returns the
+# thing index hit, or -1. Factored out of player_hitscan so the shotgun can
+# fire several spread pellets through it.
+fn player_fire_ray(ang, range, dmg): i64 {
+    var cos_a = fixed_cos(ang);
+    var sin_a = fixed_sin(ang);
 
     var best_idx = -1;
     var best_dist = range;
@@ -380,31 +383,70 @@ fn player_hitscan(): i64 {
         if (dist > range) { continue; }
         if (dist >= best_dist) { continue; }
 
-        # Check if thing is roughly in front of player (within ~45 degrees)
+        # Aim test. dot>0 keeps the thing in front (within 90 deg); the lateral
+        # (perpendicular) offset must fall within the thing's collision radius,
+        # so the EFFECTIVE cone narrows with distance (theta_max ~= asin(radius
+        # / dist)) — a per-distance auto-aim window, not a fixed 45-deg cone.
         var dot = fixed_mul(dx, cos_a) + fixed_mul(dy, sin_a);
         if (dot <= 0) { continue; }
-
-        # Cross product for lateral distance (perpendicular to aim)
         var cross = fixed_mul(dx, sin_a) - fixed_mul(dy, cos_a);
         var lateral = fixed_abs(cross);
-        # Thing must be within its radius of the aim line
         var radius = thing_radius(i);
         if (radius <= 0) { radius = 20 << 16; }
         if (lateral > radius) { continue; }
+
+        # Line-of-sight: a one-sided wall between player and thing blocks the
+        # shot. player_hitscan had NO wall check before 0.30.0, so bullets
+        # passed through solid walls into adjacent rooms (review #2). Reuses
+        # the same sight primitive the monster AI wakes on.
+        if (thing_check_sight(player_x, player_y, thing_x(i), thing_y(i)) == 0) { continue; }
 
         best_idx = i;
         best_dist = dist;
     }
 
-    if (best_idx >= 0) {
-        # Calculate damage based on weapon
-        var dmg = 5 + (tick_get_count() % 11);
-        if (player_weapon == 1) { dmg = 2 + (tick_get_count() % 19); }
-        if (player_weapon == 3) { dmg = dmg * 3; }
-        if (player_weapon == 5) { dmg = 20 + (tick_get_count() % 100); }
-        if (player_weapon == 6) { dmg = 2 + (tick_get_count() % 19); }
-        thing_damage(best_idx, dmg);
+    if (best_idx >= 0) { thing_damage(best_idx, dmg); }
+    return best_idx;
+}
+
+# ================================================================
+# Hitscan: dispatch per-weapon damage/range to the ray tracer.
+# ================================================================
+# Shotgun fires a 7-pellet spread; rocket launcher spawns a projectile —
+# both handled here. Everything else is a single centered ray.
+fn player_hitscan(): i64 {
+    # Shotgun: 7 independent pellets in a horizontal spread (review #8).
+    if (player_weapon == 3) {
+        var pellets = 0;
+        while (pellets < 7) {
+            # Spread: +/- ~8 angle units (~2.8 deg) off the aim line, centered.
+            var spread = p_random_range(17) - 8;
+            var pdmg = 5 + p_random_range(11);   # 5..15 per pellet
+            player_fire_ray(angle_add(player_angle, spread), 2048 << 16, pdmg);
+            pellets += 1;
+        }
+        return 0;
     }
+
+    # Rocket launcher: a real travelling projectile with splash (review #9).
+    if (player_weapon == 5) {
+        thing_spawn_missile(player_x, player_y, player_angle);
+        return 0;
+    }
+
+    var range = 2048 << 16;
+    # Fist/chainsaw: melee range
+    if (player_weapon == 1) { range = 64 << 16; }
+    if (player_weapon == 6) { range = 64 << 16; }
+
+    # Per-weapon damage (p_random, decorrelated from the frame counter — the
+    # old tick_get_count() % N tied damage to game time, review #15).
+    var dmg = 5 + p_random_range(11);                            # pistol/chaingun 5..15
+    if (player_weapon == 1) { dmg = 2 + p_random_range(19); }    # fist 2..20
+    if (player_weapon == 6) { dmg = 2 + p_random_range(19); }    # chainsaw 2..20
+    if (player_weapon == 7) { dmg = 5 + p_random_range(10); }    # plasma 5..14
+
+    player_fire_ray(player_angle, range, dmg);
     return 0;
 }
 
@@ -510,8 +552,14 @@ fn player_tick(): i64 {
         }
     }
 
-    # Fire weapon (with ammo check)
-    if (input_fire() == 1) {
+    # Fire weapon. The shot (ammo + hitscan + sound) is gated on the weapon
+    # being READY (weapon_fire_frame == 0), so it happens once per animation
+    # cycle = once per weapon refire period. Before 0.30.0 only the sprite
+    # animation was gated; player_try_fire() (ammo) and player_hitscan() ran
+    # EVERY 35Hz tick the fire key was held — 35 shots/sec, a magazine gone in
+    # ~1.4s, 35x intended DPS. weapon_fire_ticks (render.cyr) now sets the
+    # per-weapon cadence.
+    if (input_fire() == 1 && weapon_fire_frame == 0) {
         if (player_try_fire() == 1) {
             weapon_fire();
             player_hitscan();
@@ -520,8 +568,14 @@ fn player_tick(): i64 {
             if (player_weapon == 3) { sound_shotgun(); }
             if (player_weapon == 4) { sound_pistol(); }
             if (player_weapon == 5) { sound_explode(); }
+            if (player_weapon == 7) { sound_plasma(); }
+            weapon_dry_latch = 0;
+        } else {
+            # Out of ammo: click once per trigger pull (edge), then switch hint.
+            if (weapon_dry_latch == 0) { sound_weapon_dry(); weapon_dry_latch = 1; }
         }
     }
+    if (input_fire() == 0) { weapon_dry_latch = 0; }
 
     # Advance weapon animation + bob
     weapon_tick();

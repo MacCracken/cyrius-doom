@@ -220,6 +220,25 @@ fn thing_default_health(ttype): i64 {
     return 0;
 }
 
+# Painchance: probability (0..256, compared against p_random 0..255) that a
+# non-lethal hit makes this monster flinch into STATE_PAIN. Matches DOOM's
+# mobjinfo painchance — tough bosses rarely flinch, zombies almost always.
+# Before 0.30.0 every hit forced pain unconditionally, so holding fire
+# stun-locked anything forever (review #3, #12). 256 = always (lost souls).
+fn thing_painchance(ttype): i64 {
+    if (ttype == TTYPE_ZOMBIEMAN) { return 200; }
+    if (ttype == TTYPE_SHOTGUY) { return 170; }
+    if (ttype == TTYPE_IMP) { return 200; }
+    if (ttype == TTYPE_DEMON) { return 180; }
+    if (ttype == TTYPE_SPECTRE) { return 180; }
+    if (ttype == TTYPE_CACODEMON) { return 128; }
+    if (ttype == TTYPE_BARON) { return 50; }
+    if (ttype == TTYPE_LOSTSOUL) { return 256; }
+    if (ttype == TTYPE_SPIDER) { return 40; }
+    if (ttype == TTYPE_CYBERDEMON) { return 20; }
+    return 200;
+}
+
 # Get default radius (in fixed-point, map units << 16)
 fn thing_default_radius(ttype): i64 {
     if (ttype == TTYPE_CYBERDEMON) { return 40 << 16; }
@@ -525,7 +544,12 @@ fn thing_ai_tick(idx): i64 {
             thing_set_tics(idx, tics - 1);
         } else {
             thing_set_state(idx, STATE_DEAD);
-            thing_set_flags(idx, TF_CORPSE);
+            # Keep TF_ACTIVE so the corpse sprite still renders (sprite_render_all
+            # skips !TF_ACTIVE). Clearing it dropped TF_SHOOTABLE too — fine, a
+            # corpse is inert — but it also made bodies vanish the instant the
+            # death animation ended (review #5). TF_CORPSE alone (no SHOOTABLE
+            # /SOLID) keeps it un-shootable and non-blocking but visible.
+            thing_set_flags(idx, TF_ACTIVE | TF_CORPSE);
             level_add_kill();
         }
     }
@@ -609,19 +633,194 @@ fn things_check_pickups(): i64 {
 # ================================================================
 
 fn thing_damage(idx, damage): i64 {
-    var hp = thing_health(idx);
-    hp -= damage;
+    var state = thing_state(idx);
+    # A corpse (or a thing mid-death) can't be re-killed. Without this guard,
+    # holding fire on a dying thing reset STATE_DIE / tics=10 every tick — the
+    # death animation never finished and the die sound replayed (review #4).
+    if (state == STATE_DIE) { return 0; }
+    if (state == STATE_DEAD) { return 0; }
+
+    var ttype = thing_type(idx);
+    var hp = thing_health(idx) - damage;
     thing_set_health(idx, hp);
 
     if (hp <= 0) {
+        # Gib on massive overkill: a death that drops hp below the negative of
+        # the thing's spawn health resolves faster + more violently. (Full
+        # xdeath giblet sprites aren't mapped in spr_lookup yet — follow-up.)
+        var die_tics = 10;
+        if (hp < 0 - thing_default_health(ttype)) { die_tics = 6; }
         thing_set_state(idx, STATE_DIE);
-        thing_set_tics(idx, 10);
+        thing_set_tics(idx, die_tics);
         sound_monster_die();
-    } else {
-        thing_set_state(idx, STATE_PAIN);
-        thing_set_tics(idx, 5);
-        sound_monster_pain();
+        # Barrels detonate instead of dying quietly — radius damage + chain.
+        if (ttype == TTYPE_BARREL) { thing_explode(idx, 128 << 16, 128); }
+        return 0;
     }
+
+    # Survived. Only living monsters react; decorations (barrels) just soak
+    # damage until they blow.
+    if (thing_category(idx) == CAT_MONSTER) {
+        # Being shot wakes an idle monster even with no prior line of sight —
+        # a bullet from behind should provoke it, not leave it dozing.
+        if (state == STATE_SPAWN || state == STATE_SEE) {
+            thing_set_state(idx, STATE_CHASE);
+            thing_set_tics(idx, 0);
+            state = STATE_CHASE;
+        }
+        # Painchance-gated flinch, and NOT re-entered while already flinching:
+        # sustained fire no longer locks a monster in STATE_PAIN forever or
+        # spams the pain sound every tick (review #3, #12).
+        if (state != STATE_PAIN) {
+            if (p_random() < thing_painchance(ttype)) {
+                thing_set_state(idx, STATE_PAIN);
+                thing_set_tics(idx, 5);
+                sound_monster_pain();
+            }
+        }
+    }
+    return 0;
+}
+
+# ================================================================
+# Radius (splash) damage — barrels and rocket explosions
+# ================================================================
+# Damage every shootable thing (and the player) within `radius` of the source,
+# falling off linearly to 0 at the edge. Chain reactions are automatic: a
+# barrel killed here re-enters thing_damage -> thing_explode, but the
+# STATE_DIE guard above stops it detonating twice, so the recursion is bounded
+# by the chain length.
+fn thing_explode(src_idx, radius, maxdmg): i64 {
+    var cx = thing_x(src_idx);
+    var cy = thing_y(src_idx);
+    sound_explode();
+
+    for (var i = 0; i < thing_count; i += 1) {
+        if (i == src_idx) { continue; }
+        var flags = thing_flags(i);
+        if ((flags & TF_ACTIVE) == 0) { continue; }
+        if ((flags & TF_SHOOTABLE) == 0) { continue; }
+        var dist = fixed_approx_dist(thing_x(i) - cx, thing_y(i) - cy);
+        if (dist >= radius) { continue; }
+        # Linear falloff: maxdmg at the center, 0 at the radius edge.
+        var falloff = fixed_div(dist, radius);
+        var dmg = maxdmg - fixed_to_int(falloff * maxdmg);
+        if (dmg > 0) { thing_damage(i, dmg); }
+    }
+
+    # Splash the player too.
+    var pdist = fixed_approx_dist(player_x - cx, player_y - cy);
+    if (pdist < radius) {
+        var pf = fixed_div(pdist, radius);
+        var pdmg = maxdmg - fixed_to_int(pf * maxdmg);
+        if (pdmg > 0) { player_take_damage(pdmg); }
+    }
+    return 0;
+}
+
+# ================================================================
+# Rocket projectile (travelling missile with splash)
+# ================================================================
+# Before 0.30.0 the rocket launcher was an instant single-target hitscan with
+# no splash (review #9). It now spawns a CAT_PROJECTILE thing that flies along
+# its angle each tick and detonates (thing_explode) on hitting a wall, a
+# shootable thing, or its lifetime cap. The in-flight MISL sprite is rendered
+# by the normal sprite path; the detonation is instant (BEXP explosion frames
+# are a cosmetic follow-up). Wall hits reuse player_check_position, so a
+# missile is blocked by the same lines the player is — a pragmatic
+# approximation in this 2.5D engine (it can clip on tall steps).
+
+enum MissileConst {
+    TTYPE_ROCKET_MISSILE = 9999;     # synthetic type (not a DoomEd number)
+    MISSILE_SPEED = 1310720;         # 20 map units/tic, << 16
+    MISSILE_SPAWN_OFFSET = 2097152;  # 32 units, << 16 — clear the shooter
+    MISSILE_LIFETIME = 100;          # tics before auto-detonation (safety)
+    ROCKET_SPLASH_RADIUS = 8388608;  # 128 units, << 16
+    ROCKET_SPLASH_DMG = 128;
+}
+
+# Spawn a rocket from (px,py) heading `ang`. Reuses a spent projectile slot
+# when one is free, else appends (bounded by THING_MAX). Returns the slot.
+fn thing_spawn_missile(px, py, ang): i64 {
+    var idx = -1;
+    for (var i = 0; i < thing_count; i += 1) {
+        if (thing_category(i) == CAT_PROJECTILE) {
+            if ((thing_flags(i) & TF_ACTIVE) == 0) { idx = i; break; }
+        }
+    }
+    if (idx < 0) {
+        if (thing_count >= THING_MAX) { return -1; }
+        idx = thing_count;
+        thing_count += 1;
+    }
+
+    var ca = fixed_cos(ang);
+    var sa = fixed_sin(ang);
+    var base = things + idx * THING_SIZE;
+    store64(base,       px + fixed_mul(ca, MISSILE_SPAWN_OFFSET));
+    store64(base + 8,   py + fixed_mul(sa, MISSILE_SPAWN_OFFSET));
+    store64(base + 16,  0);
+    store64(base + 24,  ang);
+    store64(base + 32,  TTYPE_ROCKET_MISSILE);
+    store64(base + 40,  STATE_SPAWN);
+    store64(base + 48,  0);
+    store64(base + 56,  CAT_PROJECTILE);
+    store64(base + 64,  fixed_mul(ca, MISSILE_SPEED));   # velocity x
+    store64(base + 72,  fixed_mul(sa, MISSILE_SPEED));   # velocity y
+    store64(base + 80,  11 << 16);                       # radius
+    store64(base + 88,  8 << 16);                        # height
+    store64(base + 96,  MISSILE_LIFETIME);
+    store64(base + 104, TF_ACTIVE | TF_MISSILE);
+    store64(base + 112, 0);
+    return idx;
+}
+
+# Detonate a missile: splash damage, then free the slot for reuse.
+fn thing_missile_explode(idx): i64 {
+    thing_explode(idx, ROCKET_SPLASH_RADIUS, ROCKET_SPLASH_DMG);
+    thing_set_flags(idx, 0);
+    thing_set_state(idx, STATE_NONE);
+    return 0;
+}
+
+# Advance one missile: move along velocity, detonate on wall / thing / timeout.
+fn thing_missile_tick(idx): i64 {
+    var flags = thing_flags(idx);
+    if ((flags & TF_ACTIVE) == 0) { return 0; }
+    if ((flags & TF_MISSILE) == 0) { return 0; }
+
+    var tics = thing_tics(idx);
+    if (tics <= 0) { thing_missile_explode(idx); return 0; }
+    thing_set_tics(idx, tics - 1);
+
+    var vx = load64(things + idx * THING_SIZE + 64);
+    var vy = load64(things + idx * THING_SIZE + 72);
+    var nx = thing_x(idx) + vx;
+    var ny = thing_y(idx) + vy;
+
+    # Wall? Detonate in place.
+    if (player_check_position(nx, ny) == 0) {
+        thing_missile_explode(idx);
+        return 0;
+    }
+
+    # Direct hit on a shootable thing along the step?
+    for (var i = 0; i < thing_count; i += 1) {
+        if (i == idx) { continue; }
+        var tf = thing_flags(i);
+        if ((tf & TF_ACTIVE) == 0) { continue; }
+        if ((tf & TF_SHOOTABLE) == 0) { continue; }
+        var hd = fixed_approx_dist(thing_x(i) - nx, thing_y(i) - ny);
+        if (hd < thing_radius(i) + (16 << 16)) {
+            thing_set_x(idx, nx);
+            thing_set_y(idx, ny);
+            thing_missile_explode(idx);
+            return 0;
+        }
+    }
+
+    thing_set_x(idx, nx);
+    thing_set_y(idx, ny);
     return 0;
 }
 
@@ -632,6 +831,7 @@ fn thing_damage(idx, damage): i64 {
 fn things_tick(): i64 {
     for (var i = 0; i < thing_count; i += 1) {
         thing_ai_tick(i);
+        thing_missile_tick(i);
         thing_animate(i);
     }
     things_check_pickups();

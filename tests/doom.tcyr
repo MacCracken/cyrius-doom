@@ -24,6 +24,25 @@ include "src/player.cyr"
 include "src/things.cyr"
 include "src/sprite.cyr"
 
+# Hermetic no-op stubs for cross-module side-effects the combat path calls.
+# sound.cyr / level.cyr / tick.cyr / doors.cyr aren't included here (they pull
+# in device I/O and map state the unit tests don't want), so their symbols are
+# otherwise undefined — and calling an undefined function jumps to an
+# unresolved address and segfaults. Stubbing them keeps the test hermetic.
+fn sound_pistol(): i64 { return 0; }
+fn sound_shotgun(): i64 { return 0; }
+fn sound_plasma(): i64 { return 0; }
+fn sound_explode(): i64 { return 0; }
+fn sound_weapon_dry(): i64 { return 0; }
+fn sound_player_pain(): i64 { return 0; }
+fn sound_monster_pain(): i64 { return 0; }
+fn sound_monster_die(): i64 { return 0; }
+fn sound_item_pickup(): i64 { return 0; }
+fn level_add_kill(): i64 { return 0; }
+fn level_add_item(): i64 { return 0; }
+fn tick_get_count(): i64 { return 0; }
+fn doors_walk_trigger(ox, oy, nx, ny): i64 { return 0; }
+
 fn main() {
     alloc_init();
     args_init();
@@ -128,6 +147,132 @@ fn main() {
     assert_eq(angle_normalize(1025), 1, "norm(1025) wraps to 1");
     assert_eq(angle_add(ANG270, ANG90), 0, "270+90 = 0 (wrap)");
     assert_eq(angle_sub(0, 1), ANG_MASK, "0-1 = 1023 (wrap)");
+
+    # ============================================================
+    test_group("combat: RNG (p_random)");
+    # ============================================================
+    # Deterministic LCG: same seed reproduces the sequence; bytes stay 0..255.
+    p_random_seed(0x13572468);
+    var r0 = p_random();
+    var r1 = p_random();
+    assert(r0 >= 0 && r0 <= 255, "p_random in 0..255");
+    assert(r1 >= 0 && r1 <= 255, "p_random in 0..255 (2)");
+    p_random_seed(0x13572468);
+    assert_eq(p_random(), r0, "p_random deterministic from seed");
+    assert_eq(p_random(), r1, "p_random deterministic (2)");
+    var pr_ok = 1;
+    for (var ri = 0; ri < 64; ri += 1) {
+        var pv = p_random_range(11);
+        if (pv < 0) { pr_ok = 0; }
+        if (pv > 10) { pr_ok = 0; }
+    }
+    assert_eq(pr_ok, 1, "p_random_range(11) stays in 0..10");
+
+    # ============================================================
+    test_group("combat: ammo (player_try_fire)");
+    # ============================================================
+    player_weapon = 2;            # pistol
+    player_ammo_bullets = 3;
+    assert_eq(player_try_fire(), 1, "pistol fires with ammo");
+    assert_eq(player_ammo_bullets, 2, "pistol deducts 1 bullet");
+    player_ammo_bullets = 0;
+    assert_eq(player_try_fire(), 0, "pistol blocked when empty");
+    assert_eq(player_ammo_bullets, 0, "no ammo underflow when empty");
+    player_weapon = 1;            # fist
+    assert_eq(player_try_fire(), 1, "fist always fires (no ammo)");
+
+    # ============================================================
+    test_group("combat: damage + state (thing_damage)");
+    # ============================================================
+    things = alloc(THING_MAX * THING_SIZE);
+    thing_count = 0;
+    var tb = things;                          # imp at (200,0), 60 hp, idle
+    store64(tb, 200 << 16); store64(tb + 8, 0);
+    store64(tb + 32, TTYPE_IMP); store64(tb + 40, STATE_SPAWN);
+    store64(tb + 48, 60); store64(tb + 56, CAT_MONSTER);
+    store64(tb + 80, 20 << 16);
+    store64(tb + 104, TF_ACTIVE | TF_SOLID | TF_SHOOTABLE);
+    store64(tb + 112, 0);
+    thing_count = 1;
+
+    thing_damage(0, 10);
+    assert_eq(thing_health(0), 50, "imp 60-10 = 50 hp");
+    assert(thing_state(0) != STATE_SPAWN, "shot wakes an idle monster");
+
+    thing_damage(0, 100);
+    assert_eq(thing_state(0), STATE_DIE, "lethal hit -> STATE_DIE");
+    var hp_die = thing_health(0);
+    thing_damage(0, 100);                     # corpse re-kill guard
+    assert_eq(thing_state(0), STATE_DIE, "dying thing is not re-killed");
+    assert_eq(thing_health(0), hp_die, "no further hp loss on a corpse");
+
+    # ============================================================
+    test_group("combat: hitscan select + LOS (player_fire_ray)");
+    # ============================================================
+    # No map loaded -> thing_check_sight finds no blockers (open field).
+    thing_count = 0;
+    var ah = things;                          # ahead at (+300,0)
+    store64(ah, 300 << 16); store64(ah + 8, 0);
+    store64(ah + 32, TTYPE_IMP); store64(ah + 40, STATE_SPAWN); store64(ah + 48, 100);
+    store64(ah + 56, CAT_MONSTER); store64(ah + 80, 20 << 16);
+    store64(ah + 104, TF_ACTIVE | TF_SHOOTABLE); store64(ah + 112, 0);
+    var bh = things + THING_SIZE;              # behind at (-300,0)
+    store64(bh, 0 - (300 << 16)); store64(bh + 8, 0);
+    store64(bh + 32, TTYPE_IMP); store64(bh + 40, STATE_SPAWN); store64(bh + 48, 100);
+    store64(bh + 56, CAT_MONSTER); store64(bh + 80, 20 << 16);
+    store64(bh + 104, TF_ACTIVE | TF_SHOOTABLE); store64(bh + 112, 0);
+    thing_count = 2;
+    player_x = 0; player_y = 0; player_angle = 0;
+    var hit = player_fire_ray(0, 2048 << 16, 10);
+    assert_eq(hit, 0, "ray hits the monster ahead (idx 0)");
+    assert_eq(thing_health(0), 90, "monster ahead took 10 dmg");
+    assert_eq(thing_health(1), 100, "monster behind the player untouched");
+
+    # ============================================================
+    test_group("combat: splash + rocket projectile");
+    # ============================================================
+    thing_count = 0;
+    var sb = things;                          # explosion source (barrel) at center
+    store64(sb, 0); store64(sb + 8, 0);
+    store64(sb + 32, TTYPE_BARREL); store64(sb + 40, STATE_DIE); store64(sb + 48, 0);
+    store64(sb + 56, CAT_DECOR); store64(sb + 80, 10 << 16);
+    store64(sb + 104, TF_ACTIVE); store64(sb + 112, 0);
+    var s1 = things + THING_SIZE;             # near target, 16 units away
+    store64(s1, 16 << 16); store64(s1 + 8, 0);
+    store64(s1 + 32, TTYPE_IMP); store64(s1 + 40, STATE_SPAWN); store64(s1 + 48, 100);
+    store64(s1 + 56, CAT_MONSTER); store64(s1 + 80, 20 << 16);
+    store64(s1 + 104, TF_ACTIVE | TF_SHOOTABLE); store64(s1 + 112, 0);
+    var s2 = things + 2 * THING_SIZE;         # far target, 100 units away
+    store64(s2, 100 << 16); store64(s2 + 8, 0);
+    store64(s2 + 32, TTYPE_IMP); store64(s2 + 40, STATE_SPAWN); store64(s2 + 48, 100);
+    store64(s2 + 56, CAT_MONSTER); store64(s2 + 80, 20 << 16);
+    store64(s2 + 104, TF_ACTIVE | TF_SHOOTABLE); store64(s2 + 112, 0);
+    thing_count = 3;
+    player_x = 0 - (4096 << 16); player_y = 0;   # keep the player out of range
+    thing_explode(0, 128 << 16, 128);
+    assert(thing_health(1) < 100, "explosion damages a nearby thing");
+    assert(thing_health(2) < 100, "explosion reaches a farther thing");
+    assert(thing_health(1) < thing_health(2), "splash falls off with distance");
+
+    thing_count = 0;
+    var m0 = things;                          # rocket target ahead at (+200,0)
+    store64(m0, 200 << 16); store64(m0 + 8, 0);
+    store64(m0 + 32, TTYPE_IMP); store64(m0 + 40, STATE_SPAWN); store64(m0 + 48, 200);
+    store64(m0 + 56, CAT_MONSTER); store64(m0 + 80, 20 << 16);
+    store64(m0 + 104, TF_ACTIVE | TF_SHOOTABLE); store64(m0 + 112, 0);
+    thing_count = 1;
+    player_x = 0; player_y = 0;
+    var mi = thing_spawn_missile(0, 0, 0);
+    assert(mi >= 0, "missile spawned");
+    assert_eq(thing_category(mi), CAT_PROJECTILE, "missile is a projectile");
+    assert((thing_flags(mi) & TF_MISSILE) != 0, "missile carries TF_MISSILE");
+    var mguard = 0;
+    while ((thing_flags(mi) & TF_ACTIVE) != 0 && mguard < 40) {
+        thing_missile_tick(mi);
+        mguard += 1;
+    }
+    assert((thing_flags(mi) & TF_ACTIVE) == 0, "missile detonated + freed its slot");
+    assert(thing_health(0) < 200, "rocket splash damaged the target");
 
     # ============================================================
     # WAD tests require DOOM1.WAD — skip if not available

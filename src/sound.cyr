@@ -91,6 +91,9 @@ fn sound_play(freq, ticks): i64 {
 # Predefined sound effects
 fn sound_pistol(): i64 { sound_play(800, 2); return 0; }
 fn sound_shotgun(): i64 { sound_play(400, 3); return 0; }
+fn sound_plasma(): i64 { sound_play(900, 1); return 0; }
+# Dry-fire click when the trigger is pulled with no ammo (DOOM sfx_noway).
+fn sound_weapon_dry(): i64 { sound_play(120, 1); return 0; }
 fn sound_door_open(): i64 { sound_play(200, 5); return 0; }
 fn sound_door_close(): i64 { sound_play(150, 5); return 0; }
 fn sound_item_pickup(): i64 { sound_play(1200, 2); return 0; }

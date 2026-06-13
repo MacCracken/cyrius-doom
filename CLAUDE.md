@@ -151,7 +151,7 @@ Dep pins (bsp / vani versions) and 20-modules-vs-libs counts live in [`state.md`
 
 ### Closeout Pass (before every minor bump)
 
-1. Full test suite — all `.tcyr` pass (37/37 WAD-free, 73/73 full).
+1. Full test suite — all `.tcyr` pass (63/63 WAD-free, 101/101 full as of 0.30.0).
 2. Bench baseline — `bench-history.sh`; compare against prior closeout.
 3. Dead-code audit — `CYRIUS_DCE=1` build; record NOP-sled size in CHANGELOG.
 4. Refactor pass — consolidate the minor's additions where parallel codepaths accreted.
@@ -193,7 +193,7 @@ Dep pins (bsp / vani versions) and 20-modules-vs-libs counts live in [`state.md`
 - **Patra-style installer**: pre-flight HTTP check on the cyrius release asset; version-pinned install layout (`~/.cyrius/versions/$V/{bin,lib}/`).
 - **`cyrius.lock`**: committed supply-chain anchor — the resolver's own `cyrius deps` output (a clean 6.1.29 resolve is **37 entries**). `./lib/` is gitignored, so the lock hashes the pinned stdlib + git-override deps. CI checks the lock is present, runs `cyrius deps` (resolves `./lib/` + rewrites the lock from the pinned toolchain), then `cyrius deps --verify` as the unconditional gate — a clean checkout verifies 37/0. The earlier cycc 6.0.1 lockfile-writer regression (empty lock → `sha256sum` hand-population + guarded verify) was resolved in 0.27.5 by the 6.0.29 pin.
 - **Dead-code elimination**: release workflow runs `CYRIUS_DCE=1`. Binary size tracked.
-- **CI test job**: WAD-free 37-assert subset (full 73-assert suite needs a WAD; not exercised in CI by design).
+- **CI test job**: WAD-free 63-assert subset (full 101-assert suite needs a WAD; not exercised in CI by design).
 - **Bench history**: `bench-history.csv` appended via `scripts/bench-history.sh`; compare row-over-row.
 
 ## References

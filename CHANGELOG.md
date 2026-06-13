@@ -7,6 +7,97 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-06-13
+
+Shooting-mechanics overhaul — a multi-agent review of the full path (input →
+hitscan → damage → psprite render) surfaced 27 confirmed findings; this cut
+fixes the correctness bugs and closes the biggest DOOM-fidelity gaps. Binary
+**602,032 → 608,344 B** (+6,312). `render_frame` **3.10 ms** (E1M1, cycc 6.2.2)
+— render path unchanged; the only per-frame addition is the weapon's
+sector-light lookup, which is not on the measured path. ~7× headroom on the
+22 ms budget.
+
+### Added
+
+- **Deterministic combat RNG** — `p_random` / `p_random_range` (LCG, fixed seed
+  in `tables_init`) in `tables.cyr`. Replaces `tick_get_count() % N` damage
+  rolls, which tied damage to the frame counter. Drives damage spread,
+  painchance, pellet scatter, and splash falloff; reproducible for tests/demos.
+- **Rocket projectile + radius damage** — the launcher now spawns a travelling
+  `CAT_PROJECTILE` thing (`thing_spawn_missile`) that flies, renders its MISL
+  sprite, and detonates on a wall / thing / lifetime via `thing_explode`
+  (linear-falloff splash to things **and** the player). Spent slots are reused.
+- **Barrel explosions + chain reactions** — shooting a barrel to death now
+  detonates it (`thing_explode`, 128-unit / 128-dmg), which can pop adjacent
+  barrels; the corpse-guard bounds the recursion.
+- **Shotgun spread** — 7 independent pellets (±~2.8° scatter), 5–15 dmg each,
+  instead of a single hitscan ×3.
+- **Per-weapon refire cadence** — `weapon_fire_ticks` set per weapon in
+  `render_set_weapon` (chaingun fast, shotgun/rocket slow) instead of one
+  global `FIRE_TICKS`. Weapon 7 (plasma, `PLSG`) added to the sprite/cadence map.
+- **Dry-fire feedback** — `sound_weapon_dry` click when firing empty (edge-latched,
+  once per trigger pull); `sound_plasma` for weapon 7.
+- **Per-monster painchance** (`thing_painchance`) — DOOM-matched flinch odds.
+- **Combat unit tests** (`tests/doom.tcyr`, +26 asserts: WAD-free **37 → 63**,
+  full **75 → 101**) covering p_random, ammo deduction, damage/state transitions,
+  hitscan selection + LOS, splash falloff, and the rocket projectile — plus a
+  hermetic-stub block so the WAD-free subset can exercise the combat path.
+- **`fuzz/fuzz_weapon.cyr`** — drives the real `render_draw_weapon` decoder with
+  malformed one-lump WADs (20k iters clean).
+- Security research: `docs/audit/2026-06-13-shooting-hitscan.md` (P(-1)).
+
+### Fixed
+
+- **Unbounded fire cadence** (review #1). The fire block deducted ammo and ran
+  `player_hitscan` *every 35 Hz tick* the fire key was held — 35 shots/sec, a
+  magazine gone in ~1.4 s, 35× intended DPS — because only the sprite animation
+  was gated, not the shot. The shot is now gated on the weapon being ready
+  (`weapon_fire_frame == 0`), i.e. once per refire period.
+- **Shoot-through-walls** (review #2). `player_hitscan` had no line-of-sight
+  check; bullets passed through solid walls into adjacent rooms. Now reuses
+  `thing_check_sight` (the monster-AI sight primitive) to reject blocked targets.
+- **Pain-lock / stun-lock** (review #3). Every hit forced `STATE_PAIN`/tics=5
+  unconditionally, so sustained fire froze any monster forever and spammed the
+  pain sound each tick. Pain is now painchance-gated and not re-entered while
+  already flinching.
+- **Corpse re-kill** (review #4). Shooting a dying thing reset `STATE_DIE`/tics
+  and replayed the death sound, so the animation never finished. `thing_damage`
+  now early-returns on `STATE_DIE`/`STATE_DEAD`.
+- **Vanishing corpses** (review #5). The death→corpse transition cleared
+  `TF_ACTIVE`, and `sprite_render_all` skips inactive things, so bodies popped
+  out of existence. Corpses keep `TF_ACTIVE | TF_CORPSE` (visible, inert,
+  un-shootable).
+- **psprite memory leak** (review #6). `render_update_weapon_lump` `alloc(8)`'d a
+  lump-name buffer on every firing frame and weapon switch, never freeing it.
+  Now a single lazy-init-guarded buffer.
+- **Weapon 7 (plasma) fired silently with fall-through damage** (review #7) —
+  now has an explicit damage and sound case.
+- **No-map robustness** — `render_draw_weapon`'s new sector-light path is guarded
+  on `map_num_sectors > 0`, so it can't deref a null sector table off the map.
+
+### Changed (DOOM fidelity)
+
+- **Rocket** is a projectile with splash, not an instant single-target hitscan
+  (review #9). **Shotgun** is a 7-pellet spread, not hitscan ×3 (review #8).
+  **Chaingun** has its own (fast) cadence rather than being a re-skinned pistol
+  (review #10).
+- **Weapon brightness** tracks the player's sector and goes full-bright during
+  the fire animation (muzzle-flash glow), replacing the hardcoded `light_level 4`
+  (review #11).
+- **Damage variety** comes from `p_random`, decorrelated from game time (#15).
+- **Idle monsters wake when shot** even without prior line of sight.
+- **Overkill** (hp below the negative of spawn health) resolves the death faster
+  (a lightweight gib; full xdeath giblet sprites are a follow-up).
+
+### Notes
+
+- The weapon **bob** was reviewed and left unchanged: DOOM's `psp->sy` bob uses a
+  half-angle sine (a one-directional dip), which the existing `fixed_abs(cos)`
+  already matches — the review's "make it symmetric" was a misread.
+- Deferred (cosmetic): BEXP rocket-explosion frames, separate muzzle-flash
+  overlay sprite, full xdeath giblet animation. Missile-vs-wall reuses
+  `player_check_position`, so a rocket can clip on tall steps in this 2.5D engine.
+
 ## [0.29.4] - 2026-06-12
 
 ### Fixed

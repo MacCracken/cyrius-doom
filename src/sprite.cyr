@@ -79,6 +79,8 @@ fn sprite_build_lookup(): i64 {
     sprite_add_lookup(48, "ELEC");
     sprite_add_lookup(10, "PLAY");
     sprite_add_lookup(12, "PLAY");
+    # Rocket-in-flight (synthetic projectile type, see things.cyr MissileConst).
+    sprite_add_lookup(TTYPE_ROCKET_MISSILE, "MISL");
     return 0;
 }
 
