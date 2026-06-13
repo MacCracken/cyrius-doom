@@ -240,6 +240,26 @@ fn main() {
         assert_eq(render_shade(4, 0), 4, "shade(white, bright) = white");
 
         # ============================================================
+        test_group("collision (blockmap)");
+        # ============================================================
+        # Regression guard for the blockmap cell-index double-shift (latent
+        # since 0.13.0, fixed 0.29.4): the buggy `fixed_to_int(asr(.,16))`
+        # double-converted fixed->int (= asr 32), collapsing every query to
+        # cell (0,0), so player_check_position returned 1 everywhere and the
+        # player walked through all walls. A working system blocks SOMEWHERE on
+        # a sweep through the spawn.
+        player_init();
+        assert_eq(player_check_position(player_x, player_y), 1, "spawn position is valid");
+        var blk = 0;
+        var sweep_d = 0 - (2048 << 16);
+        while (sweep_d <= (2048 << 16)) {
+            if (player_check_position(player_x + sweep_d, player_y) == 0) { blk = blk + 1; }
+            if (player_check_position(player_x, player_y + sweep_d) == 0) { blk = blk + 1; }
+            sweep_d = sweep_d + (64 << 16);
+        }
+        assert(blk > 0, "collision blocks on the spawn sweep (not walk-through-walls)");
+
+        # ============================================================
         test_group("rendering");
         # ============================================================
 

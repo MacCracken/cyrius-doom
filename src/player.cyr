@@ -127,11 +127,20 @@ fn player_check_position(nx, ny): i64 {
 
     # Use BLOCKMAP if loaded
     if (map_blockmap != 0) {
-        # Find which blockmap cells the player radius covers
-        var bx1 = fixed_to_int(asr(nx - radius - map_bm_originx, 16)) / 128;
-        var by1 = fixed_to_int(asr(ny - radius - map_bm_originy, 16)) / 128;
-        var bx2 = fixed_to_int(asr(nx + radius - map_bm_originx, 16)) / 128;
-        var by2 = fixed_to_int(asr(ny + radius - map_bm_originy, 16)) / 128;
+        # Find which blockmap cells the player radius covers.
+        # The world-space offset (nx - radius - origin) is 16.16 fixed-point
+        # (player_x and map_bm_originx are both <<16), so a SINGLE fixed_to_int
+        # (= asr 16) yields integer map units; /128 is the 128-unit cell pitch.
+        # The pre-0.29.4 form wrapped that in `fixed_to_int(asr(..., 16))` — two
+        # 16-bit shifts = asr 32 — which collapsed every real map offset
+        # (< 65536 units) to 0, so every query scanned only cell (0,0) (the SW
+        # corner) and the player walked through every wall outside it. Latent
+        # since 0.13.0; only exposed once interactive movement (0.28.3 keyboard /
+        # 0.29.x world-tick) made walking around real.
+        var bx1 = fixed_to_int(nx - radius - map_bm_originx) / 128;
+        var by1 = fixed_to_int(ny - radius - map_bm_originy) / 128;
+        var bx2 = fixed_to_int(nx + radius - map_bm_originx) / 128;
+        var by2 = fixed_to_int(ny + radius - map_bm_originy) / 128;
 
         if (bx1 < 0) { bx1 = 0; }
         if (by1 < 0) { by1 = 0; }

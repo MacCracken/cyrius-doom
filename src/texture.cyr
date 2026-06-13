@@ -72,9 +72,19 @@ fn texture_init(): i64 {
     patch_count = read_le32(pn_data);
     if (patch_count > PATCH_MAX) { patch_count = PATCH_MAX; }
 
+    # PNAMES patch names are 8-byte fixed fields, null-padded ONLY when shorter
+    # than 8 chars — 161/350 in DOOM1.WAD are exactly 8 chars with NO terminator.
+    # wad_find_lump -> wad_name_eq -> strlen() reads word-at-a-time and over-reads
+    # such a field past byte 8, returns >8, and rejects the name, so patch_lumps[i]
+    # = -1 and texture_get_column composites nothing -> the wall renders
+    # framebuffer-black (the E1M9 corridor "void" + E1M1 far doorways). Copy each
+    # field into a null-terminated 9-byte buffer so the lookup sees an exact name.
+    var pnbuf = alloc(9);
     for (var i = 0; i < patch_count; i += 1) {
         var name = pn_data + 4 + i * 8;
-        var lump = wad_find_lump(name);
+        for (var c = 0; c < 8; c += 1) { store8(pnbuf + c, load8(name + c)); }
+        store8(pnbuf + 8, 0);
+        var lump = wad_find_lump(pnbuf);
         store64(patch_lumps + i * 8, lump);
     }
 
@@ -140,13 +150,19 @@ fn texture_init(): i64 {
 }
 
 # ================================================================
-# Patch data cache: keep last 8 patches in memory
-# Each slot: lump_idx(8) + data(8KB) = 8 slots * 8200 = 65600 bytes
+# Patch data cache: keep last 8 patches in memory.
+# Each slot: lump_idx(8) + size(8) + data(40KB) = 8 slots * 40976 = 327808 bytes.
+# DATA_SIZE must cover the largest PNAMES-referenced patch in the IWAD —
+# DOOM1.WAD's is WALL24_1 at 36960 B. The prior 8192 cap truncated big
+# door/wall patches (e.g. DOOR2_4 = BIGDOOR2 at 17544 B), so pcache_get kept
+# only their first 8192 bytes and texture_get_column's `col_off >= pdata_size`
+# bound then dropped every column whose post-data lived past byte 8192 to an
+# all-zero (black) column — the E1M3 central door + E1M7 left rectangles.
 # ================================================================
 enum PatchCache {
     PCACHE_SLOTS = 8;
-    PCACHE_DATA_SIZE = 8192;
-    PCACHE_SLOT_SIZE = 8208;
+    PCACHE_DATA_SIZE = 40960;
+    PCACHE_SLOT_SIZE = 40976;
 }
 
 var pcache = 0;

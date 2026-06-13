@@ -7,6 +7,85 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.29.4] - 2026-06-12
+
+### Fixed
+
+- **Player walked through every wall** (user-reported from interactive play).
+  Root cause: `player_check_position` computed each BLOCKMAP cell index as
+  `fixed_to_int(asr(nx - radius - map_bm_originx, 16)) / 128`. The world-space
+  offset is already 16.16 fixed-point (both `player_x` and `map_bm_originx`
+  carry `<<16`), so `fixed_to_int` (= `asr 16`) is the *only* shift needed —
+  the extra inner `asr(…, 16)` made it `asr 32`, collapsing every real map
+  offset (< 65536 units) to **0**. Every collision query therefore scanned only
+  blockmap cell **(0,0)** (the SW corner), so the player collided with nothing
+  outside it. Latent since **0.13.0** (when the BLOCKMAP path + the `<<16` on
+  `map_bm_originx` were added together); only exposed once interactive movement
+  landed (0.28.3 AGNOS keyboard + 0.29.x world-tick aliveness). Fixed to a
+  single `fixed_to_int` shift. Reproduced + verified with a probe on E1M1:
+  spawn cell `(0,0)→(14,9)`, and a ±2048-unit collision sweep through spawn
+  went from **0/65 blocked → 5/65 (X) + 1/65 (Y) blocked**. Added a permanent
+  collision regression assertion to `tests/doom.tcyr` (full suite 73 → 75) —
+  the bug survived 16 minors precisely because nothing exercised it.
+
+- **Wall "black holes" / dropped-wall void** (user-reported; E1M9 ~70% of the
+  view black with monster sprites floating through where solid walls belong,
+  E1M3 central black rectangle, E1M7 left rectangle, E1M1 far doorways). A
+  multi-agent A/B-render diagnosis (4 diagnosers + adversarial verification)
+  **empirically refuted** every geometry/clip/overflow hypothesis (NEAR_CLIP
+  degenerate depth, `fixed_mul(tx,PROJ_DIST)` 64-bit overflow, one-sided-wall
+  clip-drop, U/scale swap mispairing) — none move the black. The entire family
+  is **two independent texture-resolution bugs**:
+  - **PNAMES 8-char patch names never resolved.** `wad_name_eq` runs
+    `strlen(name)` on the raw 8-byte PNAMES field; WAD names are null-padded
+    *only* when shorter than 8 chars, so the 161/350 entries that are exactly 8
+    chars have no terminator and the word-at-a-time `strlen` over-reads past
+    byte 8, returns `>8`, and rejects the name → `patch_lumps[i] = -1` →
+    `texture_get_column` composites nothing → framebuffer-black. `texture_init`
+    now copies each field into a null-terminated 9-byte buffer before the
+    lookup. **Alone:** E1M9 70.7% → 1.0% viewport black, E1M1 7.6% → 0.6%.
+  - **Patch cache truncated patches > 8192 B.** `PCACHE_DATA_SIZE = 8192` kept
+    only the first 8192 bytes of large patches; the `col_off >= pdata_size`
+    bound in `texture_get_column` then dropped every column whose directory
+    offset landed past the truncation → all-zero (black) column. BIGDOOR2
+    (`DOOR2_4`, 17544 B) lost columns 58–127. Raised to **40960** (covers
+    DOOM1.WAD's largest PNAMES-referenced patch, `WALL24_1` at 36960 B; heap
+    cache grows 64 KB → 320 KB via `alloc`, binary unaffected). **On top of the
+    PNAMES fix:** E1M3 10.5% → 0.0% (111 distinct viewport colors), E1M7
+    17.8% → 0.1%.
+
+  Combined, all four maps end at **≤ 0.1%** viewport black (rows 0–167),
+  visually whole. Verification: 37/37 WAD-free, 75/75 full,
+  `fuzz_wad` 1000/1000, `fuzz_fixed` 50000/50000; nine-map PPMs at 192,015 B.
+  Bench: `render_frame` 2.451 → **2.93 ms** — A/B-isolated to the PNAMES fix
+  (the renderer now actually composites and draws the wall textures that were
+  previously unresolved black no-ops), **not** the cache bump (PCACHE 8192 vs
+  40960 = 0.011 ms = variance). ~7.5× headroom on the 22 ms budget. Linux
+  601,936 → **602,032 B** (+96 B); `--agnos` 580,960 → **581,072 B** (+112 B).
+  Built under cycc **6.2.2** (launcher ignores the 6.1.37 pin — see state.md
+  toolchain row). **AGNOS QEMU verified on the final binary** (581,072 B):
+  `doom-smoke.sh` PASS (serial `cyrius-doom v0.29.4` + `wad loaded`, framebuffer
+  240 colors), and the in-game sendkey harness (`doom-ingame-smoke.py`) drove
+  into E1M1 and rendered **textured walls + floors + ceilings with no void** —
+  viewport-black **0.06%** and **104** distinct colors, identical to the Linux
+  render's 0.06% / 104 (the menu-drive viewpoint differs only slightly, so this
+  is rendering-equivalence, not a literal same-pixel diff). No `--agnos` codegen
+  hazard (constant/alloc/cold-path changes only; the 6.1.37 fold fix holds).
+
+### Notes
+
+- The diagnosis re-attributed two roadmap "Wall-path correctness" items: the
+  closed-door black holes (E1M3/4/7) and the near-parallel one-sided wall drop
+  (E1M9) were **not** the geometry/clip defects originally hypothesized — both
+  were the texture-resolution bugs above. Two findings that *survived*
+  refutation but were **not** exercised by the spawn-view A/B remain open (now
+  on the roadmap): `closed-sector-clip-inversion` (HIGH — a two-sided line
+  backing a closed/zero-height sector inverts the column clip; reproduces only
+  facing a closed door *during play*) and `wall-u-swap-mirror` (MED — the
+  `sx1>sx2` swap reorders sx/ty but not the texture-U endpoints, mirroring
+  right-to-left segs). NEAR_CLIP=256 was A/B-proven **not** a black-hole cause
+  and is intentionally out of scope.
+
 ## [0.29.3] - 2026-06-12
 
 ### Fixed
