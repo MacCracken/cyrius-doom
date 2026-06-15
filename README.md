@@ -53,16 +53,22 @@ cyrius build src/main.cyr build/doom
 ## Controls
 
 ```
-WASD          — move/strafe
-Arrow keys    — turn/move
-Ctrl          — fire (DOOM-faithful; AGNOS only — a raw Linux tty can't see a bare Ctrl)
-F             — fire (works everywhere)
+W/S           — move forward/back
+A/D           — strafe
+Left/Right    — turn (camera)
+Up/Down       — move forward/back
+F             — fire
 E / Space     — use (open doors)
 1-7           — weapon select
 R             — run
 TAB           — automap
 Q / ESC       — quit
 ```
+
+On **AGNOS** (real PS/2 keyboard) the controls follow original DOOM more closely:
+arrows **strafe**, **Shift**+arrows / **Shift**+A/D **turn**, and **Ctrl fires**.
+A raw Linux tty can't report a bare Ctrl or Shift (they're modifiers — no byte),
+so the Linux build uses arrows-to-turn and `F`-to-fire until mouse input lands.
 
 ## Architecture
 

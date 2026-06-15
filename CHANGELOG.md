@@ -7,10 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Player-feedback patch — two crashes/dead-ends reported from live play: the game
-coredumped during combat (shooting a monster), and the main-menu "Options" item
-did nothing. Binary **611,888 B** (+1,312 over 0.30.1). Tests **63/63** WAD-free,
-**101/101** full.
+## [0.30.2] - 2026-06-14
+
+Player-feedback patch — live-play fixes plus control fidelity. Fixed a combat
+coredump (shooting a monster) and the dead main-menu "Options" item; raised the
+fist so its thumb clears the status bar; and reworked the controls so AGNOS gains
+DOOM-faithful Ctrl-fire and Shift-to-turn while Linux keeps a simple,
+Caps-Lock-immune keyboard scheme. Binary **612,576 B** (+2,000 over 0.30.1).
+Tests **63/63** WAD-free, **101/101** full.
+
+### Added
+
+- **Options menu screen** — selecting "Options" on the main menu opened nothing
+  (the case was unhandled, a silent no-op). Added a navigable `MENU_OPTIONS`
+  screen (`M_OPTTTL` heading + End Game / Messages / Graphic Detail / Screen Size
+  / Mouse Sensitivity / Sound Volume, original DOOM `OptionsDef` layout, skull
+  cursor). The individual settings are display-only stubs for now; `ESC` / `Q`
+  returns to the main menu. Also added the screen to `--ppm-menu`
+  (`/tmp/doom_options.ppm`). (`src/menu.cyr`, `src/main.cyr`)
+
+### Changed
+
+- **Controls: AGNOS gains Shift-to-turn; Linux keeps arrows-to-turn** — the
+  intended scheme (arrows strafe, **Shift**+A/D or **Shift**+arrows turn) is
+  carried on the **AGNOS** path, which reads raw PS/2 scancodes: Shift is a real
+  key (`0x2A`/`0x36`) tracked in `key_state`, so A/D and the arrows branch
+  strafe↔turn on it, and Caps Lock is inherently ignored (letters always decode
+  lowercase). On **Linux** a raw tty can't report a bare Shift (modifier, no
+  byte) and reading it from uppercase letters is ambiguous with Caps Lock, so the
+  Linux build keeps the simple, robust scheme — **arrows turn, A/D strafe** —
+  until mouse input lands. Movement is Caps-Lock-immune there: uppercase
+  `W`/`A`/`S`/`D`/`R` alias their lowercase movement actions, so Caps Lock can't
+  blow out movement. (`src/input.cyr`, `README.md`)
+- **Fire mapped to Ctrl (DOOM-faithful)** — original DOOM fires with Ctrl. Added
+  left/right Ctrl → fire on the AGNOS input path (raw PS/2 scancode `0x1D`, plus
+  the `E0 1D` right-Ctrl extended form), wired through a new `KEY_CTRL` (132)
+  entry in the fire-flag builder of both poll paths. A raw Linux tty can't report
+  a bare Ctrl (it's a modifier — only Ctrl+key yields a byte), so on Linux the
+  `KEY_CTRL` slot is never set and **F stays the working fire key everywhere**.
+  Net effect: Ctrl fires on AGNOS/real-keyboard; F fires on Linux/tty.
+  (`src/input.cyr`, `README.md`)
 
 ### Fixed
 
@@ -27,20 +63,6 @@ did nothing. Binary **611,888 B** (+1,312 over 0.30.1). Tests **63/63** WAD-free
   equivalent `if/else` ladder (cycc's if-codegen is solid); clean under sustained
   combat. Not toolchain-specific — identical miscompiled binary under both the
   pinned cycc 6.1.37 and 6.2.2. (`src/things.cyr`)
-
-### Changed
-
-- **Fire mapped to Ctrl (DOOM-faithful)** — original DOOM fires with Ctrl. Added
-  left/right Ctrl → fire on the AGNOS input path (raw PS/2 scancode `0x1D`, plus
-  the `E0 1D` right-Ctrl extended form), wired through a new `KEY_CTRL` (132)
-  entry in the fire-flag builder of both poll paths. A raw Linux tty can't report
-  a bare Ctrl (it's a modifier — only Ctrl+key yields a byte), so on Linux the
-  `KEY_CTRL` slot is never set and **F stays the working fire key everywhere**.
-  Net effect: Ctrl fires on AGNOS/real-keyboard; F fires on Linux/tty.
-  (`src/input.cyr`, `README.md`)
-
-### Fixed
-
 - **Fist thumb hidden behind the status bar** — the first weapon (fists, `PUNG`)
   sat too low: its thumb lives in the bottom-left of the sprite (rows 32-41),
   which the shared psprite anchor maps to screen rows 174-183 — entirely behind
@@ -49,16 +71,6 @@ did nothing. Binary **611,888 B** (+1,312 over 0.30.1). Tests **63/63** WAD-free
   sprite.) Added a per-weapon vertical lift (`weapon_y_lift`, zero for every gun)
   and set the fist to **14 px** so the thumb clears the bar while the wrist stays
   tucked behind it. Verified against a real-binary `--ppm` render. (`src/render.cyr`)
-
-### Added
-
-- **Options menu screen** — selecting "Options" on the main menu opened nothing
-  (the case was unhandled, a silent no-op). Added a navigable `MENU_OPTIONS`
-  screen (`M_OPTTTL` heading + End Game / Messages / Graphic Detail / Screen Size
-  / Mouse Sensitivity / Sound Volume, original DOOM `OptionsDef` layout, skull
-  cursor). The individual settings are display-only stubs for now; `ESC` / `Q`
-  returns to the main menu. Also added the screen to `--ppm-menu`
-  (`/tmp/doom_options.ppm`). (`src/menu.cyr`, `src/main.cyr`)
 
 ## [0.30.1] - 2026-06-13
 

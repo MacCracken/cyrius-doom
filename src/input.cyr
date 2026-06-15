@@ -211,6 +211,8 @@ fn doom_agnos_sc_to_key(sc, ext): i64 {
     if (sc == 32) { return 100; }       # d  -> strafe right
     if (sc == 18) { return 101; }       # e  -> use
     if (sc == 29) { return 132; }       # left Ctrl -> fire (DOOM-faithful)
+    if (sc == 42) { return 133; }       # left Shift  -> turn modifier for arrows
+    if (sc == 54) { return 133; }       # right Shift -> turn modifier for arrows
     if (sc == 33) { return 102; }       # f  -> fire (Linux/tty fallback)
     if (sc == 19) { return 114; }       # r  -> run
     if (sc == 16) { return 113; }       # q  -> quit
@@ -258,10 +260,25 @@ fn input_poll(): i64 {
     if (load64(key_state + KEY_UP * 8) == 1) { input_flags |= INP_FORWARD; }
     if (load64(key_state + KEY_S * 8) == 1) { input_flags |= INP_BACKWARD; }
     if (load64(key_state + KEY_DOWN * 8) == 1) { input_flags |= INP_BACKWARD; }
-    if (load64(key_state + KEY_LEFT * 8) == 1) { input_flags |= INP_TURN_LEFT; }
-    if (load64(key_state + KEY_RIGHT * 8) == 1) { input_flags |= INP_TURN_RIGHT; }
-    if (load64(key_state + KEY_A * 8) == 1) { input_flags |= INP_STRAFE_LEFT; }
-    if (load64(key_state + KEY_D * 8) == 1) { input_flags |= INP_STRAFE_RIGHT; }
+    # Left/Right arrows strafe (mirror A/D); hold Shift to turn instead. Until
+    # mouse input lands this keeps turning on a modifier and frees the arrows for
+    # strafing. KEY_SHIFT is set by the Shift scancodes here on AGNOS; on Linux a
+    # bare Shift is invisible but the ESC[1;2C/D shift+arrow sequence sets it.
+    var ag_turn = load64(key_state + KEY_SHIFT * 8) == 1;
+    if (load64(key_state + KEY_LEFT * 8) == 1) {
+        if (ag_turn == 1) { input_flags |= INP_TURN_LEFT; } else { input_flags |= INP_STRAFE_LEFT; }
+    }
+    if (load64(key_state + KEY_RIGHT * 8) == 1) {
+        if (ag_turn == 1) { input_flags |= INP_TURN_RIGHT; } else { input_flags |= INP_STRAFE_RIGHT; }
+    }
+    # A/D strafe, or turn while Shift is held (mirrors the arrows). W/S forward/
+    # back are unaffected by Shift, so turning-while-moving works.
+    if (load64(key_state + KEY_A * 8) == 1) {
+        if (ag_turn == 1) { input_flags |= INP_TURN_LEFT; } else { input_flags |= INP_STRAFE_LEFT; }
+    }
+    if (load64(key_state + KEY_D * 8) == 1) {
+        if (ag_turn == 1) { input_flags |= INP_TURN_RIGHT; } else { input_flags |= INP_STRAFE_RIGHT; }
+    }
     if (load64(key_state + KEY_SPACE * 8) == 1) { input_flags |= INP_USE; }
     if (load64(key_state + KEY_E * 8) == 1) { input_flags |= INP_USE; }
     if (load64(key_state + KEY_CTRL * 8) == 1) { input_flags |= INP_FIRE; }
@@ -309,13 +326,24 @@ fn input_poll(): i64 {
 
     # Map key state to bitmask
     if (load64(key_state + KEY_W * 8) == 1) { input_flags |= INP_FORWARD; }
+    if (load64(key_state + 87 * 8) == 1) { input_flags |= INP_FORWARD; }    # 'W' (Shift+w)
     if (load64(key_state + KEY_UP * 8) == 1) { input_flags |= INP_FORWARD; }
     if (load64(key_state + KEY_S * 8) == 1) { input_flags |= INP_BACKWARD; }
+    if (load64(key_state + 83 * 8) == 1) { input_flags |= INP_BACKWARD; }   # 'S' (Shift+s)
     if (load64(key_state + KEY_DOWN * 8) == 1) { input_flags |= INP_BACKWARD; }
+    # Linux keeps the simple scheme: arrows turn (the only keyboard turn until
+    # mouse input arrives), A/D strafe. No Shift-to-turn here — a raw tty can't see
+    # a bare Shift, and reading Shift from uppercase letters is ambiguous with Caps
+    # Lock. The faithful Shift-to-turn controls live on the AGNOS path (real keys).
     if (load64(key_state + KEY_LEFT * 8) == 1) { input_flags |= INP_TURN_LEFT; }
     if (load64(key_state + KEY_RIGHT * 8) == 1) { input_flags |= INP_TURN_RIGHT; }
+    # A/D strafe. Uppercase 'A'/'D' (from Caps Lock or Shift) map the SAME as
+    # lowercase so Caps Lock can never swap strafe for something else and blow out
+    # movement — a raw tty can't tell Shift+a from CapsLock+a (identical bytes).
     if (load64(key_state + KEY_A * 8) == 1) { input_flags |= INP_STRAFE_LEFT; }
+    if (load64(key_state + 65 * 8) == 1) { input_flags |= INP_STRAFE_LEFT; }    # 'A'
     if (load64(key_state + KEY_D * 8) == 1) { input_flags |= INP_STRAFE_RIGHT; }
+    if (load64(key_state + 68 * 8) == 1) { input_flags |= INP_STRAFE_RIGHT; }   # 'D'
     if (load64(key_state + KEY_SPACE * 8) == 1) { input_flags |= INP_USE; }
     if (load64(key_state + KEY_E * 8) == 1) { input_flags |= INP_USE; }
     # KEY_CTRL (132) is the DOOM-faithful fire button, but a raw Linux tty cannot
@@ -325,6 +353,7 @@ fn input_poll(): i64 {
     if (load64(key_state + KEY_CTRL * 8) == 1) { input_flags |= INP_FIRE; }
     if (load64(key_state + 102 * 8) == 1) { input_flags |= INP_FIRE; }
     if (load64(key_state + KEY_R * 8) == 1) { input_flags |= INP_RUN; }
+    if (load64(key_state + 82 * 8) == 1) { input_flags |= INP_RUN; }      # 'R' (Caps/Shift) — keep run under Caps Lock
     if (load64(key_state + KEY_TAB * 8) == 1) { input_flags |= INP_TAB; }
     if (load64(key_state + KEY_Q * 8) == 1) { input_quit = 1; }
 
