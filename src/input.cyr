@@ -202,6 +202,7 @@ fn doom_agnos_sc_to_key(sc, ext): i64 {
         if (sc == 80) { return 129; }   # down
         if (sc == 75) { return 130; }   # left
         if (sc == 77) { return 131; }   # right
+        if (sc == 29) { return 132; }   # right Ctrl (E0 1D) -> fire
         return 0 - 1;
     }
     if (sc == 17) { return 119; }       # w  -> forward
@@ -209,7 +210,8 @@ fn doom_agnos_sc_to_key(sc, ext): i64 {
     if (sc == 31) { return 115; }       # s  -> backward
     if (sc == 32) { return 100; }       # d  -> strafe right
     if (sc == 18) { return 101; }       # e  -> use
-    if (sc == 33) { return 102; }       # f  -> fire
+    if (sc == 29) { return 132; }       # left Ctrl -> fire (DOOM-faithful)
+    if (sc == 33) { return 102; }       # f  -> fire (Linux/tty fallback)
     if (sc == 19) { return 114; }       # r  -> run
     if (sc == 16) { return 113; }       # q  -> quit
     if (sc == 57) { return 32;  }       # space -> use
@@ -262,6 +264,7 @@ fn input_poll(): i64 {
     if (load64(key_state + KEY_D * 8) == 1) { input_flags |= INP_STRAFE_RIGHT; }
     if (load64(key_state + KEY_SPACE * 8) == 1) { input_flags |= INP_USE; }
     if (load64(key_state + KEY_E * 8) == 1) { input_flags |= INP_USE; }
+    if (load64(key_state + KEY_CTRL * 8) == 1) { input_flags |= INP_FIRE; }
     if (load64(key_state + 102 * 8) == 1) { input_flags |= INP_FIRE; }
     if (load64(key_state + KEY_R * 8) == 1) { input_flags |= INP_RUN; }
     if (load64(key_state + KEY_TAB * 8) == 1) { input_flags |= INP_TAB; }
@@ -315,6 +318,11 @@ fn input_poll(): i64 {
     if (load64(key_state + KEY_D * 8) == 1) { input_flags |= INP_STRAFE_RIGHT; }
     if (load64(key_state + KEY_SPACE * 8) == 1) { input_flags |= INP_USE; }
     if (load64(key_state + KEY_E * 8) == 1) { input_flags |= INP_USE; }
+    # KEY_CTRL (132) is the DOOM-faithful fire button, but a raw Linux tty cannot
+    # report a bare Ctrl (it is a modifier — only Ctrl+key yields a byte), so on
+    # Linux this index is never set and F (102) is the working fire key. The
+    # AGNOS scancode path (raw PS/2) does set 132, making Ctrl fire there.
+    if (load64(key_state + KEY_CTRL * 8) == 1) { input_flags |= INP_FIRE; }
     if (load64(key_state + 102 * 8) == 1) { input_flags |= INP_FIRE; }
     if (load64(key_state + KEY_R * 8) == 1) { input_flags |= INP_RUN; }
     if (load64(key_state + KEY_TAB * 8) == 1) { input_flags |= INP_TAB; }

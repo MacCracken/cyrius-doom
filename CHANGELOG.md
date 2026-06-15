@@ -28,6 +28,17 @@ did nothing. Binary **611,888 B** (+1,312 over 0.30.1). Tests **63/63** WAD-free
   combat. Not toolchain-specific — identical miscompiled binary under both the
   pinned cycc 6.1.37 and 6.2.2. (`src/things.cyr`)
 
+### Changed
+
+- **Fire mapped to Ctrl (DOOM-faithful)** — original DOOM fires with Ctrl. Added
+  left/right Ctrl → fire on the AGNOS input path (raw PS/2 scancode `0x1D`, plus
+  the `E0 1D` right-Ctrl extended form), wired through a new `KEY_CTRL` (132)
+  entry in the fire-flag builder of both poll paths. A raw Linux tty can't report
+  a bare Ctrl (it's a modifier — only Ctrl+key yields a byte), so on Linux the
+  `KEY_CTRL` slot is never set and **F stays the working fire key everywhere**.
+  Net effect: Ctrl fires on AGNOS/real-keyboard; F fires on Linux/tty.
+  (`src/input.cyr`, `README.md`)
+
 ### Fixed
 
 - **Fist thumb hidden behind the status bar** — the first weapon (fists, `PUNG`)

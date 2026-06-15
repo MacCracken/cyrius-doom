@@ -55,7 +55,8 @@ cyrius build src/main.cyr build/doom
 ```
 WASD          — move/strafe
 Arrow keys    — turn/move
-F             — fire
+Ctrl          — fire (DOOM-faithful; AGNOS only — a raw Linux tty can't see a bare Ctrl)
+F             — fire (works everywhere)
 E / Space     — use (open doors)
 1-7           — weapon select
 R             — run
