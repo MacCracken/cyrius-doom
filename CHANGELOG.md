@@ -28,6 +28,17 @@ did nothing. Binary **611,888 B** (+1,312 over 0.30.1). Tests **63/63** WAD-free
   combat. Not toolchain-specific — identical miscompiled binary under both the
   pinned cycc 6.1.37 and 6.2.2. (`src/things.cyr`)
 
+### Fixed
+
+- **Fist thumb hidden behind the status bar** — the first weapon (fists, `PUNG`)
+  sat too low: its thumb lives in the bottom-left of the sprite (rows 32-41),
+  which the shared psprite anchor maps to screen rows 174-183 — entirely behind
+  the status bar (top at 168), so the thumb never showed. (DOOM clips it the same
+  way in status-bar mode; the reference fist animation shows the standalone
+  sprite.) Added a per-weapon vertical lift (`weapon_y_lift`, zero for every gun)
+  and set the fist to **14 px** so the thumb clears the bar while the wrist stays
+  tucked behind it. Verified against a real-binary `--ppm` render. (`src/render.cyr`)
+
 ### Added
 
 - **Options menu screen** — selecting "Options" on the main menu opened nothing

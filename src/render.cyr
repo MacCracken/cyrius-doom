@@ -72,6 +72,15 @@ var weapon_fire_ticks = 2;
 var weapon_bob_x = 0;
 var weapon_bob_y = 0;
 var weapon_bob_time = 0;
+# Per-weapon vertical lift (pixels), subtracted from the screen anchor so the
+# weapon sits higher. Zero for every gun (the shared anchor already matches
+# DOOM). The fist (PUNG) is the exception: its thumb lives in the bottom-left of
+# the sprite (rows 32-41), which the shared anchor pushes to screen rows 174-183
+# — entirely behind the status bar (top at 168), so the thumb never shows. DOOM
+# clips it the same way in status-bar mode; we deliberately lift the fist 14 px
+# so the thumb clears the bar (wrist stays tucked behind it). Set per weapon in
+# render_set_weapon.
+var weapon_y_lift = 0;
 # Reusable lump-name scratch (8 bytes). render_update_weapon_lump used to
 # alloc(8) on every call — i.e. every firing frame advance and every weapon
 # switch — and never free it, leaking against the project's lazy-init-guard
@@ -109,8 +118,9 @@ fn render_set_weapon(weapon_id): i64 {
     # weapon_flash_max == 0 => no flash (fist/chainsaw are melee).
     weapon_fire_ticks = 2;
     weapon_flash_max = 0;
+    weapon_y_lift = 0;
     switch (weapon_id) {
-        case 1: { memcpy(weapon_prefix, "PUNG", 4); weapon_fire_max = 4; weapon_fire_ticks = 3; }
+        case 1: { memcpy(weapon_prefix, "PUNG", 4); weapon_fire_max = 4; weapon_fire_ticks = 3; weapon_y_lift = 14; }
         case 2: { memcpy(weapon_prefix, "PISG", 4); weapon_fire_max = 5; weapon_fire_ticks = 3;
                   memcpy(weapon_flash_prefix, "PISF", 4); weapon_flash_max = 1; }
         case 3: { memcpy(weapon_prefix, "SHTG", 4); weapon_fire_max = 4; weapon_fire_ticks = 6;
@@ -209,7 +219,7 @@ fn render_blit_psprite(buf, psz, light): i64 {
     if (toff >= 0x8000) { toff -= 0x10000; }
 
     var sx = 1 - loff + weapon_bob_x;
-    var sy = 16 - toff + weapon_bob_y;
+    var sy = 16 - toff + weapon_bob_y - weapon_y_lift;
     var pend = buf + psz;
 
     for (var col = 0; col < pw; col += 1) {
