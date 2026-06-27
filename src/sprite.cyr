@@ -354,11 +354,22 @@ fn sprite_render_all(): i64 {
         spr_light += dist_dim;
         if (spr_light > 31) { spr_light = 31; }
 
-        # Draw sprite columns
-        for (var c = 0; c < sprite_w; c += 1) {
+        # Draw sprite columns. Range-clamp c so scr_x is provably in
+        # [0, SCREEN_WIDTH) BY CONSTRUCTION — this replaces the old per-column
+        # `if (scr_x < 0 / >= SCREEN_WIDTH) continue;` guards, which were DEAD under
+        # the former cyrius 6.1.37 pin (it miscompiled `continue` inside this large
+        # function to a jmp-to-loop-body no-op; fixed in 6.2.x — this repo now pins
+        # 6.2.44). A point-blank sprite (tiny vy -> huge scale) produced an unclamped
+        # sprite_w in the tens of thousands, so scr_x ran off clip_top's 320-entry
+        # array -> ring-3 #PF on agnos (CR2 ~0x12xxxxxx, the clip_top heap chunk).
+        # Clamping the RANGE (not relying on continue) fixes the OOB on any cyrius
+        # version AND skips iterating the off-screen columns (per-frame perf cliff).
+        var c_lo = 0;
+        if (sx1 < 0) { c_lo = 0 - sx1; }
+        var c_hi = sprite_w;
+        if (sx1 + sprite_w > SCREEN_WIDTH) { c_hi = SCREEN_WIDTH - sx1; }
+        for (var c = c_lo; c < c_hi; c += 1) {
             var scr_x = sx1 + c;
-            if (scr_x < 0) { continue; }
-            if (scr_x >= SCREEN_WIDTH) { continue; }
 
             # Clip to walls: only draw if within the open clip region
             var clip_t = load64(clip_top + scr_x * 8);

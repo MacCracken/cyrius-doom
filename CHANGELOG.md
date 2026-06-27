@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.30.3] - 2026-06-26
+
+### Fixed
+- **Sprite draw-loop out-of-bounds read → ring-3 #PF on AGNOS during sustained close-range combat (`src/sprite.cyr`).** A point-blank sprite — the muzzle-flash / projectile sprites added in the 0.30.x shooting work — has a tiny view-space `vy`, so `scale = PROJ_DIST/vy` and the unclamped `sprite_w` (sprite.cyr:307) blow up to tens of thousands. The sprite-column draw loop then computed `scr_x = sx1 + c` up to ~91,880 and read `clip_top[scr_x]`/`clip_bottom[scr_x]` — 320-entry per-screen-column arrays — walking ~734 KB off the end. On AGNOS (guard-unmapped pages) that is a clean ring-3 page fault (CR2 ≈ `0x12xxxxxx`, the `clip_top` heap chunk → DOOM locks up after ~1–2 min of play); on stock hardware it would silently corrupt adjacent heap. The two `if (scr_x < 0 / >= SCREEN_WIDTH) continue;` guards that should have caught it were **dead no-ops** under the former `cyrius = "6.1.37"` pin, which miscompiled `continue` inside this large function to a jump-to-loop-body (fixed in cyrius 6.2.x). **Fix:** range-clamp the draw loop — `c ∈ [max(0,-sx1), min(sprite_w, SCREEN_WIDTH-sx1))` — so `scr_x` is provably in `[0, SCREEN_WIDTH)` by construction, independent of `continue` codegen, and the loop no longer iterates the huge off-screen column excess (a per-frame perf cliff). Diagnosed from the AGNOS iron #PF (CR2=0x120b3740, RIP=0x45ff1d) + objdump of the stripped binary. Validated: `doom-smoke` (title render) + `doom-ingame-smoke` (E1M1 3D) PASS; both `doom` + `doom_agnos` rebuilt clean.
+
+### Changed
+- **Bumped the `cyrius` toolchain pin `6.1.37` → `6.2.44`** (`cyrius.cyml`). 6.2.x fixes the `continue`-in-large-function miscompile that masked the sprite OOB above (so the in-source bounds guards work again as defense-in-depth), and aligns with the current ecosystem toolchain.
+
 ## [0.30.2] - 2026-06-14
 
 Player-feedback patch — live-play fixes plus control fidelity. Fixed a combat
