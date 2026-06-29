@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.30.4] - 2026-06-29
+
+Toolchain + dependency bump to the cyrius 6.3.x line. No application logic
+changes — the only `src/` edit is the version banner. Binary **612,672 →
+613,720 B** (+1,048, 6.3.0/6.3.5 codegen growth-tax; `doom_agnos` 592,448 →
+600,272 B). `render_frame` **2.971 ms** (E1M1, cycc 6.3.5 — variance-level vs
+0.30.1's 2.957 ms). Tests **63/63** WAD-free + **101/101** full;
+`fuzz_fixed`/`fuzz_wad`/`fuzz_weapon` 50000/1000/2000 clean.
+
+### Changed
+
+- **`cyrius` pin `6.2.44` → `6.3.5`** (`cyrius.cyml`) — closes the launcher
+  drift (cycc already ran 6.3.5; the manifest now matches). The band carries two
+  default-codegen deltas, both re-verified green: 6.3.5 CO-01 (forward-call ABI
+  fix, exercises the `Result<T,E>` WAD path) and 6.3.0 (per-var `_base`
+  indirection; `fuzz_fixed` + render bench confirm no hot-path regression).
+- **`[deps.vani]` `0.9.4` → `0.9.5`** — pure upstream pin sweep; `vani-core`
+  code byte-identical, the `audio_*` ABI `src/audio.cyr` uses is unchanged.
+- **`[deps.bsp]` `1.1.3` → `1.1.5`** — bsp's own 6.3.5 pin release; `dist/bsp.cyr`
+  bundle byte-identical, the `bsp_*` geometry ABI is unchanged.
+- **Regenerated `cyrius.lock`** (`rm -rf lib && cyrius deps`): 37 leaves, 5
+  commit-pinned, `cyrius deps --verify` **37/0**. Transitive trio unmoved (vani
+  0.9.5 still pins yukti 2.2.4 / patra 1.9.5; sakshi 2.2.5 via stdlib); only the
+  vani/bsp git rows + the 6.3.5 stdlib leaves re-hash.
+
+### Security
+
+- Picks up cyrius **CVE-32 (P1)** fix (6.2.45, in the 6.3.5 band) — a
+  path-traversal in the modular dep resolver. doom doesn't use `modular=` so its
+  surface was nil, but the resolver itself is now hardened.
+
 ## [0.30.3] - 2026-06-26
 
 ### Fixed

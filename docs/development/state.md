@@ -1,6 +1,6 @@
 # cyrius-doom — Current State
 
-> **Last refresh**: 2026-06-14 (v0.30.2 — **player-feedback + controls patch**. Combat coredump fixed (`thing_animate` `switch`→`if/else`, cycc return-address smash); dead main-menu **Options** item now a navigable `MENU_OPTIONS` screen; **fist thumb** raised so it clears the status bar (per-weapon `weapon_y_lift`=14 px, `render.cyr`); **controls reworked** — AGNOS gains DOOM-faithful **Ctrl-fire** + **Shift-to-turn** (raw PS/2 scancodes: `0x1D` Ctrl, `0x2A`/`0x36` Shift; arrows + A/D branch strafe↔turn; Caps Lock inherently ignored), while **Linux** keeps the simple, Caps-Lock-immune scheme — arrows turn, A/D strafe, F fires — because a raw tty can't see bare Ctrl/Shift and uppercase-letter Shift is ambiguous with Caps Lock. Binary 610,576→**612,576 B** [+2,000]. Tests 63/63 WAD-free, 101/101 full. Built under cycc **6.2.5** — launcher ignores the 6.1.37 pin, see toolchain row. **AGNOS QEMU verification of the new input path [Ctrl-fire, Shift-turn] is PENDING** — deferred at user request to avoid colliding with in-progress kernel work; Linux input verified by build + tests. Prior v0.30.1 [player-feedback rendering patch — weapon psprite reposition, muzzle-flash overlay, wall texture-U mirror, enemy facing]: see CHANGELOG.) | **Refresh cadence**: every release (ideally bumped by the release post-hook).
+> **Last refresh**: 2026-06-29 (v0.30.4 — **toolchain + dependency bump**. cyrius pin `6.2.44`→`6.3.5` (closes the launcher drift — cycc already ran 6.3.5), vani `0.9.4`→`0.9.5`, bsp `1.1.3`→`1.1.5`; `cyrius.lock` regenerated (37/0, transitive trio unmoved). No application logic changes — only the version banner. Picks up cyrius **CVE-32** resolver path-traversal fix (6.2.45, in-band). Binary 612,672→**613,720 B** [+1,048, 6.3.0/6.3.5 codegen growth-tax]; `doom_agnos` 600,272 B (builds clean). `render_frame` **2.971 ms** (variance-level). Tests 63/63 + 101/101; fuzz 50000/1000/2000 clean. **AGNOS QEMU not gated this cut** — the agnos kernel is mid-RAM/W^X-overhaul; the 0.30.4 binary itself renders 240 colors on the last pre-overhaul kernel.) | **Refresh cadence**: every release (ideally bumped by the release post-hook).
 >
 > CLAUDE.md is preferences / process / procedures (durable). This file is **state** (volatile — binary sizes, version, in-flight slots, dep tags, gates). Anything that rots within a minor lives here. See [first-party-documentation § CLAUDE.md](https://github.com/MacCracken/agnosticos/blob/main/docs/development/planning/first-party-documentation.md#claudemd).
 
@@ -8,38 +8,38 @@
 
 ## Current version
 
-**[`VERSION`](../../VERSION)** = `0.30.2` (single source of truth — `cyrius.cyml` reads it via `${file:VERSION}`).
+**[`VERSION`](../../VERSION)** = `0.30.4` (single source of truth — `cyrius.cyml` reads it via `${file:VERSION}`).
 
 | Surface | Pin |
 |---|---|
-| Cyrius toolchain | `cycc 6.1.37` (in `cyrius.cyml`). **Drift warning**: the installed launcher resolves cycc via CYRIUS_HOME/PATH and ignores the pin — even `~/.cyrius/versions/6.1.37/bin/cyrius` ran cycc **6.2.2** at the 0.29.3 cut (PATH-prepend doesn't fix it). 0.29.3 metrics are therefore on 6.2.2; no 6.2.2 `--agnos` fold regression detected (QEMU serial probe `fixed_mul(VIEW_HEIGHT, PROJ_DIST)=429916160` matches Linux + hand-computed). Lockfile unchanged, verifies 37/0. |
-| `[deps.bsp]` | `1.1.3` (git tag) |
-| `[deps.vani]` | `0.9.4` (git tag, `core` profile — `dist/vani-core.cyr`, 22 `audio_*` symbols) |
+| Cyrius toolchain | `cycc 6.3.5` (in `cyrius.cyml`). **Drift closed at 0.30.4** — the manifest now matches the launcher's actual cycc (`cyrius --version` → `manifest-pin: 6.3.5`, no drift). The 6.2.44→6.3.5 band re-verified green on Linux (101/101 + fuzz + bench); carries 6.3.5 CO-01 (forward-call ABI fix) + 6.3.0 (per-var `_base` indirection). |
+| `[deps.bsp]` | `1.1.5` (git tag — bsp's own 6.3.5 pin release; bundle byte-identical to 1.1.3) |
+| `[deps.vani]` | `0.9.5` (git tag, `core` profile — `dist/vani-core.cyr`, 22 `audio_*` symbols; code byte-identical to 0.9.4) |
 | stdlib | `string`, `alloc`, `fmt`, `vec`, `str`, `io`, `fs`, `args`, `syscalls`, `hashmap`, `tagged`, `fnptr`, `freelist`, `process`, `sakshi` |
 
 ## Current binary
 
 | Metric | Value |
 |---|---|
-| `build/doom` | **612,576 B** (cycc 6.2.5 — see toolchain drift note; +2,000 B over 0.30.1 for the combat-coredump if/else rewrite, Options menu screen, fist `weapon_y_lift`, and Ctrl/Shift input mapping). `build/doom_agnos` = **592,368 B** (build-OK; **QEMU verification PENDING** — see Gates). |
-| Unreachable fns (NOP-sled today, real shrink under O3) | 996 / 293,141 B |
+| `build/doom` | **613,720 B** (cycc 6.3.5; +1,048 B over 0.30.3's 612,672 — the 6.3.0/6.3.5 codegen prelude-widening growth-tax, no logic change). `build/doom_agnos` = **600,272 B** (builds clean; AGNOS QEMU not gated this cut — kernel mid-overhaul). |
+| Unreachable fns (NOP-sled today, real shrink under O3) | 1007 / 293,703 B |
 | Recovery target under Cyrius O3 real DCE | ~260 KB |
-| Frame time | `render_frame` **2.957 ms** / `+sprites` 2.952 ms (E1M1, 0.30.1, cycc 6.2.2). Render path **unchanged** from 0.30.0 — the U-swap correction is a couple of ops per seg and the combined-rotation sprite lookups don't register at the E1M1 spawn sprite count; the delta vs 0.30.0's 3.10 ms is run-to-run variance. ~7× headroom on the 22 ms budget. |
+| Frame time | `render_frame` **2.971 ms** / `+sprites` 2.979 ms (E1M1, 0.30.4, cycc 6.3.5). Variance-level vs 0.30.1's 2.957 ms — the 6.3.0 per-var `_base` indirection does not register on the hot render path. ~7.4× headroom on the 22 ms budget. |
 | Hot math | `fixed_mul` 7 ns / `asr` 4 ns / `texture_get_column` ~690 ns / `pcache_get_hit` 7 ns |
 
 Frame-time budget: 22 ms per tick @ 35 Hz. Current: ~12× headroom.
 
-## Gates (last green, 2026-06-14)
+## Gates (last green, 2026-06-29)
 
 | Gate | Result |
 |---|---|
-| `cyrius deps --verify` | **37 verified, 0 failed** (lock unchanged — pin didn't move at 0.30.0; no regen performed under the drifted 6.2.2 launcher, by design). CI runs `cyrius deps` then this gate. |
-| `cyrius build src/main.cyr build/doom` | OK, **612,576 B** (cycc **6.2.5** — launcher ignores the 6.1.37 pin, see toolchain row). Clean-from-scratch (`rm -rf build`) build passes. |
-| `cyrius build --agnos src/main.cyr build/doom_agnos` | OK, **592,368 B**. **QEMU verification PENDING for 0.30.2** — deferred at user request to avoid colliding with in-progress kernel work. The 0.30.2 input changes (Ctrl-fire scancode `0x1D`, Shift-to-turn `0x2A`/`0x36`) land entirely on the **AGNOS-only** `input_poll` scancode path, which the WAD-free suite does not exercise, so the decisive check is sending those scancodes to the QEMU binary and confirming fire/turn. Owed: `agnos/scripts/doom-smoke.sh` + an in-game sendkey run for Ctrl-fire + Shift-turn. (Last QEMU-verified binary: 0.30.1.) |
+| `cyrius deps --verify` | **37 verified, 0 failed** (regenerated at 0.30.4 via `rm -rf lib && cyrius deps` for the pin bump; transitive trio unmoved). CI runs `cyrius deps` then this gate. |
+| `cyrius build src/main.cyr build/doom` | OK, **613,720 B** (cycc **6.3.5** — pin matches launcher, drift closed). Clean-from-scratch (`rm -rf build`) build passes. |
+| `cyrius build --agnos src/main.cyr build/doom_agnos` | OK, **600,272 B**. **AGNOS QEMU not gated this cut** — the agnos kernel is mid-RAM/W^X-overhaul; the 0.30.4 binary itself renders 240 colors on the last pre-overhaul kernel (so the bump is sound; the current-kernel boot is a kernel-side issue, not doom). |
 | `cyrius test tests/doom.tcyr` (WAD-free, CI subset) | **63/63** (+26: a `combat:` group — p_random determinism/range, ammo deduction, damage/state transitions, hitscan select + LOS, splash falloff, rocket projectile). |
 | `./build/test_doom wad/DOOM1.WAD` (full) | **101/101** (37 WAD-free combat+math + 64 WAD-gated). |
-| `fuzz_wad` / `fuzz_fixed` / `fuzz_weapon` | **2000 / 50000 / 20000 clean**. `fuzz_weapon` (new) drives the real `render_draw_weapon` psprite decoder with malformed one-lump WADs. |
-| `./build/doom wad/DOOM1.WAD --ppm` | E1M1 + automap + intermission PPMs at 192,015 B each; map summary `V=467 L=475 SD=648 S=85 SG=732 SS=237 N=236 T=134` (134 = the 138 map things minus 4 player starts). Render unchanged from 0.29.4 (walls/flats resolve, ≤0.1% viewport black). |
+| `fuzz_wad` / `fuzz_fixed` / `fuzz_weapon` | **1000 / 50000 / 2000 clean** (self-reported iteration counts). `fuzz_fixed` is the canary for the 6.3.0 per-var `_base` codegen on the fixed-point path — clean. |
+| `./build/doom wad/DOOM1.WAD --ppm` | E1M1 PPM at 192,015 B; map summary `V=467 L=475 SD=648 S=85 SG=732 SS=237 N=236 T=138` (138 raw map things; 134 after the 4 player starts are filtered). Render unchanged. |
 | All 9 shareware maps (E1M1–E1M9) | E1M1/E1M3/E1M7/E1M9 PPM-rendered + **visually verified** at the 0.29.4 cut: the black-hole/void family is gone (≤0.1% viewport black). Remaining wall items catalogued on the roadmap (closed-sector-clip-inversion = closed-door-in-play, U-swap mirror, SLADRIP no-op, FLAT_MAX, bsp asr). |
 | bsp 1.1.3 standalone (upstream) | 79/79 tests, 13/13 benches sub-μs, 25K fuzz iters |
 | Lint / fmt | clean across all 20 src modules + vendored libs |
@@ -59,6 +59,7 @@ Current arc: **v0.28.x graphics** (review/hardening/parity/performance). The v0.
 
 | Slot | Status | What |
 |---|---|---|
+| **v0.30.4** | prepared 2026-06-29 (Linux verified; AGNOS QEMU not gated — kernel mid-overhaul) | **Toolchain + dependency bump.** cyrius pin 6.2.44→6.3.5 (drift closed), vani 0.9.4→0.9.5, bsp 1.1.3→1.1.5; `cyrius.lock` regenerated (37/0, transitive trio unmoved). No logic changes (only the banner). Picks up cyrius CVE-32 resolver fix. Binary 612,672→613,720 B; `render_frame` 2.971 ms; 63/63 + 101/101; fuzz clean. |
 | **v0.27.0** | shipped 2026-05-21 | Cyrius 5.7.48 → 6.0.1 lift; vani 0.9.1 → 0.9.3; manifest modernization; CI patra-style installer |
 | **v0.27.1** | shipped 2026-05-21 | bsp 1.1.2 → 1.1.3 + vani 0.9.3 → 0.9.4 dep-tag re-pin |
 | **v0.27.2** | shipped 2026-05-21 | `: i64` return-type annotation sweep on all 20 modules (270 sigs, ABI-identical) |

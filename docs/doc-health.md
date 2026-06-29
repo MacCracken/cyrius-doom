@@ -1,6 +1,6 @@
 # Documentation Health — cyrius-doom
 
-> **Last refresh**: 2026-06-13 (v0.30.1 — player-feedback rendering patch: CHANGELOG / state.md / roadmap.md rows touched [psprite position, muzzle-flash overlay, U-swap mirror, combined-rotation sprites, walk-strobe]; roadmap U-swap-mirror #7 + R_DrawPSprite #1 + muzzle-flash-overlay marked RESOLVED, animated-multi-frame-flash follow-up added. AGNOS QEMU re-verified on the 0.30.1 binary. completed-phases.md unchanged — 0.30.x prepared but not yet tagged). Prior refresh: 2026-06-13 v0.30.0. | **Refresh cadence**: opportunistic — update the affected row when the underlying doc is touched. No periodic sweep cron.
+> **Last refresh**: 2026-06-29 (v0.30.4 — toolchain + dependency bump: CHANGELOG / state.md / completed-phases.md rows touched; completed-phases.md gained the v0.30.x section [0.30.0–0.30.4]; state.md refreshed to 0.30.4 [pin 6.3.5, vani 0.9.5, bsp 1.1.5, lock 37/0, drift closed]). Prior refresh: 2026-06-13 v0.30.1. | **Refresh cadence**: opportunistic — update the affected row when the underlying doc is touched. No periodic sweep cron.
 >
 > **Scope**: this repo only (`cyrius-doom`) — the entire `docs/` tree plus root-level docs (README, CHANGELOG, CLAUDE.md, CONTRIBUTING, SECURITY, CODE_OF_CONDUCT). VERSION is tracked as a structural artifact, not a doc.
 >
@@ -32,7 +32,7 @@ This is a **ledger**, not a one-time audit. Rewrite-in-place as docs change.
 | File | Last touched | Status | Action |
 |---|---|---|---|
 | `README.md` | 2026-04-30 | ✅ Fresh | Top-level project README. Verify in passing at next minor closeout — pre-dates the v0.27.x cycle but content is durable. |
-| `CHANGELOG.md` | 2026-06-13 | ✅ Fresh | **Source of truth per CLAUDE.md.** Through **v0.30.1** (player-feedback rendering patch: psprite hotspot fix, muzzle-flash overlay, wall U-swap mirror, combined-rotation sprite resolution + flip, walk-strobe gating). v0.30.0 = shooting overhaul. Refreshed every release. |
+| `CHANGELOG.md` | 2026-06-29 | ✅ Fresh | **Source of truth per CLAUDE.md.** Through **v0.30.4** (toolchain + dependency bump: cyrius 6.3.5, vani 0.9.5, bsp 1.1.5, lock 37/0, CVE-32 pickup). Refreshed every release. |
 | `CLAUDE.md` | 2026-06-13 | ✅ Fresh | Durable content only (state delegated to `state.md`). Closeout/CI test-count refs bumped 37/73 → **63/101** at v0.30.0 (combat tests added). Toolchain ref → `cycc 6.1.29`; Lockfile (Work-Loop §7) + CI `cyrius.lock` notes for the pin (regenerate against the pinned stdlib; `./lib/` is a gitignored build artifact). Project-identity / Goal / Process / Rules / Cyrius Conventions all durable. |
 | `CONTRIBUTING.md` | 2026-04-30 | ✅ Fresh | Verify in passing at next minor closeout — durable content. |
 | `SECURITY.md` | 2026-04-30 | ✅ Fresh | Public reporting policy. Durable; pre-dates v0.27.x but no surface change. |
@@ -65,9 +65,9 @@ No numbered architecture notes yet — the convention is `NNN-kebab-case-title.m
 
 | File | Last touched | Status | Action |
 |---|---|---|---|
-| `state.md` | 2026-06-13 | ✅ Fresh | **Rotates every release.** Current to v0.30.1 — binary 610,576 B (agnos 589,664 B), `render_frame` 2.957 ms (render path unchanged), lock unchanged (37/0). Gates re-run on the 0.30.1 binary (63/63 + 101/101, fuzz_weapon clean, AGNOS QEMU doom-smoke + in-game PASS). v0.30.1 slot row added (prepared, not yet tagged). Toolchain drift warning retained (cycc 6.2.2 vs 6.1.37 pin). |
+| `state.md` | 2026-06-29 | ✅ Fresh | **Rotates every release.** Current to v0.30.4 — binary 613,720 B (agnos 600,272 B), `render_frame` 2.971 ms, lock regenerated (37/0, transitive trio unmoved). Pin 6.3.5 / vani 0.9.5 / bsp 1.1.5; **toolchain drift closed** (manifest matches launcher). Gates re-run on Linux (63/63 + 101/101, fuzz clean); AGNOS QEMU not gated (kernel mid-overhaul). v0.30.4 slot row added. |
 | `roadmap.md` | 2026-06-13 | ✅ Fresh | **Re-slotted at v0.28.4 cut** (0.28.5–.11 carry the Black Book parity/perf themes). Floor-render + shooting-overhaul deferrals folded in as unslotted rows. **v0.30.1 marked RESOLVED**: wall-path #7 (U-swap mirror), game-state #1 (`R_DrawPSprite` coords), and the muzzle-flash-overlay cosmetic; added an animated-multi-frame-flash follow-up (chaingun/rocket). Slot numbers vs shipped 0.29.x/0.30.x acknowledged stale — renumbering deferred to the next re-slot. |
-| `completed-phases.md` | 2026-06-12 | ✅ Fresh | **Updated at v0.29.3 cut** — added the v0.29.3 flat-rendering row; 0.29.x arc header extended (+ flat rendering). Chronological one-line index. |
+| `completed-phases.md` | 2026-06-29 | ✅ Fresh | **Updated at v0.30.4 cut** — added the **v0.30.x section** (0.30.0 shooting overhaul → 0.30.4 toolchain bump), catching up the previously-absent 0.30.x rows. Chronological one-line index. |
 | `roadmap-crossover.md` | 2026-04-30 | 🟠 Read-through | AgentWorld / secureyeoman crossover doc — spatial threat visualization via the DOOM engine. Not touched during the v0.27.x cycle; status against current secureyeoman scope not verified. Read-through at next minor closeout. |
 
 ---

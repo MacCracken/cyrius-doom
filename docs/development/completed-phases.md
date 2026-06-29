@@ -4,6 +4,16 @@
 
 Each entry: one row, headline only. For the full changelog see [`CHANGELOG.md`](../../CHANGELOG.md).
 
+## v0.30.x — Shooting overhaul + player-feedback + toolchain rollups
+
+| Version | Shipped | Milestone |
+|---------|---------|-----------|
+| v0.30.4 | 2026-06-29 | **Toolchain + dependency bump.** cyrius pin 6.2.44→6.3.5 (closes the launcher drift — cycc already ran 6.3.5), vani 0.9.4→0.9.5, bsp 1.1.3→1.1.5; `cyrius.lock` regenerated (37/0, transitive yukti/patra/sakshi unmoved). No application logic changes (only the version banner). Picks up cyrius **CVE-32** resolver path-traversal fix (6.2.45, in-band). The 6.2.44→6.3.5 band carries 6.3.5 CO-01 (forward-call ABI fix) + 6.3.0 (per-var `_base` indirection), both re-verified green on Linux. Binary 612,672→613,720 B (+1,048 codegen growth-tax); `render_frame` 2.971 ms (variance); 63/63 + 101/101; fuzz 50000/1000/2000 clean. |
+| v0.30.3 | 2026-06-26 | **Sprite draw-loop OOB read → ring-3 #PF on AGNOS during sustained close-range combat.** A point-blank muzzle-flash/projectile sprite blew up `sprite_w`, so the column draw loop read `clip_top`/`clip_bottom` ~734 KB off the end (clean #PF on AGNOS guard pages; silent heap corruption on stock HW). The in-source bounds guards were dead no-ops under the old 6.1.37 `continue`-in-large-fn miscompile. Fixed by range-clamping the draw loop so `scr_x ∈ [0, SCREEN_WIDTH)` by construction. Toolchain pin 6.1.37→6.2.44. |
+| v0.30.2 | 2026-06-14 | **Player-feedback + controls patch.** Combat coredump fixed (`thing_animate` `switch`→`if/else`, cycc return-smash); dead main-menu Options item → navigable `MENU_OPTIONS` screen; fist thumb raised to clear the status bar; controls reworked — AGNOS gains DOOM-faithful Ctrl-fire + Shift-to-turn, Linux keeps the Caps-Lock-immune arrows-turn/A-D-strafe/F-fire scheme. |
+| v0.30.1 | 2026-06-13 | **Player-feedback rendering patch.** Weapon psprite hotspot fix (`1−loff/16−toff`, was pistol-only by coincidence); muzzle-flash overlay (`ps_flash` PISF/SHTF/CHGF/MISF fullbright); wall texture-U mirror on turn corrected; enemies resolve combined-rotation lumps (`TROOA2A8`) + flip so they face correctly; walk-strobe gated to ~4-tick. |
+| v0.30.0 | 2026-06-13 | **Shooting-mechanics overhaul.** Multi-agent review of input→hitscan→damage→psprite (27 findings). Fixed unbounded fire cadence, shoot-through-walls (LOS), pain-lock, corpse re-kill, psprite leak. Fidelity: rocket→projectile+splash, barrel chain-explosions, shotgun 7-pellet spread, per-weapon refire cadence, `p_random` PRNG. Tests 37→63 WAD-free / 75→101 full + `fuzz_weapon` 20k. |
+
 ## v0.29.x — AGNOS scaling + world-tick correctness + flat rendering
 
 | Version | Shipped | Milestone |
