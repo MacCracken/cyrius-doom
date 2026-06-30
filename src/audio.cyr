@@ -10,23 +10,37 @@ enum SndConst {
 }
 
 # Software mixer. DOOM keeps the DSP continuously fed and mixes up to 8 voices;
-# we do the same against a raw ALSA hw node via vani. The mixer renders one game
-# tick of audio (SND_DMX_RATE / 35 = 315 frames, exact — no rate drift) into a
-# scratch buffer each tick and pushes it NON-BLOCKING so the 35Hz loop never
-# stalls on a WRITEI. Period/buffer/start are tunables — bump MIX_START down to
-# trade latency for underrun headroom once verified on real hardware.
+# we do the same against a raw ALSA hw node via vani. Voices are stored + mixed
+# at DOOM's native SND_DMX_RATE (11025) mono, then the OUTPUT stage converts to
+# whatever the hw node actually accepts.
+#
+# Real HDA codecs (verified on metal) reject S8/mono/11025 outright — the analog
+# jack here takes ONLY S16_LE / stereo / 44100. The raw hw node does no
+# conversion, so we do it: each mixed 11025 mono sample becomes OUT_UP (=4)
+# stereo S16 frames (44100/11025 == 4 exactly -> clean integer upsample; L==R).
+# One game tick = MIX_SRC_SAMPLES (315) mono in -> MIX_TICK_FRAMES (1260) stereo
+# frames out (44100/35, exact -> no drift). Pushed NON-BLOCKING so the 35Hz loop
+# never stalls on a WRITEI. Period/buffer/start are tunables.
 enum MixConst {
     MIX_CHANNELS    = 8;
-    MIX_TICK_FRAMES = 315;    # SND_DMX_RATE / 35 (game tick rate), exact
-    MIX_PERIOD      = 512;    # ALSA period frames (HW_PARAMS hint)
-    MIX_BUFFER      = 4096;   # ALSA ring buffer frames (~372 ms)
-    MIX_START       = 1536;   # start_threshold frames (~140 ms pre-buffer)
+    MIX_SRC_SAMPLES = 315;    # 11025 / 35 — mixed mono samples rendered per tick
+    OUT_RATE        = 44100;  # device output rate (only 44100/48000 accepted raw)
+    OUT_CH          = 2;      # stereo (mono rejected by the analog codec)
+    OUT_BITS        = 16;     # S16_LE
+    OUT_UP          = 4;      # OUT_RATE / SND_DMX_RATE (44100/11025), exact
+    MIX_TICK_FRAMES = 1260;   # OUT_RATE / 35 — output frames pushed per tick
+    OUT_BUF_BYTES   = 5040;   # MIX_TICK_FRAMES * OUT_CH * (OUT_BITS/8) = 1260*4
+    MIX_PERIOD      = 1024;   # ALSA period frames (HW_PARAMS hint)
+    MIX_BUFFER      = 8192;   # ALSA ring buffer frames (~186 ms @ 44100)
+    MIX_START       = 3072;   # start_threshold frames (~70 ms pre-buffer)
     MIX_RATE_22K    = 22050;  # the one off-rate that ships in shareware (DSITMBK)
     ERRNO_EPIPE     = 32;     # -EPIPE: ALSA underrun -> re-prepare
     F_SETFL         = 4;
     F_GETFL         = 3;
     FCNTL_NB        = 2048;   # O_NONBLOCK (Linux x86_64)
     SYS_FCNTL       = 72;
+    AUDIO_SCAN_CARDS = 4;     # scan cards 0..3 for a usable output
+    AUDIO_SCAN_DEVS  = 8;     # scan devices 0..7 within a card (fallback pass)
 }
 
 var snd_cache_lumps = 0;
@@ -38,10 +52,51 @@ var audio_dev = 0;
 var audio_inited = 0;
 
 # Active-voice state (parallel arrays, MIX_CHANNELS entries of 8 bytes each).
-var audio_chan_data = 0;   # pointer to the voice's S? PCM (raw unsigned 8-bit)
+var audio_chan_data = 0;   # pointer to the voice's PCM (raw unsigned 8-bit)
 var audio_chan_len  = 0;   # voice length in samples (0 = slot never used)
 var audio_chan_pos  = 0;   # next sample index; pos >= len means finished/free
-var audio_mix_buf   = 0;   # MIX_TICK_FRAMES scratch, S8 mono
+var audio_mix_buf   = 0;   # OUT_BUF_BYTES scratch, S16_LE stereo @ OUT_RATE
+
+# Open + configure a playback device for OUT_RATE/OUT_CH/OUT_BITS, returning the
+# configured vani handle (already through HW_PARAMS) or 0 if none works.
+#
+# Device choice matters: on a box with a GPU, card 0 is usually the HDMI codec
+# (output goes to a monitor, often with nothing plugged in) and the analog jack
+# is a later card. A blind ascending scan would grab HDMI first. So we PREFER an
+# analog codec, identified name-free by a capture sibling on device 0 (HDMI is
+# playback-only; the headphone/line-out codec also has a mic/line-in). Only if no
+# analog candidate accepts the format do we fall back to the first playback node
+# that does (HDMI, virtual, etc.) so something still plays.
+fn audio_try_configure(card, device): i64 {
+    var dev = audio_open_playback(card, device);
+    if (dev == 0) { return 0; }
+    var r = audio_set_params_full(dev, OUT_RATE, OUT_CH, OUT_BITS, MIX_PERIOD, MIX_BUFFER);
+    if (r != 0) {
+        r = audio_set_params(dev, OUT_RATE, OUT_CH, OUT_BITS);
+    }
+    if (r != 0) { audio_close(dev); return 0; }
+    return dev;
+}
+
+fn audio_open_best(): i64 {
+    # Pass 1: prefer a card whose device 0 has a capture sibling (analog codec).
+    for (var card = 0; card < AUDIO_SCAN_CARDS; card += 1) {
+        var cap = audio_open_capture(card, 0);
+        if (cap != 0) {
+            audio_close(cap);
+            var dev = audio_try_configure(card, 0);
+            if (dev != 0) { return dev; }
+        }
+    }
+    # Pass 2: fall back to the first playback node anywhere that takes the format.
+    for (var card2 = 0; card2 < AUDIO_SCAN_CARDS; card2 += 1) {
+        for (var device = 0; device < AUDIO_SCAN_DEVS; device += 1) {
+            var dev2 = audio_try_configure(card2, device);
+            if (dev2 != 0) { return dev2; }
+        }
+    }
+    return 0;
+}
 
 fn audio_init(): i64 {
     #ifdef CYRIUS_TARGET_AGNOS
@@ -68,9 +123,9 @@ fn audio_init(): i64 {
     snd_cache_rates = alloc(SND_CACHE_MAX * 8);
     snd_cache_count = 0;
 
-    # Mixer scratch + voice tables (S8 mono). One game tick of output is
-    # MIX_TICK_FRAMES bytes; the voice arrays are MIX_CHANNELS * 8 each.
-    audio_mix_buf   = alloc(MIX_TICK_FRAMES);
+    # Mixer scratch + voice tables. One game tick of output is OUT_BUF_BYTES
+    # (S16 stereo); the voice arrays are MIX_CHANNELS * 8 each.
+    audio_mix_buf   = alloc(OUT_BUF_BYTES);
     audio_chan_data = alloc(MIX_CHANNELS * 8);
     audio_chan_len  = alloc(MIX_CHANNELS * 8);
     audio_chan_pos  = alloc(MIX_CHANNELS * 8);
@@ -80,28 +135,14 @@ fn audio_init(): i64 {
         store64(audio_chan_pos + c * 8, 0);
     }
 
-    # Open ALSA playback device (card 0, device 0).
-    audio_dev = audio_open_playback(0, 0);
-    if (audio_dev == 0) {
-        sakshi_warn("audio: no device", 16);
-        return 0;
-    }
-
-    # Configure S8 / mono / 11025 Hz to match DOOM's native sound format. The
-    # raw hw node does no conversion, so try the period/buffer-constrained form
-    # first, then fall back to letting the kernel pick period/buffer. If BOTH
-    # are rejected the device can't take this format raw -- close it and run
+    # Find + configure a working output (analog jack preferred, see
+    # audio_open_best). The raw hw node does no conversion, so the mixer's output
+    # stage produces exactly OUT_RATE/OUT_CH/OUT_BITS. If nothing accepts it, run
     # silent (the mixer no-ops on audio_dev==0) rather than logging a false
-    # "ALSA playback" and writing into a misconfigured PCM. A later bite can add
-    # S16 + resampling negotiation here.
-    var r = audio_set_params_full(audio_dev, SND_DMX_RATE, 1, 8, MIX_PERIOD, MIX_BUFFER);
-    if (r != 0) {
-        r = audio_set_params(audio_dev, SND_DMX_RATE, 1, 8);
-    }
-    if (r != 0) {
-        sakshi_warn("audio: S8/11025 rejected", 24);
-        audio_close(audio_dev);
-        audio_dev = 0;
+    # "ALSA playback".
+    audio_dev = audio_open_best();
+    if (audio_dev == 0) {
+        sakshi_warn("audio: no usable device", 23);
         return 0;
     }
 
@@ -269,14 +310,17 @@ fn audio_play_name(lump_name): i64 {
     return 0;
 }
 
-# Per-tick mixer. Renders MIX_TICK_FRAMES of mixed S8 mono from the active
-# voices and pushes it non-blocking. Called once per 35Hz game tick. Keeps the
-# stream fed with silence between sounds so the PCM never start/stop-churns.
+# Per-tick mixer. Mixes MIX_SRC_SAMPLES (315) of 11025 mono from the active
+# voices, then renders the OUTPUT stage: each mono sample -> OUT_UP (4) stereo
+# S16_LE frames (U8->S16 recenter+scale, mono->L/R dup, 11025->44100 upsample).
+# MIX_TICK_FRAMES (1260) frames out, pushed non-blocking. Called once per 35Hz
+# tick; silence between sounds keeps the PCM from start/stop-churning.
 fn audio_tick(): i64 {
     if (audio_dev == 0) { return 0; }
     if (audio_mix_buf == 0) { return 0; }
 
-    for (var f = 0; f < MIX_TICK_FRAMES; f += 1) {
+    var oi = 0;   # byte offset into the S16 stereo output buffer
+    for (var f = 0; f < MIX_SRC_SAMPLES; f += 1) {
         var acc = 0;
         for (var c = 0; c < MIX_CHANNELS; c += 1) {
             var clen = load64(audio_chan_len + c * 8);
@@ -284,17 +328,23 @@ fn audio_tick(): i64 {
                 var cpos = load64(audio_chan_pos + c * 8);
                 if (cpos < clen) {
                     # DOOM PCM is UNSIGNED 8-bit (silence == 128); recenter to
-                    # signed for the S8 stream and summation.
+                    # signed for summation.
                     var u = load8(load64(audio_chan_data + c * 8) + cpos);
                     acc = acc + (u - 128);
                     store64(audio_chan_pos + c * 8, cpos + 1);
                 }
             }
         }
-        # Clamp the mixed sum to the S8 range, store as a two's-complement byte.
+        # Clamp the mix to signed 8-bit, then scale to S16 (<<8) for output.
         if (acc > 127) { acc = 127; }
         if (acc < 0 - 128) { acc = 0 - 128; }
-        store8(audio_mix_buf + f, acc & 255);
+        var s16 = (acc << 8) & 0xFFFF;
+        # Upsample 4x, duplicate to L+R: 4 stereo frames per source sample.
+        for (var up = 0; up < OUT_UP; up += 1) {
+            store16(audio_mix_buf + oi, s16);       # left
+            store16(audio_mix_buf + oi + 2, s16);   # right
+            oi = oi + 4;
+        }
     }
 
     # Non-blocking push. -EPIPE (underrun) -> re-prepare so the next tick

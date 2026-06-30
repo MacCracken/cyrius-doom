@@ -158,11 +158,13 @@ fn doom_main(): i64 {
     # Parse args
     var ppm_mode = 0;
     var ppm_menu = 0;
+    var audio_test = 0;
     var direct_map = 0;
     for (var ai = 2; ai < argc(); ai += 1) {
         var arg = argv(ai);
         if (streq(arg, "--ppm") == 1) { ppm_mode = 1; }
         if (streq(arg, "--ppm-menu") == 1) { ppm_menu = 1; }
+        if (streq(arg, "--audio-test") == 1) { audio_test = 1; }
         if (load8(arg) == 69) {
             var ep = load8(arg + 1) - 48;
             var mp = load8(arg + 3) - 48;
@@ -221,6 +223,33 @@ fn doom_main(): i64 {
 
     # Load initial map
     if (load_map() != 0) { doom_exit(1); }
+
+    # Audio self-test: play a sequence of real DOOM SFX through the full mixer,
+    # paced at 35Hz, then exit. No framebuffer needed — confirms the ALSA output
+    # path (device pick, S16/stereo/44100 conversion, non-blocking writes) is
+    # actually producing sound out of the speaker/jack. load_map() above already
+    # ran audio_init()+audio_preload(), so the cache + device are ready.
+    if (audio_test == 1) {
+        sakshi_info("audio test: 6 sounds, ~6s", 25);
+        tick_init();   # the 35Hz clock isn't set up until the game loop below
+        var at_total = 35 * 6;
+        var at_t = 0;
+        while (at_t < at_total) {
+            tick_begin();
+            if (at_t == 0)   { sakshi_info("sfx: pistol", 11); audio_play_name("DSPISTOL"); }
+            if (at_t == 35)  { sakshi_info("sfx: shotgun", 12); audio_play_name("DSSHOTGN"); }
+            if (at_t == 70)  { sakshi_info("sfx: door", 9); audio_play_name("DSDOROPN"); }
+            if (at_t == 105) { sakshi_info("sfx: pickup", 11); audio_play_name("DSITEMUP"); }
+            if (at_t == 140) { sakshi_info("sfx: pain", 9); audio_play_name("DSPLPAIN"); }
+            if (at_t == 175) { sakshi_info("sfx: explosion", 14); audio_play_name("DSBAREXP"); }
+            audio_tick();
+            at_t += 1;
+            tick_wait();
+        }
+        audio_shutdown();
+        wad_close();
+        doom_exit(0);
+    }
 
     # Game screenshot mode (also renders intermission)
     if (ppm_mode == 1) {
