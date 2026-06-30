@@ -175,6 +175,13 @@ fn audio_shutdown(): i64 {
 
 # Load a sound from WAD into cache
 fn audio_load(lump_name): i64 {
+    # No cache means audio was never initialized for this target -- on AGNOS
+    # audio_init early-returns before allocating snd_cache_*, but the event sites
+    # (player/things/doors) still call audio_play_name -> audio_load. Without this
+    # guard the store64(snd_cache_lumps + idx*8, ...) below writes to the NULL
+    # page (base 0) on the first SFX. audio_play(-1) is already a clean no-op.
+    if (snd_cache_lumps == 0) { return -1; }
+
     var lump = wad_find_lump(lump_name);
     if (lump < 0) { return -1; }
 
@@ -210,17 +217,17 @@ fn audio_load(lump_name): i64 {
     # at load (crude, no low-pass -- acceptable for SFX) so playback is 1 cached
     # sample == 1 output frame for every voice. Anything else is taken as-is.
     var src = raw + SND_HEADER_SIZE;
-    var pcm = 0;
-    var stored = 0;
+    var stored = nsamples;
+    if (rate == MIX_RATE_22K) { stored = nsamples / 2; }
+    # A degenerate 1-sample 22050 lump decimates to 0 -> alloc(0) would cache a
+    # null pointer in a live slot. Reject it.
+    if (stored <= 0) { return -1; }
+    var pcm = alloc(stored);
     if (rate == MIX_RATE_22K) {
-        stored = nsamples / 2;
-        pcm = alloc(stored);
         for (var i = 0; i < stored; i += 1) {
             store8(pcm + i, load8(src + i * 2));
         }
     } else {
-        stored = nsamples;
-        pcm = alloc(stored);
         memcpy(pcm, src, stored);
     }
 
@@ -348,8 +355,11 @@ fn audio_tick(): i64 {
     }
 
     # Non-blocking push. -EPIPE (underrun) -> re-prepare so the next tick
-    # re-primes; EAGAIN / short write -> we're ahead of the card, just drop this
-    # chunk (it is silence or a sub-tick gap) and catch up next tick.
+    # re-primes. -EAGAIN / short write -> the ring is full (we're ahead of the
+    # card): we drop this chunk and catch up next tick. NOTE: voices already
+    # advanced cpos above, so a dropped chunk skips ~28.6 ms of any ACTIVE sound
+    # (not just silence) -- an audible micro-gap, traded for the never-stall
+    # guarantee. With exact 1260-frames/tick pacing this is rare in steady state.
     var w = audio_write(audio_dev, audio_mix_buf, MIX_TICK_FRAMES);
     if (w == 0 - ERRNO_EPIPE) {
         audio_prepare(audio_dev);

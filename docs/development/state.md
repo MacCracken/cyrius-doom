@@ -1,6 +1,6 @@
 # cyrius-doom — Current State
 
-> **Last refresh**: 2026-06-29 (v0.30.4 — **toolchain + dependency bump**. cyrius pin `6.2.44`→`6.3.5` (closes the launcher drift — cycc already ran 6.3.5), vani `0.9.4`→`0.9.5`, bsp `1.1.3`→`1.1.5`; `cyrius.lock` regenerated (37/0, transitive trio unmoved). No application logic changes — only the version banner. Picks up cyrius **CVE-32** resolver path-traversal fix (6.2.45, in-band). Binary 612,672→**613,720 B** [+1,048, 6.3.0/6.3.5 codegen growth-tax]; `doom_agnos` 600,272 B (builds clean). `render_frame` **2.971 ms** (variance-level). Tests 63/63 + 101/101; fuzz 50000/1000/2000 clean. **AGNOS QEMU not gated this cut** — the agnos kernel is mid-RAM/W^X-overhaul; the 0.30.4 binary itself renders 240 colors on the last pre-overhaul kernel.) | **Refresh cadence**: every release (ideally bumped by the release post-hook).
+> **Last refresh**: 2026-06-29 (v0.30.5 — **audio revive**. The `audio.cyr` + vani ALSA path was wired but **dead** (`audio_play` had zero callers → only PC-speaker beeps reached a device). Now real WAD `DS*` SFX play: an 8-voice non-blocking software mixer (`audio_tick`), analog-card auto-pick (`audio_open_best`), S16/stereo/44100 output (U8→S16, mono→stereo, clean 4× upsample from 11025), idempotent init, AGNOS guards, DMX validation, `--audio-test` harness. **Verified producing sound on real hardware** (analog jack = card1/D0; HDA rejects S8/mono/11025, accepts only S16/stereo/44100·48000). Binary 613,720→**619,224 B** [+5,504]; `doom_agnos` 605,808 B (builds clean). `render_frame` **3.082 ms** (variance-level — mixer is off the render path). Tests 63/63 + 101/101; fuzz 1000/50000 clean; deps 37/0; DCE 998 unreachable/295,193 B. Pre-cut 29-agent adversarial review: 18 confirmed, 1 HIGH fixed (AGNOS null-write), MED/LOW → roadmap. **AGNOS QEMU not gated this cut** — kernel mid-RAM/W^X-overhaul; audio is `#ifdef`-guarded off on AGNOS regardless.) | **Refresh cadence**: every release (ideally bumped by the release post-hook).
 >
 > CLAUDE.md is preferences / process / procedures (durable). This file is **state** (volatile — binary sizes, version, in-flight slots, dep tags, gates). Anything that rots within a minor lives here. See [first-party-documentation § CLAUDE.md](https://github.com/MacCracken/agnosticos/blob/main/docs/development/planning/first-party-documentation.md#claudemd).
 
@@ -8,7 +8,7 @@
 
 ## Current version
 
-**[`VERSION`](../../VERSION)** = `0.30.4` (single source of truth — `cyrius.cyml` reads it via `${file:VERSION}`).
+**[`VERSION`](../../VERSION)** = `0.30.5` (single source of truth — `cyrius.cyml` reads it via `${file:VERSION}`).
 
 | Surface | Pin |
 |---|---|
@@ -21,10 +21,10 @@
 
 | Metric | Value |
 |---|---|
-| `build/doom` | **613,720 B** (cycc 6.3.5; +1,048 B over 0.30.3's 612,672 — the 6.3.0/6.3.5 codegen prelude-widening growth-tax, no logic change). `build/doom_agnos` = **600,272 B** (builds clean; AGNOS QEMU not gated this cut — kernel mid-overhaul). |
-| Unreachable fns (NOP-sled today, real shrink under O3) | 1007 / 293,703 B |
+| `build/doom` | **619,224 B** (cycc 6.3.5; +5,504 B over 0.30.4's 613,720 — the software SFX mixer, `audio_open_best` device pick, and the `--audio-test` harness). `build/doom_agnos` = **605,808 B** (builds clean; audio `#ifdef`-guarded off; AGNOS QEMU not gated this cut — kernel mid-overhaul). |
+| Unreachable fns (NOP-sled today, real shrink under O3) | 998 / 295,193 B |
 | Recovery target under Cyrius O3 real DCE | ~260 KB |
-| Frame time | `render_frame` **2.971 ms** / `+sprites` 2.979 ms (E1M1, 0.30.4, cycc 6.3.5). Variance-level vs 0.30.1's 2.957 ms — the 6.3.0 per-var `_base` indirection does not register on the hot render path. ~7.4× headroom on the 22 ms budget. |
+| Frame time | `render_frame` **3.082 ms** / `+sprites` 3.056 ms (E1M1, 0.30.5, cycc 6.3.5). Variance-level vs 0.30.4's 2.971 ms — the audio mixer runs in the game loop (off the render path) and no-ops when no card is present. ~7.1× headroom on the 22 ms budget. |
 | Hot math | `fixed_mul` 7 ns / `asr` 4 ns / `texture_get_column` ~690 ns / `pcache_get_hit` 7 ns |
 
 Frame-time budget: 22 ms per tick @ 35 Hz. Current: ~12× headroom.
@@ -33,9 +33,10 @@ Frame-time budget: 22 ms per tick @ 35 Hz. Current: ~12× headroom.
 
 | Gate | Result |
 |---|---|
-| `cyrius deps --verify` | **37 verified, 0 failed** (regenerated at 0.30.4 via `rm -rf lib && cyrius deps` for the pin bump; transitive trio unmoved). CI runs `cyrius deps` then this gate. |
-| `cyrius build src/main.cyr build/doom` | OK, **613,720 B** (cycc **6.3.5** — pin matches launcher, drift closed). Clean-from-scratch (`rm -rf build`) build passes. |
-| `cyrius build --agnos src/main.cyr build/doom_agnos` | OK, **600,272 B**. **AGNOS QEMU not gated this cut** — the agnos kernel is mid-RAM/W^X-overhaul; the 0.30.4 binary itself renders 240 colors on the last pre-overhaul kernel (so the bump is sound; the current-kernel boot is a kernel-side issue, not doom). |
+| `cyrius deps --verify` | **37 verified, 0 failed** (lock unchanged from 0.30.4 — no dep moves; regenerate deterministically with `rm -rf lib && cyrius deps` if an `--agnos`/cross-target build pollutes `./lib/` with `*_macos.cyr`). CI runs `cyrius deps` then this gate. |
+| `cyrius build src/main.cyr build/doom` | OK, **619,224 B** (cycc **6.3.5**). Clean-from-scratch (`rm -rf build`) build passes. |
+| `cyrius build --agnos src/main.cyr build/doom_agnos` | OK, **605,808 B** (audio path `#ifdef CYRIUS_TARGET_AGNOS`-guarded off). **AGNOS QEMU not gated this cut** — the agnos kernel is mid-RAM/W^X-overhaul. |
+| `./build/doom wad/DOOM1.WAD --audio-test` | Plays 6 real SFX paced at 35 Hz over ~6 s; **verified audible on the analog jack** (card1/D0, S16/stereo/44100). Logs `audio: ALSA playback`. |
 | `cyrius test tests/doom.tcyr` (WAD-free, CI subset) | **63/63** (+26: a `combat:` group — p_random determinism/range, ammo deduction, damage/state transitions, hitscan select + LOS, splash falloff, rocket projectile). |
 | `./build/test_doom wad/DOOM1.WAD` (full) | **101/101** (37 WAD-free combat+math + 64 WAD-gated). |
 | `fuzz_wad` / `fuzz_fixed` / `fuzz_weapon` | **1000 / 50000 / 2000 clean** (self-reported iteration counts). `fuzz_fixed` is the canary for the 6.3.0 per-var `_base` codegen on the fixed-point path — clean. |
@@ -59,7 +60,8 @@ Current arc: **v0.28.x graphics** (review/hardening/parity/performance). The v0.
 
 | Slot | Status | What |
 |---|---|---|
-| **v0.30.4** | prepared 2026-06-29 (Linux verified; AGNOS QEMU not gated — kernel mid-overhaul) | **Toolchain + dependency bump.** cyrius pin 6.2.44→6.3.5 (drift closed), vani 0.9.4→0.9.5, bsp 1.1.3→1.1.5; `cyrius.lock` regenerated (37/0, transitive trio unmoved). No logic changes (only the banner). Picks up cyrius CVE-32 resolver fix. Binary 612,672→613,720 B; `render_frame` 2.971 ms; 63/63 + 101/101; fuzz clean. |
+| **v0.30.5** | prepared 2026-06-29 (Linux + **real-hardware audio verified**; AGNOS QEMU not gated — kernel mid-overhaul, audio guarded off there) | **Audio revive.** The dead ALSA/WAD-SFX path (`audio_play` had zero callers) is now live: 8-voice non-blocking software mixer (`audio_tick`), analog-card auto-pick (`audio_open_best` — old hardcoded card0 was HDMI), S16/stereo/44100 output (U8→S16 + mono→stereo + clean 4× upsample from 11025, since HDA rejects S8/mono/11025), idempotent init + `audio_shutdown` at exit, AGNOS `#ifdef` guards + `audio_load` null-cache guard, DMX validation, `--audio-test` harness, real WAD sounds wired to weapon/door/pickup/pain/death events. Pre-cut 29-agent review: 18 confirmed, 1 HIGH fixed (AGNOS null-write), MED/LOW → roadmap. Binary 613,720→619,224 B; `render_frame` 3.082 ms; 63/63 + 101/101; fuzz 1000/50000; deps 37/0. |
+| **v0.30.4** | shipped 2026-06-29 | **Toolchain + dependency bump.** cyrius pin 6.2.44→6.3.5 (drift closed), vani 0.9.4→0.9.5, bsp 1.1.3→1.1.5; `cyrius.lock` regenerated (37/0, transitive trio unmoved). No logic changes (only the banner). Picks up cyrius CVE-32 resolver fix. Binary 612,672→613,720 B; `render_frame` 2.971 ms; 63/63 + 101/101; fuzz clean. |
 | **v0.27.0** | shipped 2026-05-21 | Cyrius 5.7.48 → 6.0.1 lift; vani 0.9.1 → 0.9.3; manifest modernization; CI patra-style installer |
 | **v0.27.1** | shipped 2026-05-21 | bsp 1.1.2 → 1.1.3 + vani 0.9.3 → 0.9.4 dep-tag re-pin |
 | **v0.27.2** | shipped 2026-05-21 | `: i64` return-type annotation sweep on all 20 modules (270 sigs, ABI-identical) |

@@ -1,6 +1,6 @@
 # Documentation Health — cyrius-doom
 
-> **Last refresh**: 2026-06-29 (v0.30.4 — toolchain + dependency bump: CHANGELOG / state.md / completed-phases.md rows touched; completed-phases.md gained the v0.30.x section [0.30.0–0.30.4]; state.md refreshed to 0.30.4 [pin 6.3.5, vani 0.9.5, bsp 1.1.5, lock 37/0, drift closed]). Prior refresh: 2026-06-13 v0.30.1. | **Refresh cadence**: opportunistic — update the affected row when the underlying doc is touched. No periodic sweep cron.
+> **Last refresh**: 2026-06-29 (v0.30.5 — **audio revive**: CHANGELOG / state.md / roadmap.md rows touched; CHANGELOG gained the `[0.30.5]` entry; state.md refreshed to 0.30.5 [binary 619,224 B, render 3.082 ms, audio mixer live]; roadmap gained the Options→Sound-menu + audio-hardening unslotted rows. Prior refresh: 2026-06-29 v0.30.4 [toolchain + dependency bump]). | **Refresh cadence**: opportunistic — update the affected row when the underlying doc is touched. No periodic sweep cron.
 >
 > **Scope**: this repo only (`cyrius-doom`) — the entire `docs/` tree plus root-level docs (README, CHANGELOG, CLAUDE.md, CONTRIBUTING, SECURITY, CODE_OF_CONDUCT). VERSION is tracked as a structural artifact, not a doc.
 >
@@ -32,7 +32,7 @@ This is a **ledger**, not a one-time audit. Rewrite-in-place as docs change.
 | File | Last touched | Status | Action |
 |---|---|---|---|
 | `README.md` | 2026-04-30 | ✅ Fresh | Top-level project README. Verify in passing at next minor closeout — pre-dates the v0.27.x cycle but content is durable. |
-| `CHANGELOG.md` | 2026-06-29 | ✅ Fresh | **Source of truth per CLAUDE.md.** Through **v0.30.4** (toolchain + dependency bump: cyrius 6.3.5, vani 0.9.5, bsp 1.1.5, lock 37/0, CVE-32 pickup). Refreshed every release. |
+| `CHANGELOG.md` | 2026-06-29 | ✅ Fresh | **Source of truth per CLAUDE.md.** Through **v0.30.5** (audio revive — dead ALSA path made live: S16/stereo/44100 software mixer, analog-card auto-pick, AGNOS null-write fix). Refreshed every release. |
 | `CLAUDE.md` | 2026-06-13 | ✅ Fresh | Durable content only (state delegated to `state.md`). Closeout/CI test-count refs bumped 37/73 → **63/101** at v0.30.0 (combat tests added). Toolchain ref → `cycc 6.1.29`; Lockfile (Work-Loop §7) + CI `cyrius.lock` notes for the pin (regenerate against the pinned stdlib; `./lib/` is a gitignored build artifact). Project-identity / Goal / Process / Rules / Cyrius Conventions all durable. |
 | `CONTRIBUTING.md` | 2026-04-30 | ✅ Fresh | Verify in passing at next minor closeout — durable content. |
 | `SECURITY.md` | 2026-04-30 | ✅ Fresh | Public reporting policy. Durable; pre-dates v0.27.x but no surface change. |
@@ -65,8 +65,8 @@ No numbered architecture notes yet — the convention is `NNN-kebab-case-title.m
 
 | File | Last touched | Status | Action |
 |---|---|---|---|
-| `state.md` | 2026-06-29 | ✅ Fresh | **Rotates every release.** Current to v0.30.4 — binary 613,720 B (agnos 600,272 B), `render_frame` 2.971 ms, lock regenerated (37/0, transitive trio unmoved). Pin 6.3.5 / vani 0.9.5 / bsp 1.1.5; **toolchain drift closed** (manifest matches launcher). Gates re-run on Linux (63/63 + 101/101, fuzz clean); AGNOS QEMU not gated (kernel mid-overhaul). v0.30.4 slot row added. |
-| `roadmap.md` | 2026-06-13 | ✅ Fresh | **Re-slotted at v0.28.4 cut** (0.28.5–.11 carry the Black Book parity/perf themes). Floor-render + shooting-overhaul deferrals folded in as unslotted rows. **v0.30.1 marked RESOLVED**: wall-path #7 (U-swap mirror), game-state #1 (`R_DrawPSprite` coords), and the muzzle-flash-overlay cosmetic; added an animated-multi-frame-flash follow-up (chaingun/rocket). Slot numbers vs shipped 0.29.x/0.30.x acknowledged stale — renumbering deferred to the next re-slot. |
+| `state.md` | 2026-06-29 | ✅ Fresh | **Rotates every release.** Current to v0.30.5 — **audio revive**: binary 619,224 B (agnos 605,808 B), `render_frame` 3.082 ms, lock 37/0 (unchanged). Audio mixer live (S16/stereo/44100, analog-card pick); real-hardware verified. Gates re-run on Linux (63/63 + 101/101, fuzz 1000/50000); AGNOS QEMU not gated (kernel mid-overhaul, audio guarded off). v0.30.5 slot row added; 0.30.4 → shipped. |
+| `roadmap.md` | 2026-06-29 | ✅ Fresh | **Re-slotted at v0.28.4 cut** (0.28.5–.11 carry the Black Book parity/perf themes). Floor-render + shooting-overhaul deferrals folded in as unslotted rows. v0.30.1 wall-path/psprite/flash items RESOLVED. **v0.30.5 added** two unslotted rows: Options→Sound menu (wire live now that audio plays) + audio-output hardening (HW_PARAMS-fallback thresholds, ESTRPIPE recovery, normalization/volume, 48 kHz, virtual-card heuristic). Slot numbers vs shipped 0.29.x/0.30.x acknowledged stale — renumbering deferred. |
 | `completed-phases.md` | 2026-06-29 | ✅ Fresh | **Updated at v0.30.4 cut** — added the **v0.30.x section** (0.30.0 shooting overhaul → 0.30.4 toolchain bump), catching up the previously-absent 0.30.x rows. Chronological one-line index. |
 | `roadmap-crossover.md` | 2026-04-30 | 🟠 Read-through | AgentWorld / secureyeoman crossover doc — spatial threat visualization via the DOOM engine. Not touched during the v0.27.x cycle; status against current secureyeoman scope not verified. Read-through at next minor closeout. |
 

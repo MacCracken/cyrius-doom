@@ -7,6 +7,77 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.30.5] - 2026-06-29
+
+**Audio revive — DOOM SFX actually play through ALSA now.** The `audio.cyr` +
+vani path was wired but **dead**: `audio_play` had zero callers, so not one `DS*`
+sample ever reached the card — all in-game sound came from the PC-speaker beep
+fallback (`sound.cyr`), inaudible on hardware without a `pcspkr`. This cut makes
+the real WAD sounds play, fixing every blocker found by reproducing on metal.
+Binary **613,720 → 619,224 B** (+5,504, the software mixer + device pick + the
+`--audio-test` harness; `doom_agnos` 600,272 → 605,808 B). `render_frame`
+**3.082 ms** (E1M1, cycc 6.3.5 — variance-level; the mixer is not on the render
+path and no-ops when no card is present). Tests **63/63** WAD-free + **101/101**
+full; `fuzz_wad`/`fuzz_fixed` 1000/50000 clean; DCE **998 unreachable / 295,193 B**;
+`cyrius deps --verify` **37/0**. Vetted by a 29-agent pre-cut adversarial review
+(18 findings confirmed; the one HIGH — an AGNOS null-page write — fixed below;
+MED/LOW deferred to the roadmap audio-hardening item).
+
+### Added
+
+- **Software SFX mixer** (`src/audio.cyr`) — 8-voice, non-blocking. Voices are
+  cached + mixed at DOOM-native 11025 mono (U8); `audio_tick()` (driven once per
+  35 Hz tick from the game loop + dead-wait loop) renders one tick of audio and
+  pushes it with a non-blocking `WRITEI` so it can never stall the frame loop.
+  Underruns (`-EPIPE`) self-heal via re-`prepare`. Voice allocation prefers a
+  free slot, else steals the one with the least audio remaining.
+- **`--audio-test` mode** (`src/main.cyr`) — plays six real DOOM SFX paced at
+  35 Hz, no framebuffer required, so the output chain (device pick, format
+  conversion, non-blocking writes) can be verified directly on the speaker/jack.
+- **Real WAD sounds wired to game events** (`player`/`things`/`doors.cyr`,
+  alongside the kept PC-speaker fallback): weapon fire (`DSPISTOL`/`DSSHOTGN`/
+  `DSRLAUNC`/`DSPLASMA`), player + monster pain/death, item pickup, door,
+  explosion. All pre-cached by `audio_preload` so the first hit does no
+  mid-frame WAD I/O.
+
+### Fixed
+
+- **Audio output was entirely dead** — `audio_play`/`audio_play_name` had no
+  callers; now driven from the `sound_*` event sites.
+- **Wrong sound card** — the hardcoded `audio_open_playback(0, 0)` opened card 0
+  device 0, which on a box with a GPU is the HDMI codec (and often has no D0
+  node at all → "no device"). New `audio_open_best()` prefers the **analog**
+  card (its device 0 has a capture sibling; HDMI is playback-only), falling back
+  to the first playback node that accepts the format.
+- **Impossible format** — requested S8/mono/11025, which real HDA codecs reject
+  outright (the analog jack accepts **only S16_LE/stereo/44100·48000**). The raw
+  hw node does no conversion, so the mixer's output stage now converts: U8→S16
+  (`(s<<8)`), mono→L/R, and a clean **4× upsample** (44100/11025 = 4 exactly).
+  315 mono samples in → 1260 stereo frames out per tick, exact (no drift). Honest
+  logging: only `audio: ALSA playback` on a config the device actually accepted.
+- **Audio died after the first level transition** — `audio_init()` runs in
+  `load_map()` (every map); the old code re-opened the **exclusive** PCM node
+  while the prior fd was held → `-EBUSY`. Now idempotent via a one-shot
+  `audio_inited` flag; `audio_shutdown()` wired at exit.
+- **AGNOS null-page write** (pre-cut review, HIGH) — on AGNOS `audio_init`
+  early-returns before allocating the caches, but the event sites still call
+  `audio_load`; the first SFX did `store64(0 + idx*8, …)`. `audio_load` now
+  no-ops when `snd_cache_lumps == 0`. Plus an AGNOS `#ifdef` guard on
+  `audio_init`/`audio_preload` (mirrors `sound.cyr`).
+- **Malformed `DS*` lumps** — validate the DMX format word (== 3) and reject
+  `nsamples <= 0` (and the post-decimation 1-sample-22050 `alloc(0)` case);
+  decimate the one 22050 Hz shareware lump (`DSITMBK`) 2:1 to the device rate.
+
+### Known limitations (→ roadmap audio-hardening item)
+
+- Output is hardcoded **S16/stereo/44100**; cards that reject 44100 (need 48000)
+  aren't handled yet (fractional resample). HW_PARAMS-fallback path keeps the
+  fixed start-threshold (could mis-start on an unusually small negotiated
+  buffer). Only `-EPIPE` is recovered (not suspend/resume). SFX play at the
+  lump's native loudness (no normalization/volume) — soft lumps like `DSITEMUP`
+  (±19 vs gunfire's ±128) are faithfully quiet. PC-speaker + ALSA both fire per
+  event. Device heuristic can't tell a virtual card (snd-aloop) from the codec.
+
 ## [0.30.4] - 2026-06-29
 
 Toolchain + dependency bump to the cyrius 6.3.x line. No application logic
