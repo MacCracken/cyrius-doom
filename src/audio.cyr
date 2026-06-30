@@ -65,6 +65,8 @@ var sfx_volume = 15;
 var audio_chan_data = 0;   # pointer to the voice's PCM (raw unsigned 8-bit)
 var audio_chan_len  = 0;   # voice length in samples (0 = slot never used)
 var audio_chan_pos  = 0;   # next sample index; pos >= len means finished/free
+var audio_chan_lvol = 0;   # per-voice left-channel volume, 0..256 (256 = full)
+var audio_chan_rvol = 0;   # per-voice right-channel volume, 0..256
 var audio_mix_buf   = 0;   # OUT_BUF_BYTES scratch, S16_LE stereo @ OUT_RATE
 
 # Open + configure a playback device for OUT_RATE/OUT_CH/OUT_BITS, returning the
@@ -143,10 +145,14 @@ fn audio_init(): i64 {
     audio_chan_data = alloc(MIX_CHANNELS * 8);
     audio_chan_len  = alloc(MIX_CHANNELS * 8);
     audio_chan_pos  = alloc(MIX_CHANNELS * 8);
+    audio_chan_lvol = alloc(MIX_CHANNELS * 8);
+    audio_chan_rvol = alloc(MIX_CHANNELS * 8);
     for (var c = 0; c < MIX_CHANNELS; c += 1) {
         store64(audio_chan_data + c * 8, 0);
         store64(audio_chan_len + c * 8, 0);
         store64(audio_chan_pos + c * 8, 0);
+        store64(audio_chan_lvol + c * 8, 256);
+        store64(audio_chan_rvol + c * 8, 256);
     }
 
     # Find + configure a working output (analog jack preferred, see
@@ -290,10 +296,11 @@ fn audio_preload(): i64 {
     return 0;
 }
 
-# Trigger a cached sound effect. This only ASSIGNS a mixer voice -- it never
-# touches the device, so it is safe to call from any game-event site without
-# stalling the tick. The actual non-blocking WRITEI happens in audio_tick().
-fn audio_play(cache_idx): i64 {
+# Trigger a cached sound effect on a mixer voice with explicit per-channel
+# volumes (lvol/rvol, 0..256). This only ASSIGNS a voice -- it never touches the
+# device, so it is safe from any game-event site without stalling the tick. The
+# actual non-blocking WRITEI happens in audio_tick().
+fn audio_play_vol(cache_idx, lvol, rvol): i64 {
     if (cache_idx < 0) { return 0; }
     if (cache_idx >= snd_cache_count) { return 0; }
     if (audio_dev == 0) { return 0; }
@@ -326,13 +333,63 @@ fn audio_play(cache_idx): i64 {
     store64(audio_chan_data + slot * 8, pcm);
     store64(audio_chan_len + slot * 8, nsamples);
     store64(audio_chan_pos + slot * 8, 0);
+    store64(audio_chan_lvol + slot * 8, lvol);
+    store64(audio_chan_rvol + slot * 8, rvol);
     return 0;
 }
 
-# Play by WAD lump name (loads if not cached). Cheap when preloaded (dedup hit).
+# Centered, full-volume trigger (player-sourced sounds: weapon, pain, UI).
+fn audio_play(cache_idx): i64 {
+    return audio_play_vol(cache_idx, 256, 256);
+}
+
+# Play by WAD lump name, centered (loads if not cached; cheap on a preload hit).
 fn audio_play_name(lump_name): i64 {
     var idx = audio_load(lump_name);
     audio_play(idx);
+    return 0;
+}
+
+# Positional trigger: a sound at world (sx, sy), attenuated by distance from the
+# player listener (player_x/y) and panned by the angle relative to player_angle.
+# Distances are 16.16 fixed (DOOM units << 16). Beyond S_CLIPPING_DIST (1200u)
+# the sound is inaudible and no voice is taken. Uses the same approximate
+# distance + stereo-swing panning law as the original engine.
+fn audio_play_at(lump_name, sx, sy): i64 {
+    if (audio_dev == 0) { return 0; }
+    var idx = audio_load(lump_name);
+    if (idx < 0) { return 0; }
+
+    var dx = sx - player_x;
+    var dy = sy - player_y;
+    var dist = fixed_approx_dist(dx, dy);
+    if (dist >= (1200 << 16)) { return 0; }   # S_CLIPPING_DIST: inaudible
+
+    # Distance volume, 0..256. Full within S_CLOSE_DIST (160u), linear to 0 at
+    # the clipping distance.
+    var vol = 256;
+    if (dist > (160 << 16)) {
+        vol = 256 * ((1200 << 16) - dist) / ((1200 - 160) << 16);
+    }
+    if (vol <= 0) { return 0; }
+
+    # Stereo separation from the source angle relative to the listener's facing.
+    # sep: 0 = hard left, 128 = center, 256 = hard right. Swing 96 (< 128) keeps
+    # even side sounds partly present on the far channel.
+    var s = fixed_sin(fixed_atan2(dy, dx) - player_angle);   # [-65536, 65536]
+    var sep = 128 - asr(s * 96, 16);
+    if (sep < 0) { sep = 0; }
+    if (sep > 256) { sep = 256; }
+
+    # Equal-power-ish pan law (matches the original): each channel attenuates by
+    # the square of its distance from that side.
+    var lvol = vol - asr(vol * sep * sep, 16);
+    var rsep = 256 - sep;
+    var rvol = vol - asr(vol * rsep * rsep, 16);
+    if (lvol < 0) { lvol = 0; }
+    if (rvol < 0) { rvol = 0; }
+
+    audio_play_vol(idx, lvol, rvol);
     return 0;
 }
 
@@ -347,34 +404,41 @@ fn audio_tick(): i64 {
 
     var oi = 0;   # byte offset into the S16 stereo output buffer
     for (var f = 0; f < MIX_SRC_SAMPLES; f += 1) {
-        var acc = 0;
+        var accl = 0;
+        var accr = 0;
         for (var c = 0; c < MIX_CHANNELS; c += 1) {
             var clen = load64(audio_chan_len + c * 8);
             if (clen != 0) {
                 var cpos = load64(audio_chan_pos + c * 8);
                 if (cpos < clen) {
                     # DOOM PCM is UNSIGNED 8-bit (silence == 128); recenter to
-                    # signed for summation.
-                    var u = load8(load64(audio_chan_data + c * 8) + cpos);
-                    acc = acc + (u - 128);
+                    # signed, then apply the voice's per-channel volume (0..256,
+                    # /256). A centered full voice (lvol==rvol==256) leaves the
+                    # sample unchanged -> bit-identical to the old mono mix.
+                    var samp = load8(load64(audio_chan_data + c * 8) + cpos) - 128;
+                    accl = accl + asr(samp * load64(audio_chan_lvol + c * 8), 8);
+                    accr = accr + asr(samp * load64(audio_chan_rvol + c * 8), 8);
                     store64(audio_chan_pos + c * 8, cpos + 1);
                 }
             }
         }
-        # Clamp the mix to signed 8-bit, scale to S16 (<<8), apply master volume.
-        if (acc > 127) { acc = 127; }
-        if (acc < 0 - 128) { acc = 0 - 128; }
-        # Volume gain = (sfx_volume+1)/16: v==15 is bit-exact full scale
-        # (sample*16 >> 4 == sample), v==0 mutes. asr (arithmetic shift) because
-        # Cyrius '>>' is logical and the sample is signed.
-        var s16 = 0;
+        # Clamp each channel to signed 8-bit, scale to S16 (<<8), apply master
+        # volume. Gain = (sfx_volume+1)/16: v==15 bit-exact full, v==0 mutes; asr
+        # (arithmetic) because Cyrius '>>' is logical and the sample is signed.
+        if (accl > 127) { accl = 127; }
+        if (accl < 0 - 128) { accl = 0 - 128; }
+        if (accr > 127) { accr = 127; }
+        if (accr < 0 - 128) { accr = 0 - 128; }
+        var s16l = 0;
+        var s16r = 0;
         if (sfx_volume > 0) {
-            s16 = asr((acc << 8) * (sfx_volume + 1), 4) & 0xFFFF;
+            s16l = asr((accl << 8) * (sfx_volume + 1), 4) & 0xFFFF;
+            s16r = asr((accr << 8) * (sfx_volume + 1), 4) & 0xFFFF;
         }
-        # Upsample 4x, duplicate to L+R: 4 stereo frames per source sample.
+        # Upsample 4x: 4 stereo frames per source sample.
         for (var up = 0; up < OUT_UP; up += 1) {
-            store16(audio_mix_buf + oi, s16);       # left
-            store16(audio_mix_buf + oi + 2, s16);   # right
+            store16(audio_mix_buf + oi, s16l);      # left
+            store16(audio_mix_buf + oi + 2, s16r);  # right
             oi = oi + 4;
         }
     }

@@ -7,7 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.30.6] - 2026-06-29
+## [0.30.7] - 2026-06-29
+
+**Positional/stereo SFX + Sound-menu live preview.** Builds on the 0.30.5/0.30.6
+audio work: monster and explosion sounds now attenuate with distance and pan
+across the stereo field, and the volume slider previews live. Binary **621,080 →
+623,520 B** (+2,440; `doom_agnos` 607,680 → 610,152 B). `render_frame` **2.956 ms**
+(E1M1, cycc 6.3.5 — variance-level; the mixer is off the render path). Tests
+**63/63** WAD-free + **101/101** full; `fuzz_wad`/`fuzz_fixed` 1000/50000 clean;
+`cyrius deps --verify` **37/0**; DCE 1001 / 294,063 B. Vetted by a 27-agent
+pre-cut adversarial review (17/17 confirmed as correctness verifications — zero
+defects; L/R pan direction confirmed correct, centered playback bit-identical to
+0.30.6).
+
+### Added
+
+- **Positional SFX — distance attenuation + stereo pan** — `audio_play_at(name,
+  sx, sy)` attenuates by the player→source distance (full within 160 u, linear
+  to silence at 1200 u; beyond that no voice is taken) and pans by the source
+  angle relative to the player's facing, using the original engine's
+  approximate-distance + stereo-swing (96) panning law. The mixer is now truly
+  stereo (per-voice `lvol`/`rvol`, separate L/R accumulators). Wired at the
+  monster **death**/**pain** and **explosion** sites (`things.cyr`); player-,
+  pickup- and door-sourced sounds stay centered. **A centered, full-volume voice
+  is bit-identical to the 0.30.6 mono mix.**
+- **Sound-menu live preview** — adjusting the SFX slider plays a pistol shot at
+  the new level (the device is already open before the menu), so you can hear the
+  volume as you set it. `audio_tick` is pumped in the `menu_run` loop.
+- **`--audio-test` LEFT/RIGHT pan pings** — two positional pistol shots 400 u to
+  the player's left and right, so the stereo pan can be verified headless without
+  launching gameplay (now 8 sounds over ~8 s).
+
+### Changed
+
+- **Sound-menu polish** (0.30.6 review nice-to-haves) — defensive `[0, 15]` clamp
+  inside `menu_draw_thermo`; the slider's increment is `else`-gated so a held key
+  steps cleanly.
 
 **SFX volume control + Options→Sound menu, plus ALSA hardening and a bsp bump.**
 Builds on the 0.30.5 audio revive: the previously display-only "Sound Volume"

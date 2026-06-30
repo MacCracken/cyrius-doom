@@ -663,7 +663,7 @@ fn thing_damage(idx, damage): i64 {
         thing_set_state(idx, STATE_DIE);
         thing_set_tics(idx, die_tics);
         sound_monster_die();
-        audio_play_name("DSPODTH1");
+        audio_play_at("DSPODTH1", thing_x(idx), thing_y(idx));
         # Barrels detonate instead of dying quietly — radius damage + chain.
         if (ttype == TTYPE_BARREL) { thing_explode(idx, 128 << 16, 128); }
         return 0;
@@ -687,7 +687,7 @@ fn thing_damage(idx, damage): i64 {
                 thing_set_state(idx, STATE_PAIN);
                 thing_set_tics(idx, 5);
                 sound_monster_pain();
-                audio_play_name("DSPOPAIN");
+                audio_play_at("DSPOPAIN", thing_x(idx), thing_y(idx));
             }
         }
     }
@@ -706,7 +706,7 @@ fn thing_explode(src_idx, radius, maxdmg): i64 {
     var cx = thing_x(src_idx);
     var cy = thing_y(src_idx);
     sound_explode();
-    audio_play_name("DSBAREXP");
+    audio_play_at("DSBAREXP", cx, cy);
 
     for (var i = 0; i < thing_count; i += 1) {
         if (i == src_idx) { continue; }

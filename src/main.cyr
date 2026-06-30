@@ -105,7 +105,7 @@ fn doom_main(): i64 {
     # non-identity arena top (0x3FC00000); no warm-up needed.
     alloc_init();
     args_init();
-    sakshi_info("cyrius-doom v0.30.6", 19);
+    sakshi_info("cyrius-doom v0.30.7", 19);
 
     # WAD path: argv[1] on Linux. On agnos, agnsh `run /bin/doom` passes no argv
     # beyond the path, so default to /DOOM1.WAD (staged on the ext2 root).
@@ -238,9 +238,17 @@ fn doom_main(): i64 {
     # actually producing sound out of the speaker/jack. load_map() above already
     # ran audio_init()+audio_preload(), so the cache + device are ready.
     if (audio_test == 1) {
-        sakshi_info("audio test: 6 sounds, ~6s", 25);
+        sakshi_info("audio test: 6 sfx + L/R pan, ~8s", 31);
         tick_init();   # the 35Hz clock isn't set up until the game loop below
-        var at_total = 35 * 6;
+        # Two positional sources 400u to the player's left / right of facing, to
+        # audibly verify the stereo pan (audio_play_at). player_x/y/angle are set
+        # (load_map ran player_init above).
+        var pan_d = 400 << 16;
+        var lx = player_x + fixed_mul(fixed_cos(player_angle + 256), pan_d);   # +ANG90 = left
+        var ly = player_y + fixed_mul(fixed_sin(player_angle + 256), pan_d);
+        var rx = player_x + fixed_mul(fixed_cos(player_angle + 768), pan_d);   # +ANG270 = right
+        var ry = player_y + fixed_mul(fixed_sin(player_angle + 768), pan_d);
+        var at_total = 35 * 8;
         var at_t = 0;
         while (at_t < at_total) {
             tick_begin();
@@ -250,6 +258,8 @@ fn doom_main(): i64 {
             if (at_t == 105) { sakshi_info("sfx: pickup", 11); audio_play_name("DSITEMUP"); }
             if (at_t == 140) { sakshi_info("sfx: pain", 9); audio_play_name("DSPLPAIN"); }
             if (at_t == 175) { sakshi_info("sfx: explosion", 14); audio_play_name("DSBAREXP"); }
+            if (at_t == 210) { sakshi_info("sfx: LEFT (pan)", 15); audio_play_at("DSPISTOL", lx, ly); }
+            if (at_t == 245) { sakshi_info("sfx: RIGHT (pan)", 16); audio_play_at("DSPISTOL", rx, ry); }
             audio_tick();
             at_t += 1;
             tick_wait();
