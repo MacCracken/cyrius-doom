@@ -105,7 +105,7 @@ fn doom_main(): i64 {
     # non-identity arena top (0x3FC00000); no warm-up needed.
     alloc_init();
     args_init();
-    sakshi_info("cyrius-doom v0.30.5", 19);
+    sakshi_info("cyrius-doom v0.30.6", 19);
 
     # WAD path: argv[1] on Linux. On agnos, agnsh `run /bin/doom` passes no argv
     # beyond the path, so default to /DOOM1.WAD (staged on the ext2 root).
@@ -217,6 +217,14 @@ fn doom_main(): i64 {
         menu_draw_lump("M_SKULL1", 44, 34);
         framebuf_write_ppm("/tmp/doom_options.ppm");
         sakshi_info("wrote /tmp/doom_options.ppm", 27);
+
+        framebuf_clear(0);
+        menu_draw_lump("M_SVOL", 60, 38);
+        menu_draw_lump("M_SFXVOL", 80, 64);
+        menu_draw_thermo(80, 80, sfx_volume);
+        menu_draw_lump("M_SKULL1", 64, 61);
+        framebuf_write_ppm("/tmp/doom_sound.ppm");
+        sakshi_info("wrote /tmp/doom_sound.ppm", 25);
         wad_close();
         doom_exit(0);
     }

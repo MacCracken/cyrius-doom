@@ -35,12 +35,14 @@ enum MixConst {
     MIX_START       = 3072;   # start_threshold frames (~70 ms pre-buffer)
     MIX_RATE_22K    = 22050;  # the one off-rate that ships in shareware (DSITMBK)
     ERRNO_EPIPE     = 32;     # -EPIPE: ALSA underrun -> re-prepare
+    ERRNO_ESTRPIPE  = 86;     # -ESTRPIPE: PCM suspended (e.g. laptop sleep) -> resume
     F_SETFL         = 4;
     F_GETFL         = 3;
     FCNTL_NB        = 2048;   # O_NONBLOCK (Linux x86_64)
     SYS_FCNTL       = 72;
     AUDIO_SCAN_CARDS = 4;     # scan cards 0..3 for a usable output
     AUDIO_SCAN_DEVS  = 8;     # scan devices 0..7 within a card (fallback pass)
+    SFX_VOL_MAX     = 15;     # master SFX volume range 0..15 (DOOM convention)
 }
 
 var snd_cache_lumps = 0;
@@ -50,6 +52,14 @@ var snd_cache_rates = 0;
 var snd_cache_count = 0;
 var audio_dev = 0;
 var audio_inited = 0;
+# Whether the explicit period/buffer (MIX_PERIOD/MIX_BUFFER) were accepted. If
+# the device fell back to kernel-chosen sizes we DON'T know the buffer, so we
+# must not impose a fixed start_threshold (it could exceed a small buffer and
+# never auto-start). Set by audio_try_configure, read by audio_init.
+var audio_explicit_params = 0;
+# Master SFX volume, 0..SFX_VOL_MAX. Adjustable via the Options -> Sound menu.
+# Default = max so playback is bit-identical to pre-volume builds at full.
+var sfx_volume = 15;
 
 # Active-voice state (parallel arrays, MIX_CHANNELS entries of 8 bytes each).
 var audio_chan_data = 0;   # pointer to the voice's PCM (raw unsigned 8-bit)
@@ -71,8 +81,12 @@ fn audio_try_configure(card, device): i64 {
     var dev = audio_open_playback(card, device);
     if (dev == 0) { return 0; }
     var r = audio_set_params_full(dev, OUT_RATE, OUT_CH, OUT_BITS, MIX_PERIOD, MIX_BUFFER);
-    if (r != 0) {
+    if (r == 0) {
+        audio_explicit_params = 1;
+    } else {
+        # Explicit period/buffer rejected; let the kernel pick them.
         r = audio_set_params(dev, OUT_RATE, OUT_CH, OUT_BITS);
+        if (r == 0) { audio_explicit_params = 0; }
     }
     if (r != 0) { audio_close(dev); return 0; }
     return dev;
@@ -147,9 +161,14 @@ fn audio_init(): i64 {
     }
 
     # Pre-buffer ~MIX_START frames before the card starts draining so normal
-    # 35Hz tick jitter doesn't underrun on the first few ticks. Optional on some
-    # drivers; ignore failure.
-    audio_set_sw_params(audio_dev, MIX_START, MIX_BUFFER, MIX_PERIOD);
+    # 35Hz tick jitter doesn't underrun on the first few ticks. ONLY when the
+    # explicit buffer (MIX_BUFFER) was accepted -- on the kernel-chosen-buffer
+    # fallback a fixed start_threshold could exceed a smaller buffer and never
+    # auto-start (total silence), so there we leave the kernel default
+    # (start_threshold=1 auto-starts on the first write). Ignore failure.
+    if (audio_explicit_params == 1) {
+        audio_set_sw_params(audio_dev, MIX_START, MIX_BUFFER, MIX_PERIOD);
+    }
     audio_prepare(audio_dev);
 
     # Non-blocking writes: the per-tick mixer must never block the render loop.
@@ -342,10 +361,16 @@ fn audio_tick(): i64 {
                 }
             }
         }
-        # Clamp the mix to signed 8-bit, then scale to S16 (<<8) for output.
+        # Clamp the mix to signed 8-bit, scale to S16 (<<8), apply master volume.
         if (acc > 127) { acc = 127; }
         if (acc < 0 - 128) { acc = 0 - 128; }
-        var s16 = (acc << 8) & 0xFFFF;
+        # Volume gain = (sfx_volume+1)/16: v==15 is bit-exact full scale
+        # (sample*16 >> 4 == sample), v==0 mutes. asr (arithmetic shift) because
+        # Cyrius '>>' is logical and the sample is signed.
+        var s16 = 0;
+        if (sfx_volume > 0) {
+            s16 = asr((acc << 8) * (sfx_volume + 1), 4) & 0xFFFF;
+        }
         # Upsample 4x, duplicate to L+R: 4 stereo frames per source sample.
         for (var up = 0; up < OUT_UP; up += 1) {
             store16(audio_mix_buf + oi, s16);       # left
@@ -362,6 +387,12 @@ fn audio_tick(): i64 {
     # guarantee. With exact 1260-frames/tick pacing this is rare in steady state.
     var w = audio_write(audio_dev, audio_mix_buf, MIX_TICK_FRAMES);
     if (w == 0 - ERRNO_EPIPE) {
+        audio_prepare(audio_dev);
+    }
+    if (w == 0 - ERRNO_ESTRPIPE) {
+        # PCM was suspended (system sleep). Resume, then re-prepare; the next
+        # tick re-primes the ring.
+        audio_resume(audio_dev);
         audio_prepare(audio_dev);
     }
     return 0;

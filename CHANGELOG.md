@@ -7,7 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.30.5] - 2026-06-29
+## [0.30.6] - 2026-06-29
+
+**SFX volume control + Options→Sound menu, plus ALSA hardening and a bsp bump.**
+Builds on the 0.30.5 audio revive: the previously display-only "Sound Volume"
+option is now a live menu, and two robustness gaps from the 0.30.5 pre-cut review
+are closed. Binary **619,224 → 621,080 B** (+1,856; `doom_agnos` 605,808 →
+607,680 B). `render_frame` **2.950 ms** (E1M1, cycc 6.3.5 — variance-level; none
+of this touches the render path). Tests **63/63** WAD-free + **101/101** full;
+`fuzz_wad`/`fuzz_fixed` 1000/50000 clean; `cyrius deps --verify` **37/0**. Vetted
+by a 29-agent pre-cut adversarial review (20/20 findings confirmed as correctness
+verifications — zero defects).
+
+### Added
+
+- **Master SFX volume + Options→Sound menu** — selecting "Sound Volume" on the
+  Options screen now opens a real Sound sub-menu (`MENU_SOUND`) with a DOOM-style
+  thermometer slider (`M_THERML`/`M_THERMM`/`M_THERMR` track + `M_THERMO` knob).
+  Left/right (arrows or A/D, debounced) adjust `sfx_volume` (0–15), applied as a
+  gain in the `audio_tick` mix stage: `asr((sample<<8)*(vol+1), 4)` — so **v=15
+  is bit-identical full scale** (default, unchanged from 0.30.5) and **v=0 mutes**.
+  `--ppm-menu` gained a Sound-screen render.
+
+### Changed
+
+- **`[deps.bsp]` `1.1.5` → `1.2.0`** — source-module bump (no ABI surface change);
+  `cyrius.lock` regenerated (`rm -rf lib && cyrius deps`), verifies **37/0** with
+  only the bsp row moved (transitive trio + stdlib leaves unchanged). Both Linux
+  and `--agnos` link clean; 63/63 + 101/101 hold.
+
+### Fixed
+
+- **ALSA suspend/resume recovery** — `audio_tick` now also recovers from
+  `-ESTRPIPE` (PCM suspended on system sleep) via `audio_resume` + `audio_prepare`,
+  alongside the existing `-EPIPE` underrun path. `-EAGAIN`/short writes still fall
+  through untouched (the never-stall design).
+- **HW_PARAMS-fallback start-threshold** — `audio_set_sw_params(MIX_START, …)` is
+  now applied **only** when the explicit period/buffer were accepted
+  (`audio_explicit_params`). On the kernel-chosen-buffer fallback a fixed
+  `start_threshold` could exceed a smaller negotiated buffer and never auto-start
+  (total silence); the fallback now leaves the kernel default (`start_threshold=1`).
 
 **Audio revive — DOOM SFX actually play through ALSA now.** The `audio.cyr` +
 vani path was wired but **dead**: `audio_play` had zero callers, so not one `DS*`

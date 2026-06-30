@@ -1,5 +1,5 @@
 commit	b20393ab1e6ced9c1b4a9b2c34c35935120f00ca	vani	https://github.com/MacCracken/vani.git	0.9.5
-commit	7511d5c4ca155e228d168b9581f4e79cf79a13ab	bsp	https://github.com/MacCracken/bsp.git	1.1.5
+commit	6a125ef8d107df5d57857e054f391257eaa9ce7a	bsp	https://github.com/MacCracken/bsp.git	1.2.0
 commit	6f55be476600bb413a59d5da31288e5bdfff81c2	yukti	https://github.com/MacCracken/yukti.git	2.2.4
 commit	c610b178e61590b684c9158e45c5efc3aad66527	patra	https://github.com/MacCracken/patra.git	1.9.5
 commit	b3ee389719c97bebbe47310aab6ac423413a3d54	sakshi	https://github.com/MacCracken/sakshi.git	2.2.5
@@ -34,7 +34,7 @@ f6563cc78843147905c8a7e957da1d182d696a371ba392347d1e1522f42a993c  lib/syscalls_a
 34460df54170e0cc60ec3cd78c221f14bfab015e3f6b48e966178ae854f65084  lib/io.cyr
 9fd6444e8cfcf7950837e955473adc5bab6d7bf4fa2c15f8ce2578360c4100eb  lib/hashmap.cyr
 1cdc1b90422f3eba341630badab05ad22af32f747d65a4098d4703081da996cb  lib/fnptr.cyr
-849898d0cde98aa23b0fd611da6204aba37e52260d48d6ef9784c0f3b9653c68  lib/bsp.cyr
+25757cd5b27290839d36a3815bb6957651880a84ad3a7b00d00e4be7eab00ea2  lib/bsp.cyr
 8bbcb23edfd05adf4c9efe22c9a24f5beefaf43d02bdd50c9eac3ed183bc9967  lib/syscalls_windows.cyr
 adc7a17efb71a262cf322ca99050ff28d364b4c8117f1512fac384c3c2aae81d  lib/syscalls_linux_common.cyr
 31d19d90fee304c2788582abac596e1a7d06fb376800c70343b6492b6226cd26  lib/process_win.cyr
