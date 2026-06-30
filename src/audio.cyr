@@ -6,6 +6,27 @@ enum SndConst {
     SND_CACHE_MAX = 32;
     SND_HEADER_SIZE = 8;
     SND_MAX_SIZE = 65536;
+    SND_DMX_RATE = 11025;     # device + DOOM native sample rate
+}
+
+# Software mixer. DOOM keeps the DSP continuously fed and mixes up to 8 voices;
+# we do the same against a raw ALSA hw node via vani. The mixer renders one game
+# tick of audio (SND_DMX_RATE / 35 = 315 frames, exact — no rate drift) into a
+# scratch buffer each tick and pushes it NON-BLOCKING so the 35Hz loop never
+# stalls on a WRITEI. Period/buffer/start are tunables — bump MIX_START down to
+# trade latency for underrun headroom once verified on real hardware.
+enum MixConst {
+    MIX_CHANNELS    = 8;
+    MIX_TICK_FRAMES = 315;    # SND_DMX_RATE / 35 (game tick rate), exact
+    MIX_PERIOD      = 512;    # ALSA period frames (HW_PARAMS hint)
+    MIX_BUFFER      = 4096;   # ALSA ring buffer frames (~372 ms)
+    MIX_START       = 1536;   # start_threshold frames (~140 ms pre-buffer)
+    MIX_RATE_22K    = 22050;  # the one off-rate that ships in shareware (DSITMBK)
+    ERRNO_EPIPE     = 32;     # -EPIPE: ALSA underrun -> re-prepare
+    F_SETFL         = 4;
+    F_GETFL         = 3;
+    FCNTL_NB        = 2048;   # O_NONBLOCK (Linux x86_64)
+    SYS_FCNTL       = 72;
 }
 
 var snd_cache_lumps = 0;
@@ -14,24 +35,89 @@ var snd_cache_sizes = 0;
 var snd_cache_rates = 0;
 var snd_cache_count = 0;
 var audio_dev = 0;
+var audio_inited = 0;
+
+# Active-voice state (parallel arrays, MIX_CHANNELS entries of 8 bytes each).
+var audio_chan_data = 0;   # pointer to the voice's S? PCM (raw unsigned 8-bit)
+var audio_chan_len  = 0;   # voice length in samples (0 = slot never used)
+var audio_chan_pos  = 0;   # next sample index; pos >= len means finished/free
+var audio_mix_buf   = 0;   # MIX_TICK_FRAMES scratch, S8 mono
 
 fn audio_init(): i64 {
+    #ifdef CYRIUS_TARGET_AGNOS
+    # No ALSA on agnos: vani's audio_open_playback issues a Linux-arg-order
+    # sys_open and there is no sound card. Leave audio disabled (audio_inited
+    # stays 0, audio_dev stays 0) so load/preload/play/shutdown are all no-ops,
+    # mirroring how sound.cyr guards the PC-speaker path.
+    return 0;
+    #endif
+
+    # Idempotent. load_map() runs at boot AND on every level transition, so a
+    # naive re-init would (1) re-alloc the four caches, orphaning the sounds
+    # already loaded, and (2) re-open the EXCLUSIVE hw PCM node while the prior
+    # fd is still held -> EBUSY -> audio_dev goes 0 -> sound silently dies after
+    # the first level change. A bare `if (audio_dev == 0)` guard is NOT enough:
+    # on a host with no usable device the open fails every map and the caches
+    # re-leak. Gate the whole body on a one-shot flag.
+    if (audio_inited == 1) { return 0; }
+    audio_inited = 1;
+
     snd_cache_lumps = alloc(SND_CACHE_MAX * 8);
     snd_cache_data = alloc(SND_CACHE_MAX * 8);
     snd_cache_sizes = alloc(SND_CACHE_MAX * 8);
     snd_cache_rates = alloc(SND_CACHE_MAX * 8);
     snd_cache_count = 0;
 
-    # Open ALSA playback device (card 0, device 0)
-    audio_dev = audio_open_playback(0, 0);
-    if (audio_dev != 0) {
-        # 8-bit mono at 11025Hz (matches DOOM sound format)
-        audio_set_params(audio_dev, 11025, 1, 8);
-        audio_prepare(audio_dev);
-        sakshi_info("audio: ALSA playback", 20);
-    } else {
-        sakshi_warn("audio: no device", 16);
+    # Mixer scratch + voice tables (S8 mono). One game tick of output is
+    # MIX_TICK_FRAMES bytes; the voice arrays are MIX_CHANNELS * 8 each.
+    audio_mix_buf   = alloc(MIX_TICK_FRAMES);
+    audio_chan_data = alloc(MIX_CHANNELS * 8);
+    audio_chan_len  = alloc(MIX_CHANNELS * 8);
+    audio_chan_pos  = alloc(MIX_CHANNELS * 8);
+    for (var c = 0; c < MIX_CHANNELS; c += 1) {
+        store64(audio_chan_data + c * 8, 0);
+        store64(audio_chan_len + c * 8, 0);
+        store64(audio_chan_pos + c * 8, 0);
     }
+
+    # Open ALSA playback device (card 0, device 0).
+    audio_dev = audio_open_playback(0, 0);
+    if (audio_dev == 0) {
+        sakshi_warn("audio: no device", 16);
+        return 0;
+    }
+
+    # Configure S8 / mono / 11025 Hz to match DOOM's native sound format. The
+    # raw hw node does no conversion, so try the period/buffer-constrained form
+    # first, then fall back to letting the kernel pick period/buffer. If BOTH
+    # are rejected the device can't take this format raw -- close it and run
+    # silent (the mixer no-ops on audio_dev==0) rather than logging a false
+    # "ALSA playback" and writing into a misconfigured PCM. A later bite can add
+    # S16 + resampling negotiation here.
+    var r = audio_set_params_full(audio_dev, SND_DMX_RATE, 1, 8, MIX_PERIOD, MIX_BUFFER);
+    if (r != 0) {
+        r = audio_set_params(audio_dev, SND_DMX_RATE, 1, 8);
+    }
+    if (r != 0) {
+        sakshi_warn("audio: S8/11025 rejected", 24);
+        audio_close(audio_dev);
+        audio_dev = 0;
+        return 0;
+    }
+
+    # Pre-buffer ~MIX_START frames before the card starts draining so normal
+    # 35Hz tick jitter doesn't underrun on the first few ticks. Optional on some
+    # drivers; ignore failure.
+    audio_set_sw_params(audio_dev, MIX_START, MIX_BUFFER, MIX_PERIOD);
+    audio_prepare(audio_dev);
+
+    # Non-blocking writes: the per-tick mixer must never block the render loop.
+    # Same F_SETFL | O_NONBLOCK dance input.cyr uses on stdin.
+    var afd = audio_fd(audio_dev);
+    var fl = syscall(SYS_FCNTL, afd, F_GETFL, 0);
+    syscall(SYS_FCNTL, afd, F_SETFL, fl | FCNTL_NB);
+
+    sakshi_info("audio: ALSA playback", 20);
     return 0;
 }
 
@@ -41,6 +127,8 @@ fn audio_shutdown(): i64 {
         audio_close(audio_dev);
         audio_dev = 0;
     }
+    # Clear the one-shot guard so a later audio_init() could re-open cleanly.
+    audio_inited = 0;
     return 0;
 }
 
@@ -62,25 +150,56 @@ fn audio_load(lump_name): i64 {
     var raw = alloc(sz);
     wad_read_lump_into(lump, raw, sz);
 
+    # DMX digital-sound header: bytes 0-1 = format (always 3), 2-3 = sample
+    # rate, 4-7 = sample count, 8+ = unsigned 8-bit PCM. Reject anything whose
+    # format word isn't 3 before trusting the rest of the header offsets.
+    var fmt_word = read_le16(raw);
+    if (fmt_word != 3) { return -1; }
+
     var rate = read_le16(raw + 2);
     var nsamples = read_le32(raw + 4);
     var data_size = sz - SND_HEADER_SIZE;
     if (nsamples > data_size) { nsamples = data_size; }
+    # Reject empty/garbage payloads so audio_play never hands ALSA a 0-frame
+    # write (and so alloc(0) never caches a null data pointer).
+    if (nsamples <= 0) { return -1; }
 
-    var pcm = alloc(nsamples);
-    memcpy(pcm, raw + SND_HEADER_SIZE, nsamples);
+    # The device runs at SND_DMX_RATE (11025). Most DS* lumps already match;
+    # the only off-rate in shareware is DSITMBK @ 22050, which we decimate 2:1
+    # at load (crude, no low-pass -- acceptable for SFX) so playback is 1 cached
+    # sample == 1 output frame for every voice. Anything else is taken as-is.
+    var src = raw + SND_HEADER_SIZE;
+    var pcm = 0;
+    var stored = 0;
+    if (rate == MIX_RATE_22K) {
+        stored = nsamples / 2;
+        pcm = alloc(stored);
+        for (var i = 0; i < stored; i += 1) {
+            store8(pcm + i, load8(src + i * 2));
+        }
+    } else {
+        stored = nsamples;
+        pcm = alloc(stored);
+        memcpy(pcm, src, stored);
+    }
 
     var idx = snd_cache_count;
     store64(snd_cache_lumps + idx * 8, lump);
     store64(snd_cache_data + idx * 8, pcm);
-    store64(snd_cache_sizes + idx * 8, nsamples);
-    store64(snd_cache_rates + idx * 8, rate);
+    store64(snd_cache_sizes + idx * 8, stored);
+    store64(snd_cache_rates + idx * 8, SND_DMX_RATE);
     snd_cache_count += 1;
     return idx;
 }
 
 # Preload common DOOM sounds
 fn audio_preload(): i64 {
+    #ifdef CYRIUS_TARGET_AGNOS
+    return 0;
+    #endif
+    # Nothing to preload into the device cache if there is no device — skip the
+    # WAD reads entirely on headless / no-sound-card hosts.
+    if (audio_dev == 0) { return 0; }
     audio_load("DSPISTOL");
     audio_load("DSSHOTGN");
     audio_load("DSDOROPN");
@@ -93,10 +212,20 @@ fn audio_preload(): i64 {
     audio_load("DSOOF");
     audio_load("DSNOWAY");
     audio_load("DSTINK");
+    # Event sounds wired at the sound_* sites (player/things/doors). Pre-cached
+    # so the first hit never triggers a mid-frame WAD read. Lumps absent from
+    # the shareware IWAD (e.g. DSPLASMA) just return -1 and stay uncached.
+    audio_load("DSRLAUNC");   # rocket launch
+    audio_load("DSBAREXP");   # barrel / rocket explosion
+    audio_load("DSPLASMA");   # plasma (registered only)
+    audio_load("DSPOPAIN");   # monster pain (generic)
+    audio_load("DSPODTH1");   # monster death (generic)
     return 0;
 }
 
-# Play a cached sound effect
+# Trigger a cached sound effect. This only ASSIGNS a mixer voice -- it never
+# touches the device, so it is safe to call from any game-event site without
+# stalling the tick. The actual non-blocking WRITEI happens in audio_tick().
 fn audio_play(cache_idx): i64 {
     if (cache_idx < 0) { return 0; }
     if (cache_idx >= snd_cache_count) { return 0; }
@@ -104,14 +233,76 @@ fn audio_play(cache_idx): i64 {
 
     var pcm = load64(snd_cache_data + cache_idx * 8);
     var nsamples = load64(snd_cache_sizes + cache_idx * 8);
+    if (pcm == 0) { return 0; }
+    if (nsamples <= 0) { return 0; }
 
-    audio_write_bytes(audio_dev, pcm, nsamples);
+    # Prefer a free voice (unused or finished). Pass 1.
+    var slot = 0 - 1;
+    for (var c = 0; c < MIX_CHANNELS; c += 1) {
+        if (slot < 0) {
+            var clen = load64(audio_chan_len + c * 8);
+            var cpos = load64(audio_chan_pos + c * 8);
+            if (clen == 0) { slot = c; }
+            if (clen != 0 && cpos >= clen) { slot = c; }
+        }
+    }
+    # All voices busy: steal the one with the least audio left (closest to done).
+    if (slot < 0) {
+        slot = 0;
+        var best_rem = load64(audio_chan_len) - load64(audio_chan_pos);
+        for (var c = 1; c < MIX_CHANNELS; c += 1) {
+            var rem = load64(audio_chan_len + c * 8) - load64(audio_chan_pos + c * 8);
+            if (rem < best_rem) { best_rem = rem; slot = c; }
+        }
+    }
+
+    store64(audio_chan_data + slot * 8, pcm);
+    store64(audio_chan_len + slot * 8, nsamples);
+    store64(audio_chan_pos + slot * 8, 0);
     return 0;
 }
 
-# Play by WAD lump name (loads if not cached)
+# Play by WAD lump name (loads if not cached). Cheap when preloaded (dedup hit).
 fn audio_play_name(lump_name): i64 {
     var idx = audio_load(lump_name);
     audio_play(idx);
+    return 0;
+}
+
+# Per-tick mixer. Renders MIX_TICK_FRAMES of mixed S8 mono from the active
+# voices and pushes it non-blocking. Called once per 35Hz game tick. Keeps the
+# stream fed with silence between sounds so the PCM never start/stop-churns.
+fn audio_tick(): i64 {
+    if (audio_dev == 0) { return 0; }
+    if (audio_mix_buf == 0) { return 0; }
+
+    for (var f = 0; f < MIX_TICK_FRAMES; f += 1) {
+        var acc = 0;
+        for (var c = 0; c < MIX_CHANNELS; c += 1) {
+            var clen = load64(audio_chan_len + c * 8);
+            if (clen != 0) {
+                var cpos = load64(audio_chan_pos + c * 8);
+                if (cpos < clen) {
+                    # DOOM PCM is UNSIGNED 8-bit (silence == 128); recenter to
+                    # signed for the S8 stream and summation.
+                    var u = load8(load64(audio_chan_data + c * 8) + cpos);
+                    acc = acc + (u - 128);
+                    store64(audio_chan_pos + c * 8, cpos + 1);
+                }
+            }
+        }
+        # Clamp the mixed sum to the S8 range, store as a two's-complement byte.
+        if (acc > 127) { acc = 127; }
+        if (acc < 0 - 128) { acc = 0 - 128; }
+        store8(audio_mix_buf + f, acc & 255);
+    }
+
+    # Non-blocking push. -EPIPE (underrun) -> re-prepare so the next tick
+    # re-primes; EAGAIN / short write -> we're ahead of the card, just drop this
+    # chunk (it is silence or a sub-tick gap) and catch up next tick.
+    var w = audio_write(audio_dev, audio_mix_buf, MIX_TICK_FRAMES);
+    if (w == 0 - ERRNO_EPIPE) {
+        audio_prepare(audio_dev);
+    }
     return 0;
 }

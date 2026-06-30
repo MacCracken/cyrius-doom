@@ -121,6 +121,7 @@ fn door_open(sector_idx): i64 {
 
     door_count += 1;
     sound_door_open();
+    audio_play_name("DSDOROPN");
     return 0;
 }
 

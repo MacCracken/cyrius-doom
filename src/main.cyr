@@ -310,6 +310,7 @@ fn doom_main(): i64 {
             while (dead_wait == 1) {
                 tick_begin();
                 input_poll();
+                audio_tick();
                 if (input_flags != 0) { dead_wait = 0; }
                 if (input_quit == 1) { game_running = 0; dead_wait = 0; }
                 tick_wait();
@@ -328,6 +329,7 @@ fn doom_main(): i64 {
         doors_tick();
         things_tick();
         sound_tick();
+        audio_tick();
         texture_animate();
         level_tick_time();
 
@@ -359,6 +361,7 @@ fn doom_main(): i64 {
     # Shutdown
     input_shutdown();
     sound_shutdown();
+    audio_shutdown();
     framebuf_write_ppm("/tmp/doom_final.ppm");
     wad_close();
     framebuf_shutdown();

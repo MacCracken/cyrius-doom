@@ -302,6 +302,7 @@ fn player_take_damage(dmg): i64 {
     }
     player_health -= dmg;
     sound_player_pain();
+    audio_play_name("DSPLPAIN");
     return 0;
 }
 
@@ -564,11 +565,11 @@ fn player_tick(): i64 {
             weapon_fire();
             player_hitscan();
             # Weapon sound
-            if (player_weapon == 2) { sound_pistol(); }
-            if (player_weapon == 3) { sound_shotgun(); }
-            if (player_weapon == 4) { sound_pistol(); }
-            if (player_weapon == 5) { sound_explode(); }
-            if (player_weapon == 7) { sound_plasma(); }
+            if (player_weapon == 2) { sound_pistol(); audio_play_name("DSPISTOL"); }
+            if (player_weapon == 3) { sound_shotgun(); audio_play_name("DSSHOTGN"); }
+            if (player_weapon == 4) { sound_pistol(); audio_play_name("DSPISTOL"); }
+            if (player_weapon == 5) { sound_explode(); audio_play_name("DSRLAUNC"); }
+            if (player_weapon == 7) { sound_plasma(); audio_play_name("DSPLASMA"); }
             weapon_dry_latch = 0;
         } else {
             # Out of ammo: click once per trigger pull (edge), then switch hint.

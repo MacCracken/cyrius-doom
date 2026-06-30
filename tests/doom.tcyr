@@ -38,6 +38,7 @@ fn sound_player_pain(): i64 { return 0; }
 fn sound_monster_pain(): i64 { return 0; }
 fn sound_monster_die(): i64 { return 0; }
 fn sound_item_pickup(): i64 { return 0; }
+fn audio_play_name(lump_name): i64 { return 0; }
 fn level_add_kill(): i64 { return 0; }
 fn level_add_item(): i64 { return 0; }
 fn tick_get_count(): i64 { return 0; }
