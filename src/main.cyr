@@ -264,6 +264,28 @@ fn doom_main(): i64 {
             at_t += 1;
             tick_wait();
         }
+        #ifdef CYRIUS_TARGET_AGNOS
+        # FB telemetry (archaemenid has no serial): 3 stacked bars across the 320-wide screen.
+        #   TOP (white, full)  = the RING (16384 frames = 100%).
+        #   MID (red)          = the TARGET fill doom aims for (~256 ms ~= 240 px).
+        #   BOT (white)        = the WORST-CASE actual fill doom saw via snd_avail.
+        # Read it: BOT ~= MID => ring HELD full all run -> if echo STILL heard, snd_avail/LPIB is lying
+        # (real ALC897 position register inaccurate) = a kernel DMA-position-buffer fix, NOT more buffer.
+        # BOT much SHORTER than MID => the ring genuinely emptied = real underrun -> deeper buffer / guard.
+        var tm_mf = AUDIO_RING_FR - 1 - audio_dbg_maxav;
+        if (tm_mf < 0) { tm_mf = 0; }
+        var tm_fx = tm_mf * SCREEN_WIDTH / AUDIO_RING_FR;
+        var tm_tx = AUDIO_AGNOS_TARGET * SCREEN_WIDTH / AUDIO_RING_FR;
+        framebuf_clear(0);
+        var tm_y = 40;
+        while (tm_y < 65)  { framebuf_hline(0, SCREEN_WIDTH - 1, tm_y, 4);   tm_y = tm_y + 1; }   # RING (full)
+        tm_y = 85;
+        while (tm_y < 110) { framebuf_hline(0, tm_tx, tm_y, 176); tm_y = tm_y + 1; }              # TARGET
+        tm_y = 130;
+        while (tm_y < 155) { framebuf_hline(0, tm_fx, tm_y, 4);   tm_y = tm_y + 1; }              # actual FILL
+        framebuf_flip();
+        syscall(41, 9000);   # hold ~9s so the bar chart is photographable before doom exits
+        #endif
         audio_shutdown();
         wad_close();
         doom_exit(0);

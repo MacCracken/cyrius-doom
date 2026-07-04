@@ -23,12 +23,16 @@ HDA ring → ALC897` path is now live.
   vani→ALSA buffers ~186 ms and absorbs the jitter; the raw agnos ring has no such cushion.)
   Fix (`audio.cyr`, agnos-gated): `audio_tick` now reads **`sys_snd_avail`#69** (ground truth of
   what actually drained) and mixes+pushes chunks in a loop until the ring fill reaches a deep,
-  jitter-tolerant **`AUDIO_AGNOS_TARGET` = 3072 frames (~64 ms)** (capped at 5 chunks/tick). The
+  jitter-tolerant **`AUDIO_AGNOS_TARGET` = 8192 frames (~171 ms)** (capped at 7 chunks/tick). The
   mix body is factored into `audio_mix_chunk()`; each chunk still renders exactly `MIX_SRC_SAMPLES`
   (315) so `audio_up_acc` + per-voice `cpos` advance identically — pitch/timing stay drift-free,
   and 315 samples emit ≤5488 B < `OUT_BUF_BYTES` (no overflow). The **Linux/ALSA path is byte-
-  identical** (one chunk per tick behind `#ifndef`). QEMU-verified: ring fill held at ~3072 (was
-  ~1 tick, near-empty), SFX bursts **23 → 8** (echo clusters gone), no slowdown. No kernel change
+  identical** (one chunk per tick behind `#ifndef`). QEMU-verified: ring fill held at the target (was
+  ~1 tick, near-empty), SFX bursts **23 → 8** (echo clusters gone), no slowdown. (First iron burn:
+  the rate/speed fix landed but a residual echo remained at the initial 3072/~64ms target — real
+  ALC897 service stalls exceed what QEMU models — so `AUDIO_AGNOS_TARGET` was deepened to
+  8192/~171ms; to be tuned down to the min-clean depth for in-game SFX latency once iron confirms.)
+  No kernel change
   (a kernel silence-net was rejected — it would make the timer ISR a second `snd_appl` writer,
   breaking the lock-free single-writer band ABI).
 - **`OUT_RATE` 44100 → 48000** to match the agnos HDA stream's hard-armed 48k/16/2 format

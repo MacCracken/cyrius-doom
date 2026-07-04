@@ -48,12 +48,18 @@ enum MixConst {
     # 1371-frames/tick push leaves the ring ~1 tick deep and sleep_ms jitter underruns
     # it -> the cyclic DMA replays ~28ms of stale ring = echo. Keep the ring topped to
     # a deep, jitter-tolerant target instead, driven by snd_avail#69 ground truth.
-    AUDIO_AGNOS_TARGET   = 3072;   # steady-state ring depth in FRAMES (~64 ms @48k). Worst ~40ms
-                                   # inter-service gap drains ~1920 < 3072 -> ~1152 stay queued ->
-                                   # snd_appl stays ahead of the DAC -> no wrap into stale = no echo.
-                                   # Latency lands ~64-93ms (a chunk overshoots the floor), mid-budget.
-    AUDIO_AGNOS_MAXITERS = 5;      # cap mix-chunks/tick. Cold rebuild 0->3072 = ~3 chunks; 5 gives
-                                   # margin. Invariant: MAXITERS >= ceil(TARGET/1371)+1.
+    AUDIO_AGNOS_TARGET   = 12288;  # steady-state ring depth in FRAMES (~256 ms @48k). Raised 3072->8192
+                                   # ->12288 across iron burns: each deepening shrank the echo (=> it IS
+                                   # underrun-replay) but 8192/~171ms still left a residual, so real
+                                   # ALC897/iron either stalls >171ms OR LPIB-tracking (snd_hw_frames) is
+                                   # inaccurate on hardware (LPIB is a known-unreliable HDA register). 12288
+                                   # = 75% of the 16384 ring — a near-max DIAGNOSTIC depth: if this kills
+                                   # the echo it's underrun-depth (then tune DOWN for latency); if it still
+                                   # echoes at ~256ms buffer it is NOT underrun (=> LPIB/servicer). ~256ms
+                                   # latency is high for in-game SFX — a validation value, to be trimmed.
+    AUDIO_AGNOS_MAXITERS = 10;     # cap mix-chunks/tick. Cold rebuild 0->12288 = 9 chunks (9*1371=12339);
+                                   # 10 gives margin. Invariant: MAXITERS >= ceil(TARGET/1371)+1 = 10.
+    AUDIO_RING_FR        = 16384;  # ring size mirror for the fill telemetry (fill = RING_FR-1 - avail).
     RING_FRAMES          = 16384;  # kernel SND_CBL_FRAMES mirror; fill = (RING_FRAMES-1) - snd_avail.
 }
 
@@ -81,6 +87,8 @@ var audio_chan_lvol = 0;   # per-voice left-channel volume, 0..256 (256 = full)
 var audio_chan_rvol = 0;   # per-voice right-channel volume, 0..256
 var audio_mix_buf   = 0;   # OUT_BUF_BYTES scratch, S16_LE stereo @ OUT_RATE
 var audio_up_acc    = 0;   # Bresenham upsample accumulator (48000/11025), carried across ticks -> drift-free
+var audio_dbg_maxav = 0;   # DBG telemetry: worst (highest) free-frames seen = lowest ring fill = closest to underrun
+var audio_dbg_armed = 0;   # DBG: start tracking maxav only AFTER the buffer first reaches target (exclude the startup ramp)
 
 # Open + configure a playback device for OUT_RATE/OUT_CH/OUT_BITS, returning the
 # configured vani handle (already through HW_PARAMS) or 0 if none works.
@@ -514,8 +522,11 @@ fn audio_tick(): i64 {
     while (iters < AUDIO_AGNOS_MAXITERS) {
         var av = sys_snd_avail(audio_dev - 1);
         if (av < 0) { break; }                        # slot lost -> stop (don't spin)
+        # DBG: once the buffer has first reached target (armed), the pre-refill av on
+        # each tick's FIRST read is the steady-state worst-case dip -> track its max.
+        if (audio_dbg_armed == 1) { if (av > audio_dbg_maxav) { audio_dbg_maxav = av; } }
         var fill = (RING_FRAMES - 1) - av;            # frames queued ahead of the DAC
-        if (fill >= AUDIO_AGNOS_TARGET) { break; }    # ring topped to target -> done this tick
+        if (fill >= AUDIO_AGNOS_TARGET) { audio_dbg_armed = 1; break; }   # ring topped -> done this tick
         var got = audio_mix_chunk();
         iters = iters + 1;
         if (got <= 0) { break; }                      # #66 short-wrote (ring full mid-chunk) -> stop
