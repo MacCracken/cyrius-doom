@@ -101,7 +101,8 @@ Dep pins (bsp / vani versions) and 20-modules-vs-libs counts live in [`state.md`
 - **Fuzz early** — `fuzz/fuzz_wad.cyr` + `fuzz/fuzz_fixed.cyr` have found bugs unit tests missed. Run before claiming robustness.
 - **`asr()` everywhere on signed shifts** — Cyrius `>>` is logical. Every right-shift on a signed value must use `asr()`.
 - **Lazy init guards** — `if (ptr == 0) { ptr = alloc(N); }` — prevents double-alloc and null deref. Pattern lives in framebuf / texture / masked-segs.
-- **Enum for constants** — saves `gvar_toks` slots (cycc limit: 1024 initialized globals). Use `var` only for mutable state.
+- **Enum for constants** — saves `gvar_toks` slots (cycc limit: 4,096 initialized globals). Use `var` only for mutable state.
+- **Initialized-globals counting rule** — only a top-level `var NAME = <non-literal>;` (call / identifier / expression initializer) consumes a slot; a bare integer-literal init (`var x = 42;`) takes the static-init fast path and enum members are const-folded, so neither counts. See the cyrius guide's **Global Initializers** section (`docs/guides/cyrius-guide.md` in the cyrius repo).
 - **Patch cache** — `pcache_get()` eliminates WAD I/O during rendering (200× speedup). Don't bypass it.
 - **Sakshi tracing** — all error paths use `sakshi_error / sakshi_warn / sakshi_info` — structured timestamped logging. Don't `file_write(2, ...)` raw.
 - **Clean-room implementation** — read [Black Book](https://fabiensanglard.net/gebbdoom/) + [Unofficial Specs](https://doomwiki.org/wiki/WAD) before implementing. Never copy from [id Software DOOM source](https://github.com/id-Software/DOOM) (GPL-2.0; read for understanding only).
