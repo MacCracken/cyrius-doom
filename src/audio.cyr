@@ -87,8 +87,10 @@ var audio_chan_lvol = 0;   # per-voice left-channel volume, 0..256 (256 = full)
 var audio_chan_rvol = 0;   # per-voice right-channel volume, 0..256
 var audio_mix_buf   = 0;   # OUT_BUF_BYTES scratch, S16_LE stereo @ OUT_RATE
 var audio_up_acc    = 0;   # Bresenham upsample accumulator (48000/11025), carried across ticks -> drift-free
-var audio_dbg_maxav = 0;   # DBG telemetry: worst (highest) free-frames seen = lowest ring fill = closest to underrun
-var audio_dbg_armed = 0;   # DBG: start tracking maxav only AFTER the buffer first reaches target (exclude the startup ramp)
+var audio_fill_idx = 0;    # DBG telemetry: per-tick pre-refill ring-fill history index (0..287)
+var audio_fill_hist[288];  # DBG: snd_avail sampled at the START of each tick (pre-refill = worst fill that tick).
+                           # Module-global var[N] = N*8 bytes -> 288 u64 slots (>= the 280-tick audio-test).
+                           # Rendered as a fill-vs-tick graph at test end: reveals holding vs dips vs flat-low.
 
 # Open + configure a playback device for OUT_RATE/OUT_CH/OUT_BITS, returning the
 # configured vani handle (already through HW_PARAMS) or 0 if none works.
@@ -275,8 +277,14 @@ fn audio_load(lump_name): i64 {
     # at load (crude, no low-pass -- acceptable for SFX) so playback is 1 cached
     # sample == 1 output frame for every voice. Anything else is taken as-is.
     var src = raw + SND_HEADER_SIZE;
-    var stored = nsamples;
-    if (rate == MIX_RATE_22K) { stored = nsamples / 2; }
+    var eff = nsamples;
+    # Skip the DMX 16-sample lead + 16-sample tail PAD (0x80 = silence, present in the
+    # shareware DS* lumps for the original DAC's sample-and-hold) as Chocolate/PrBoom do
+    # -> removes ~1.5 ms of "empty air" at each SFX's start (and a trailing click).
+    # Guarded so a short/degenerate lump is left untouched.
+    if (nsamples > 32) { src = src + 16; eff = nsamples - 32; }
+    var stored = eff;
+    if (rate == MIX_RATE_22K) { stored = eff / 2; }
     # A degenerate 1-sample 22050 lump decimates to 0 -> alloc(0) would cache a
     # null pointer in a live slot. Reject it.
     if (stored <= 0) { return -1; }
@@ -518,15 +526,21 @@ fn audio_tick(): i64 {
     if (audio_mix_buf == 0) { return 0; }
 
     #ifdef CYRIUS_TARGET_AGNOS
+    # DBG: sample the ring fill ONCE at the start of the tick (pre-refill = the worst
+    # fill this tick, right before the loop tops it back up) into the per-tick history.
+    var av0 = sys_snd_avail(audio_dev - 1);
+    if (av0 >= 0) {
+        if (audio_fill_idx < 288) {
+            store64(&audio_fill_hist + audio_fill_idx * 8, av0);
+            audio_fill_idx = audio_fill_idx + 1;
+        }
+    }
     var iters = 0;
     while (iters < AUDIO_AGNOS_MAXITERS) {
         var av = sys_snd_avail(audio_dev - 1);
         if (av < 0) { break; }                        # slot lost -> stop (don't spin)
-        # DBG: once the buffer has first reached target (armed), the pre-refill av on
-        # each tick's FIRST read is the steady-state worst-case dip -> track its max.
-        if (audio_dbg_armed == 1) { if (av > audio_dbg_maxav) { audio_dbg_maxav = av; } }
         var fill = (RING_FRAMES - 1) - av;            # frames queued ahead of the DAC
-        if (fill >= AUDIO_AGNOS_TARGET) { audio_dbg_armed = 1; break; }   # ring topped -> done this tick
+        if (fill >= AUDIO_AGNOS_TARGET) { break; }    # ring topped -> done this tick
         var got = audio_mix_chunk();
         iters = iters + 1;
         if (got <= 0) { break; }                      # #66 short-wrote (ring full mid-chunk) -> stop
