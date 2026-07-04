@@ -5,7 +5,45 @@ All notable changes to cyrius-doom will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.31.0] - 2026-07-04
+
+**Sound on agnos — DOOM SFX out the sovereign HDA output (the audio arc's Gate 4).**
+Retargets the digital-SFX output stage onto the agnos `sys_snd_*` syscall band (`#64–#69`,
+frozen in agnos 1.52.7 + shipped in the cyrius v6.4.2 stdlib), so DOOM's WAD sound effects
+reach the ALC897 codec on agnos — the `cyrius-doom audio.cyr → sys_snd_* → agnos #64–#69 →
+HDA ring → ALC897` path is now live.
+
+### Changed
+- **`OUT_RATE` 44100 → 48000** to match the agnos HDA stream's hard-armed 48k/16/2 format
+  (a valid raw ALSA rate too, so the Linux path is unaffected in kind). The output stage's
+  fixed ×4 integer upsample (44100/11025) becomes a **drift-free Bresenham nearest-neighbour
+  upsampler** (`audio_up_acc`, `audio_tick`): each 11025 mono source sample emits
+  `floor((acc+48000)/11025)` output frames (4 or 5, averaging 4.354), the accumulator carried
+  across ticks so the long-run count is exactly 48000/11025 — no pitch drift. Per-tick output
+  is now a variable ~1371/1372 frames (`OUT_BUF_BYTES` grown 5040 → 6400 to hold it); the push
+  uses the actual produced count (`oi/4`), not a fixed constant.
+- **`audio_init` / `audio_preload` / `audio_tick` agnos branches** (`#ifdef CYRIUS_TARGET_AGNOS`):
+  `audio_init` opens the output via `sys_snd_open()` + `sys_snd_config(slot, 48000, 0x1002)`
+  (S16/stereo) instead of ALSA (storing `slot+1` in `audio_dev` so 0 stays "no device"); the
+  per-tick push uses `sys_snd_write_nb`; `audio_preload` now loads the WAD SFX on agnos (was a
+  no-op). The vani/ALSA path (`audio_open_best`/`audio_write`/EPIPE recovery) is unchanged on
+  non-agnos targets. `sound.cyr`'s PC-speaker guard stays agnos-disabled (no PC speaker there).
+- **Toolchain pin → cyrius 6.4.2** (`cyrius.cyml`) — the release carrying the `sys_snd_*` peer;
+  the vendored `lib/` was `cyrius lib sync --full`'d to the 6.4.2 snapshot (the stale wrappers
+  lacked `sys_snd_*`). Builds clean for agnos.
+
+### Fixed
+- **`audio_init` / `audio_shutdown` agnos branches fell through to the ALSA-only tail on a fake
+  handle → `#PF` inside `load_map`.** With `audio_dev = slot + 1` (a small integer, not an fd), the
+  post-branch common code (`audio_set_sw_params`/`audio_prepare`/`audio_fd`/`SYS_FCNTL` in `audio_init`;
+  `audio_drain`/`audio_close` in `audio_shutdown`) operated on that fake handle and faulted on agnos.
+  Both agnos branches now `return` before the Linux-only tail (and `audio_shutdown` calls
+  `sys_snd_drain`/`sys_snd_close` on the slot). Surfaced by the agnos `--audio-test` bring-up, where
+  it masked the actual audio path; caught via serial bisection.
+- **Validated end-to-end on agnos in QEMU** (agnos `scripts/doom-audio-smoke.sh`): `--audio-test`
+  plays all 8 SFX out the emulated `intel-hda` and the captured wav is non-silent (PEAK=24287) — first
+  cyrius-doom sound on AGNOS. (The exercise also caught + fixed an agnos kernel bug where the HDA PCM
+  ring's CPU-access VA wasn't in the per-process CR3; fixed kernel-side in agnos 1.52.7.)
 
 ## [0.30.7] - 2026-06-29
 

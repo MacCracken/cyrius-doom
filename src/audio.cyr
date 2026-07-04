@@ -24,12 +24,12 @@ enum SndConst {
 enum MixConst {
     MIX_CHANNELS    = 8;
     MIX_SRC_SAMPLES = 315;    # 11025 / 35 — mixed mono samples rendered per tick
-    OUT_RATE        = 44100;  # device output rate (only 44100/48000 accepted raw)
+    OUT_RATE        = 48000;  # output rate — matches the agnos HDA stream's hard-armed 48k (valid raw on ALSA too)
     OUT_CH          = 2;      # stereo (mono rejected by the analog codec)
     OUT_BITS        = 16;     # S16_LE
-    OUT_UP          = 4;      # OUT_RATE / SND_DMX_RATE (44100/11025), exact
-    MIX_TICK_FRAMES = 1260;   # OUT_RATE / 35 — output frames pushed per tick
-    OUT_BUF_BYTES   = 5040;   # MIX_TICK_FRAMES * OUT_CH * (OUT_BITS/8) = 1260*4
+    OUT_UP          = 4;      # legacy/unused — 48000/11025 is fractional (see the audio_up_acc upsampler in audio_tick)
+    MIX_TICK_FRAMES = 1371;   # ~OUT_RATE/35 (48000/35=1371.4); actual per-tick count is variable (1371/1372) via audio_up_acc
+    OUT_BUF_BYTES   = 6400;   # holds the worst-case variable tick (up to ~1575 frames * OUT_CH * bytes)
     MIX_PERIOD      = 1024;   # ALSA period frames (HW_PARAMS hint)
     MIX_BUFFER      = 8192;   # ALSA ring buffer frames (~186 ms @ 44100)
     MIX_START       = 3072;   # start_threshold frames (~70 ms pre-buffer)
@@ -68,6 +68,7 @@ var audio_chan_pos  = 0;   # next sample index; pos >= len means finished/free
 var audio_chan_lvol = 0;   # per-voice left-channel volume, 0..256 (256 = full)
 var audio_chan_rvol = 0;   # per-voice right-channel volume, 0..256
 var audio_mix_buf   = 0;   # OUT_BUF_BYTES scratch, S16_LE stereo @ OUT_RATE
+var audio_up_acc    = 0;   # Bresenham upsample accumulator (48000/11025), carried across ticks -> drift-free
 
 # Open + configure a playback device for OUT_RATE/OUT_CH/OUT_BITS, returning the
 # configured vani handle (already through HW_PARAMS) or 0 if none works.
@@ -115,14 +116,6 @@ fn audio_open_best(): i64 {
 }
 
 fn audio_init(): i64 {
-    #ifdef CYRIUS_TARGET_AGNOS
-    # No ALSA on agnos: vani's audio_open_playback issues a Linux-arg-order
-    # sys_open and there is no sound card. Leave audio disabled (audio_inited
-    # stays 0, audio_dev stays 0) so load/preload/play/shutdown are all no-ops,
-    # mirroring how sound.cyr guards the PC-speaker path.
-    return 0;
-    #endif
-
     # Idempotent. load_map() runs at boot AND on every level transition, so a
     # naive re-init would (1) re-alloc the four caches, orphaning the sounds
     # already loaded, and (2) re-open the EXCLUSIVE hw PCM node while the prior
@@ -160,11 +153,26 @@ fn audio_init(): i64 {
     # stage produces exactly OUT_RATE/OUT_CH/OUT_BITS. If nothing accepts it, run
     # silent (the mixer no-ops on audio_dev==0) rather than logging a false
     # "ALSA playback".
+    audio_up_acc = 0;
+    #ifdef CYRIUS_TARGET_AGNOS
+    # agnos: open the HDA output via the snd_* band (#64-69), not ALSA. The kernel
+    # stream is hard-armed 48k/16/2; snd_config just asserts that format. Store
+    # slot+1 in audio_dev so 0 stays "no device" (the mixer no-ops on audio_dev==0).
+    var asl = sys_snd_open();
+    if (asl < 0) { audio_dev = 0; return 0; }
+    sys_snd_config(asl, 48000, 0x1002);        # fmt = (16<<8)|2 = S16 stereo
+    audio_dev = asl + 1;
+    sakshi_info("audio: HDA snd band open", 24);
+    return 0;                                  # agnos done — the ALSA tail below
+                                               # (sw_params/prepare/fd/FCNTL) is
+                                               # Linux-only; the snd_* band needs none.
+    #else
     audio_dev = audio_open_best();
     if (audio_dev == 0) {
         sakshi_warn("audio: no usable device", 23);
         return 0;
     }
+    #endif
 
     # Pre-buffer ~MIX_START frames before the card starts draining so normal
     # 35Hz tick jitter doesn't underrun on the first few ticks. ONLY when the
@@ -189,8 +197,13 @@ fn audio_init(): i64 {
 
 fn audio_shutdown(): i64 {
     if (audio_dev != 0) {
+        #ifdef CYRIUS_TARGET_AGNOS
+        sys_snd_drain(audio_dev - 1);          # flush the ring, then release the slot
+        sys_snd_close(audio_dev - 1);
+        #else
         audio_drain(audio_dev);
         audio_close(audio_dev);
+        #endif
         audio_dev = 0;
     }
     # Clear the one-shot guard so a later audio_init() could re-open cleanly.
@@ -267,9 +280,6 @@ fn audio_load(lump_name): i64 {
 
 # Preload common DOOM sounds
 fn audio_preload(): i64 {
-    #ifdef CYRIUS_TARGET_AGNOS
-    return 0;
-    #endif
     # Nothing to preload into the device cache if there is no device — skip the
     # WAD reads entirely on headless / no-sound-card hosts.
     if (audio_dev == 0) { return 0; }
@@ -435,8 +445,15 @@ fn audio_tick(): i64 {
             s16l = asr((accl << 8) * (sfx_volume + 1), 4) & 0xFFFF;
             s16r = asr((accr << 8) * (sfx_volume + 1), 4) & 0xFFFF;
         }
-        # Upsample 4x: 4 stereo frames per source sample.
-        for (var up = 0; up < OUT_UP; up += 1) {
+        # Fractional nearest-neighbour upsample OUT_RATE/SND_DMX_RATE (48000/11025
+        # ~= 4.354x; == 4 exactly at 44100). Drift-free via the module-global
+        # accumulator carried across ticks: this source sample emits
+        # floor((acc+OUT_RATE)/SND_DMX_RATE) output frames; over 11025 samples the
+        # total is exactly OUT_RATE, so no long-run pitch drift.
+        audio_up_acc = audio_up_acc + OUT_RATE;
+        var upn = audio_up_acc / SND_DMX_RATE;
+        audio_up_acc = audio_up_acc - upn * SND_DMX_RATE;
+        for (var up = 0; up < upn; up += 1) {
             store16(audio_mix_buf + oi, s16l);      # left
             store16(audio_mix_buf + oi + 2, s16r);  # right
             oi = oi + 4;
@@ -449,7 +466,11 @@ fn audio_tick(): i64 {
     # advanced cpos above, so a dropped chunk skips ~28.6 ms of any ACTIVE sound
     # (not just silence) -- an audible micro-gap, traded for the never-stall
     # guarantee. With exact 1260-frames/tick pacing this is rare in steady state.
-    var w = audio_write(audio_dev, audio_mix_buf, MIX_TICK_FRAMES);
+    #ifdef CYRIUS_TARGET_AGNOS
+    var w = sys_snd_write_nb(audio_dev - 1, audio_mix_buf, oi / 4);   # slot = audio_dev-1; frames actually produced
+    #else
+    var w = audio_write(audio_dev, audio_mix_buf, oi / 4);
+    #endif
     if (w == 0 - ERRNO_EPIPE) {
         audio_prepare(audio_dev);
     }
