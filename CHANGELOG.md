@@ -14,6 +14,24 @@ reach the ALC897 codec on agnos — the `cyrius-doom audio.cyr → sys_snd_* →
 HDA ring → ALC897` path is now live.
 
 ### Changed
+- **Closed-loop adaptive-`avail` producer on agnos (the echo/underrun fix).** The first iron
+  burn played every SFX with a **heavy echo/repeat** + slight slowness. Root cause (measured):
+  the agnos HDA ring is drained by a **free-running 48 kHz DAC** independent of the 35 Hz /
+  10 ms-quantized game clock, so pushing a **fixed ~1371 frames per tick** left the ring only
+  ~1 tick deep; the 100 Hz `sleep_ms` jitter (20/30 ms) then tipped it into **underrun**, where
+  the cyclic BDL **replays ~28 ms of stale ring content** = the echo. (Linux is clean because
+  vani→ALSA buffers ~186 ms and absorbs the jitter; the raw agnos ring has no such cushion.)
+  Fix (`audio.cyr`, agnos-gated): `audio_tick` now reads **`sys_snd_avail`#69** (ground truth of
+  what actually drained) and mixes+pushes chunks in a loop until the ring fill reaches a deep,
+  jitter-tolerant **`AUDIO_AGNOS_TARGET` = 3072 frames (~64 ms)** (capped at 5 chunks/tick). The
+  mix body is factored into `audio_mix_chunk()`; each chunk still renders exactly `MIX_SRC_SAMPLES`
+  (315) so `audio_up_acc` + per-voice `cpos` advance identically — pitch/timing stay drift-free,
+  and 315 samples emit ≤5488 B < `OUT_BUF_BYTES` (no overflow). The **Linux/ALSA path is byte-
+  identical** (one chunk per tick behind `#ifndef`). QEMU-verified: ring fill held at ~3072 (was
+  ~1 tick, near-empty), SFX bursts **23 → 8** (echo clusters gone), no slowdown. No kernel change
+  (a kernel silence-net was rejected — it would make the timer ISR a second `snd_appl` writer,
+  breaking the lock-free single-writer band ABI).
+- **`OUT_RATE` 44100 → 48000** to match the agnos HDA stream's hard-armed 48k/16/2 format
 - **`OUT_RATE` 44100 → 48000** to match the agnos HDA stream's hard-armed 48k/16/2 format
   (a valid raw ALSA rate too, so the Linux path is unaffected in kind). The output stage's
   fixed ×4 integer upsample (44100/11025) becomes a **drift-free Bresenham nearest-neighbour

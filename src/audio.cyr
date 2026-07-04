@@ -43,6 +43,18 @@ enum MixConst {
     AUDIO_SCAN_CARDS = 4;     # scan cards 0..3 for a usable output
     AUDIO_SCAN_DEVS  = 8;     # scan devices 0..7 within a card (fallback pass)
     SFX_VOL_MAX     = 15;     # master SFX volume range 0..15 (DOOM convention)
+    # agnos adaptive-avail producer (audio_tick): the HDA ring is drained by a free-
+    # running 48k DAC independent of the 35Hz/10ms-quantized game clock, so a fixed
+    # 1371-frames/tick push leaves the ring ~1 tick deep and sleep_ms jitter underruns
+    # it -> the cyclic DMA replays ~28ms of stale ring = echo. Keep the ring topped to
+    # a deep, jitter-tolerant target instead, driven by snd_avail#69 ground truth.
+    AUDIO_AGNOS_TARGET   = 3072;   # steady-state ring depth in FRAMES (~64 ms @48k). Worst ~40ms
+                                   # inter-service gap drains ~1920 < 3072 -> ~1152 stay queued ->
+                                   # snd_appl stays ahead of the DAC -> no wrap into stale = no echo.
+                                   # Latency lands ~64-93ms (a chunk overshoots the floor), mid-budget.
+    AUDIO_AGNOS_MAXITERS = 5;      # cap mix-chunks/tick. Cold rebuild 0->3072 = ~3 chunks; 5 gives
+                                   # margin. Invariant: MAXITERS >= ceil(TARGET/1371)+1.
+    RING_FRAMES          = 16384;  # kernel SND_CBL_FRAMES mirror; fill = (RING_FRAMES-1) - snd_avail.
 }
 
 var snd_cache_lumps = 0;
@@ -408,10 +420,14 @@ fn audio_play_at(lump_name, sx, sy): i64 {
 # S16_LE frames (U8->S16 recenter+scale, mono->L/R dup, 11025->44100 upsample).
 # MIX_TICK_FRAMES (1260) frames out, pushed non-blocking. Called once per 35Hz
 # tick; silence between sounds keeps the PCM from start/stop-churning.
-fn audio_tick(): i64 {
-    if (audio_dev == 0) { return 0; }
-    if (audio_mix_buf == 0) { return 0; }
-
+# Mix ONE chunk: MIX_SRC_SAMPLES (315) of 11025 mono from the active voices ->
+# Bresenham upsample to OUT_RATE stereo S16 -> push. Returns frames the sink
+# ACCEPTED (agnos #66: 0..n, short = ring was full mid-chunk; Linux: audio_write
+# result). audio_up_acc + each voice's cpos advance exactly one tick's worth per
+# call, so calling this N times buffers the SFX N chunks DEEPER (correct — same
+# pitch/timing, just queued further ahead), never resampled faster. 315 src emit
+# <=1372 frames = <=5488 B < OUT_BUF_BYTES=6400 -> the buffer never overflows.
+fn audio_mix_chunk(): i64 {
     var oi = 0;   # byte offset into the S16 stereo output buffer
     for (var f = 0; f < MIX_SRC_SAMPLES; f += 1) {
         var accl = 0;
@@ -447,7 +463,7 @@ fn audio_tick(): i64 {
         }
         # Fractional nearest-neighbour upsample OUT_RATE/SND_DMX_RATE (48000/11025
         # ~= 4.354x; == 4 exactly at 44100). Drift-free via the module-global
-        # accumulator carried across ticks: this source sample emits
+        # accumulator carried across chunks: this source sample emits
         # floor((acc+OUT_RATE)/SND_DMX_RATE) output frames; over 11025 samples the
         # total is exactly OUT_RATE, so no long-run pitch drift.
         audio_up_acc = audio_up_acc + OUT_RATE;
@@ -460,25 +476,53 @@ fn audio_tick(): i64 {
         }
     }
 
-    # Non-blocking push. -EPIPE (underrun) -> re-prepare so the next tick
-    # re-primes. -EAGAIN / short write -> the ring is full (we're ahead of the
-    # card): we drop this chunk and catch up next tick. NOTE: voices already
-    # advanced cpos above, so a dropped chunk skips ~28.6 ms of any ACTIVE sound
-    # (not just silence) -- an audible micro-gap, traded for the never-stall
-    # guarantee. With exact 1260-frames/tick pacing this is rare in steady state.
     #ifdef CYRIUS_TARGET_AGNOS
-    var w = sys_snd_write_nb(audio_dev - 1, audio_mix_buf, oi / 4);   # slot = audio_dev-1; frames actually produced
+    var w = sys_snd_write_nb(audio_dev - 1, audio_mix_buf, oi / 4);   # frames ACCEPTED (0..n)
     #else
+    # Non-blocking push. -EPIPE (underrun) -> re-prepare so the next chunk
+    # re-primes. -EAGAIN / short write -> the ring is full (we're ahead of the
+    # card): drop this chunk and catch up. (agnos never returns these errnos —
+    # #66 returns 0..n — so this recovery is Linux-only.)
     var w = audio_write(audio_dev, audio_mix_buf, oi / 4);
-    #endif
     if (w == 0 - ERRNO_EPIPE) {
         audio_prepare(audio_dev);
     }
     if (w == 0 - ERRNO_ESTRPIPE) {
-        # PCM was suspended (system sleep). Resume, then re-prepare; the next
-        # tick re-primes the ring.
+        # PCM was suspended (system sleep). Resume, then re-prepare.
         audio_resume(audio_dev);
         audio_prepare(audio_dev);
     }
+    #endif
+    return w;
+}
+
+# Per-tick producer (once per 35 Hz game tick).
+#   Linux: one chunk -> vani/ALSA, whose deep (~186 ms) buffer absorbs tick jitter.
+#   agnos: CLOSED-LOOP adaptive-avail. The 16384-frame DMA ring is drained by a
+#     FREE-RUNNING 48k DAC independent of the 10ms-quantized game clock, so a fixed
+#     1-chunk/tick push only matches the AVERAGE drain and leaves the ring ~1 tick
+#     deep -> sleep_ms jitter (20/30ms) underruns it -> the cyclic BDL replays ~28ms
+#     of stale ring = echo. Instead, read snd_avail#69 (ground truth of what actually
+#     drained) and mix+push chunks until fill >= a deep, jitter-tolerant target. Each
+#     chunk buffers the SFX further ahead (correct), tracking the real DAC clock.
+fn audio_tick(): i64 {
+    if (audio_dev == 0) { return 0; }
+    if (audio_mix_buf == 0) { return 0; }
+
+    #ifdef CYRIUS_TARGET_AGNOS
+    var iters = 0;
+    while (iters < AUDIO_AGNOS_MAXITERS) {
+        var av = sys_snd_avail(audio_dev - 1);
+        if (av < 0) { break; }                        # slot lost -> stop (don't spin)
+        var fill = (RING_FRAMES - 1) - av;            # frames queued ahead of the DAC
+        if (fill >= AUDIO_AGNOS_TARGET) { break; }    # ring topped to target -> done this tick
+        var got = audio_mix_chunk();
+        iters = iters + 1;
+        if (got <= 0) { break; }                      # #66 short-wrote (ring full mid-chunk) -> stop
+    }
     return 0;
+    #else
+    audio_mix_chunk();
+    return 0;
+    #endif
 }
