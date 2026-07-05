@@ -5,7 +5,70 @@ All notable changes to cyrius-doom will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.31.2] - 2026-07-04
+## [0.31.3] - 2026-07-04
+
+**Vanilla-fidelity gameplay pass + sky-pan fix.** Follow-on to the 0.31.2 July Fable
+audit playability pass: closes the batch of MED vanilla-fidelity gaps the audit's
+gameplay review surfaced but that were scoped out of the play-breaking Tier-1 cut —
+combat damage rolls, item/ammo pickup rules, player-vs-thing collision, secret sectors —
+plus the one cleanly-doable deferred render item (sky pan rate). All Linux-verifiable;
+the other deferred audit items stay blocked (AGNOS QEMU: F-U6; hardware this box lacks:
+F-R5 non-32bpp fb, F-U8 audio jack; entangled with bigger render rewrites: F-R3
+native-scale-V pegging, F-R6 masked-transparency).
+
+### Fixed
+
+- **Monster melee damage no longer time-correlated (audit follow-up to F-G1).** The melee
+  roll was `3 + (tick_get_count() % 22)` — a deterministic function of the game clock, the
+  same time-correlation class purged from player weapons in 0.30.0. Now `(p_random() % 8
+  + 1) * 3` (3–24, DOOM's imp/demon melee formula). ([`src/things.cyr`](src/things.cyr))
+- **Linux audio output rate is now negotiated, not hardcoded (audit F-U8).** 0.31.0 set
+  `OUT_RATE` 48000 (the ALC897/HDA native rate, matching the agnos stream) but the header
+  comment + state.md still claimed "the jack takes ONLY 44100" — a contradiction that, if
+  literal, meant Linux audio could go silently dead. `audio_try_configure` now requests
+  48000 first and **falls back to 44100** if a raw hw node rejects it, recording the winner
+  in a new `audio_out_rate` that the Bresenham upsampler reads — so pitch stays correct at
+  whichever rate the device accepts. The 48000 path is byte-identical (`audio_out_rate ==
+  OUT_RATE`), and the agnos `sys_snd_*` path is untouched (hard-armed 48000, never runs the
+  fallback). Upsampler verified drift-free at both rates (11025 src samples → exactly
+  48000 / 44100 output frames; worst chunk 1372 / 1260 frames ≤ the 6400 B buffer). Stale
+  "44100-only" comments reconciled. **Audible confirmation on the jack is pending a user
+  `--audio-test`** — the agent's execution context can't open `/dev/snd` (not in the
+  `audio` group / no login-session ACL), so it can't verify sound end-to-end here.
+  ([`src/audio.cyr`](src/audio.cyr))
+- **Item/ammo pickup rules match DOOM (audit gameplay-review gap).** Stimpacks and
+  medikits healed into the shared 200 clamp and were consumed even at full health; ammo
+  had no maximum at all. Now stimpack/medikit cap at 100 (maxhealth) and are *not* picked
+  up at full health (soulsphere/potion/bonus still go to 200), and ammo clamps to DOOM
+  maxammo (bullets 200, shells 50, rockets 50, cells 300). Regression test covers the
+  no-over-heal, no-pickup-at-full, and ammo-cap cases. (A pure-ammo box walked over while
+  already at max still vanishes — a smaller follow-up.) ([`src/things.cyr`](src/things.cyr))
+- **Player-vs-thing collision (audit gameplay-review gap).** `TF_SOLID` was defined but
+  never tested, so the player walked straight through monsters and barrels. Added
+  `player_check_things` (a radius test against every `TF_SOLID` active thing) and gated the
+  player's move + slide on a combined `player_move_ok` (walls AND solid things). Corpses
+  (`TF_CORPSE`), items (`TF_PICKUP`), and missiles (`TF_MISSILE`) are non-solid and stay
+  passable. Regression test covers the blocked/clear/corpse cases. (Monster-into-player is
+  a separate gap — chase movement still uses the wall-only `player_check_position`.)
+  ([`src/player.cyr`](src/player.cyr))
+- **Secret sectors count and credit correctly (audit gameplay-review gap).** The
+  max-secret scan read the sector *tag* (offset +48) == 9, but a DOOM secret is the sector
+  *special* (offset +40) == 9 — so `level_max_secrets` was almost always 0, and
+  `level_add_secret` had zero callers so nothing was ever credited. Now the scan reads the
+  special, and a new per-tick `level_check_secret(player_find_sector())` credits a secret
+  once when the player enters it (clearing the special to mark it found, matching DOOM's
+  `P_PlayerInSpecialSector`). Verified: E1M1 now reports `max_secrets=3` (was 0).
+  ([`src/level.cyr`](src/level.cyr), [`src/main.cyr`](src/main.cyr))
+- **Sky pans at the DOOM rate instead of looking glued to the view (audit F-R2, the one
+  cleanly-doable deferred render item).** The sky column mapped a full 360° turn to a
+  single texture wrap (~0.25 texel/angle-unit), ~5× slower than the geometry, so the sky
+  appeared stuck to the viewport. Now it maps the turn to FOUR wraps (DOOM's
+  ANGLETOSKYSHIFT, ~1 texel/angle-unit) and one screen-width to one wrap
+  (`view_angle*sky_w*4/ANG360 + col*sky_w/SCREEN_WIDTH`). `render_frame` **2.952 ms**
+  (indoor spawn byte-identical — the sky path isn't hit there). Visually verified on
+  E1M1's outdoor courtyard: the SKY1 mountain backdrop renders cleanly and scrolls with
+  the view as it turns. ([`src/render.cyr`](src/render.cyr))
+
 
 **Playability pass — acting on the July Fable full-project audit
 ([`docs/development/july-fable-audit.md`](docs/development/july-fable-audit.md)).** Works

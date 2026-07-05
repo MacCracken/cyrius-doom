@@ -5,8 +5,12 @@
 >
 > **Scope note**: this audit was requested as a health check *of the whole project*, oriented toward "get the game working properly." It intentionally does **not** re-derive items already tracked in [`roadmap.md`](roadmap.md) (visplane pool, global viewz, closed-sector clip inversion, FLAT_MAX/TEX_MAX truncation, native-scale midtex, sky vertical anchoring, animated muzzle flash, audio hardware-gated hardening). Everything below is either **new** or a **material correctness/severity escalation** of something the roadmap under-weights.
 
-> ### ✅ Resolution status — **v0.31.2** (2026-07-04)
-> The playability pass acted on this audit in 13 committable bites (see [`CHANGELOG.md`](../../CHANGELOG.md) `[0.31.2]`). **Fixed & verified**: F-G1, F-G2, F-G3, F-G4, F-G5, F-G6 (all Tier-1 gameplay); F-S1 (HIGH memory-safety, canary-verified); F-S2, F-S4 (leaks); F-S3, F-S5, F-S6 (parser/IO hardening); F-U1, F-U2, F-U3, F-U4, F-U5, F-U7, F-U9, F-U10 (UI/input/audio); F-R1 (sprite rotation). +27 regression asserts (WAD-free 63→90, full 101→128). **Deferred to [`roadmap.md`](roadmap.md)** (hardware / careful-calibration / AGNOS-QEMU): F-R2 (sky pan), F-R3 (one-sided pegging), F-R4 (masked dead field), F-R5 (24-bpp), F-R6 (palette-0), F-U6 (AGNOS scancode prefix), F-U8 (OUT_RATE re-verify). Individual finding entries below are left as-written (the historical audit record); consult the resolution list here for current status.
+> ### ✅ Resolution status — **v0.31.2 + v0.31.3** (2026-07-04)
+> **v0.31.2** (13 bites, [`CHANGELOG.md`](../../CHANGELOG.md) `[0.31.2]`) fixed & verified: F-G1–F-G6 (all Tier-1 gameplay); F-S1 (HIGH memory-safety, canary-verified); F-S2, F-S4 (leaks); F-S3, F-S5, F-S6 (hardening); F-U1–F-U5, F-U7, F-U9, F-U10 (UI/input/audio); F-R1 (sprite rotation).
+> **v0.31.3** ([`CHANGELOG.md`](../../CHANGELOG.md) `[0.31.3]`) added the gameplay review's MED vanilla-fidelity gaps (melee `p_random`; DOOM pickup rules — stimpack/medikit cap 100 + no-pickup-at-full, maxammo caps; player-vs-thing collision; secret sectors — special-not-tag + credit-on-entry) plus two now-doable deferred items: **F-R2** (sky 4-wraps-per-turn, visually verified) and **F-U8** (Linux audio 48000→44100 rate negotiation, math-verified; audible confirmation pending a user `--audio-test`).
+> **Regression asserts**: WAD-free 63 → **99**, full 101 → **137**.
+> **Still deferred → [`roadmap.md`](roadmap.md)**: F-R3 (pegging) + F-R4 (masked dead field) — entangled with native-scale-V; F-R6 (palette-0) — entangled with the masked-transparency rewrite (index-0 IS the transparency key); F-R5 (24-bpp) — needs non-32-bpp fb hardware; F-U6 (AGNOS scancode) — needs QEMU.
+> Individual finding entries below are the historical audit record; consult this resolution list for current status.
 
 ---
 

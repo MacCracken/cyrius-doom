@@ -295,6 +295,30 @@ fn player_check_linedef(nx, ny, radius, i): i64 {
     return 1;
 }
 
+# Solid-thing collision for the player. Returns 1 if the position (nx, ny) is
+# clear of solid things, 0 if a TF_SOLID thing (live monster, barrel) would
+# overlap the player's radius. Before this, TF_SOLID was defined but never
+# tested, so the player walked straight through monsters and barrels (audit
+# gameplay-review gap). Corpses (TF_CORPSE, no SOLID), items (TF_PICKUP), and
+# missiles (TF_MISSILE) are non-solid and correctly passable.
+fn player_check_things(nx, ny): i64 {
+    for (var i = 0; i < thing_count; i += 1) {
+        var flags = thing_flags(i);
+        if ((flags & TF_ACTIVE) == 0) { continue; }
+        if ((flags & TF_SOLID) == 0) { continue; }
+        var d = fixed_approx_dist(nx - thing_x(i), ny - thing_y(i));
+        if (d < thing_radius(i) + PLAYER_RADIUS) { return 0; }
+    }
+    return 1;
+}
+
+# Combined move test: walls (player_check_position) AND solid things.
+fn player_move_ok(nx, ny): i64 {
+    if (player_check_position(nx, ny) == 0) { return 0; }
+    if (player_check_things(nx, ny) == 0) { return 0; }
+    return 1;
+}
+
 # ================================================================
 # Damage with armor absorption
 # ================================================================
@@ -526,15 +550,15 @@ fn player_tick(): i64 {
         var nx = player_x + move_x;
         var ny = player_y + move_y;
 
-        if (player_check_position(nx, ny) == 1) {
+        if (player_move_ok(nx, ny) == 1) {
             player_x = nx;
             player_y = ny;
         } else {
-            # Wall sliding: try X-only, then Y-only.
-            if (move_x != 0 && player_check_position(player_x + move_x, player_y) == 1) {
+            # Wall/thing sliding: try X-only, then Y-only.
+            if (move_x != 0 && player_move_ok(player_x + move_x, player_y) == 1) {
                 player_x = player_x + move_x;
             } else {
-                if (move_y != 0 && player_check_position(player_x, player_y + move_y) == 1) {
+                if (move_y != 0 && player_move_ok(player_x, player_y + move_y) == 1) {
                     player_y = player_y + move_y;
                 }
             }

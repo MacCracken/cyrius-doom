@@ -14,13 +14,17 @@ enum SndConst {
 # at DOOM's native SND_DMX_RATE (11025) mono, then the OUTPUT stage converts to
 # whatever the hw node actually accepts.
 #
-# Real HDA codecs (verified on metal) reject S8/mono/11025 outright — the analog
-# jack here takes ONLY S16_LE / stereo / 44100. The raw hw node does no
-# conversion, so we do it: each mixed 11025 mono sample becomes OUT_UP (=4)
-# stereo S16 frames (44100/11025 == 4 exactly -> clean integer upsample; L==R).
-# One game tick = MIX_SRC_SAMPLES (315) mono in -> MIX_TICK_FRAMES (1260) stereo
-# frames out (44100/35, exact -> no drift). Pushed NON-BLOCKING so the 35Hz loop
-# never stalls on a WRITEI. Period/buffer/start are tunables.
+# Real HDA codecs (verified on metal) reject S8/mono/11025 outright, so the raw
+# hw node needs S16_LE / stereo and a codec-native rate. We request 48000 first
+# (the ALC897/HDA native rate, matching the hard-armed agnos stream) and fall
+# back to 44100 if a given node only advertises that — see audio_try_configure
+# (audit F-U8; supersedes the earlier "jack takes ONLY 44100" note, which was a
+# single-config observation). The raw node does no conversion, so the output
+# stage upsamples 11025 mono -> audio_out_rate stereo S16 via the drift-free
+# Bresenham accumulator in audio_mix_chunk (4.354x avg at 48000, exact 4x at
+# 44100; L==R). Pushed NON-BLOCKING so the 35Hz loop never stalls on a WRITEI.
+# NOTE: the agnos sys_snd_* path is hard-armed at 48000 and never runs this
+# Linux fallback (audio_out_rate stays OUT_RATE there).
 enum MixConst {
     MIX_CHANNELS    = 8;
     MIX_SRC_SAMPLES = 315;    # 11025 / 35 — mixed mono samples rendered per tick
@@ -85,8 +89,14 @@ var audio_chan_len  = 0;   # voice length in samples (0 = slot never used)
 var audio_chan_pos  = 0;   # next sample index; pos >= len means finished/free
 var audio_chan_lvol = 0;   # per-voice left-channel volume, 0..256 (256 = full)
 var audio_chan_rvol = 0;   # per-voice right-channel volume, 0..256
-var audio_mix_buf   = 0;   # OUT_BUF_BYTES scratch, S16_LE stereo @ OUT_RATE
-var audio_up_acc    = 0;   # Bresenham upsample accumulator (48000/11025), carried across ticks -> drift-free
+var audio_mix_buf   = 0;   # OUT_BUF_BYTES scratch, S16_LE stereo @ audio_out_rate
+var audio_up_acc    = 0;   # Bresenham upsample accumulator (audio_out_rate/11025), carried across ticks -> drift-free
+# Rate the OUTPUT device actually accepted. Defaults to OUT_RATE (48000, the HDA
+# codec native rate, and the hard-armed agnos stream rate). On Linux, audio_try_
+# configure falls it back to 44100 if a raw hw node rejects 48000 (audit F-U8);
+# the upsampler reads THIS, so pitch stays correct at whichever rate won. On the
+# common (48000-accepted) path this equals OUT_RATE, so the mix is byte-identical.
+var audio_out_rate  = OUT_RATE;
 
 # Open + configure a playback device for OUT_RATE/OUT_CH/OUT_BITS, returning the
 # configured vani handle (already through HW_PARAMS) or 0 if none works.
@@ -98,19 +108,33 @@ var audio_up_acc    = 0;   # Bresenham upsample accumulator (48000/11025), carri
 # playback-only; the headphone/line-out codec also has a mic/line-in). Only if no
 # analog candidate accepts the format do we fall back to the first playback node
 # that does (HDMI, virtual, etc.) so something still plays.
-fn audio_try_configure(card, device): i64 {
+# Try one rate on a freshly-opened handle (HW_PARAMS can be set only once per
+# open). Returns the configured dev, or 0. Sets audio_explicit_params.
+fn audio_try_rate(card, device, rate): i64 {
     var dev = audio_open_playback(card, device);
     if (dev == 0) { return 0; }
-    var r = audio_set_params_full(dev, OUT_RATE, OUT_CH, OUT_BITS, MIX_PERIOD, MIX_BUFFER);
+    var r = audio_set_params_full(dev, rate, OUT_CH, OUT_BITS, MIX_PERIOD, MIX_BUFFER);
     if (r == 0) {
         audio_explicit_params = 1;
     } else {
         # Explicit period/buffer rejected; let the kernel pick them.
-        r = audio_set_params(dev, OUT_RATE, OUT_CH, OUT_BITS);
+        r = audio_set_params(dev, rate, OUT_CH, OUT_BITS);
         if (r == 0) { audio_explicit_params = 0; }
     }
     if (r != 0) { audio_close(dev); return 0; }
     return dev;
+}
+
+fn audio_try_configure(card, device): i64 {
+    # Prefer 48000 (HDA/ALC897 native, matches the agnos stream). Fall back to
+    # 44100 if a raw hw node only advertises that (audit F-U8 — resolves the
+    # old header comment's "jack takes ONLY 44100" without hardcoding a rate).
+    # Whichever wins is recorded in audio_out_rate for the upsampler.
+    var dev = audio_try_rate(card, device, OUT_RATE);
+    if (dev != 0) { audio_out_rate = OUT_RATE; return dev; }
+    dev = audio_try_rate(card, device, 44100);
+    if (dev != 0) { audio_out_rate = 44100; return dev; }
+    return 0;
 }
 
 fn audio_open_best(): i64 {
@@ -473,12 +497,13 @@ fn audio_mix_chunk(): i64 {
             s16l = asr((accl << 8) * (sfx_volume + 1), 4) & 0xFFFF;
             s16r = asr((accr << 8) * (sfx_volume + 1), 4) & 0xFFFF;
         }
-        # Fractional nearest-neighbour upsample OUT_RATE/SND_DMX_RATE (48000/11025
-        # ~= 4.354x; == 4 exactly at 44100). Drift-free via the module-global
-        # accumulator carried across chunks: this source sample emits
-        # floor((acc+OUT_RATE)/SND_DMX_RATE) output frames; over 11025 samples the
-        # total is exactly OUT_RATE, so no long-run pitch drift.
-        audio_up_acc = audio_up_acc + OUT_RATE;
+        # Fractional nearest-neighbour upsample audio_out_rate/SND_DMX_RATE
+        # (48000/11025 ~= 4.354x; == 4 exactly at the 44100 fallback). Drift-free
+        # via the module-global accumulator carried across chunks: this source
+        # sample emits floor((acc+rate)/SND_DMX_RATE) output frames; over 11025
+        # samples the total is exactly `rate`, so no long-run pitch drift at
+        # EITHER output rate (audit F-U8).
+        audio_up_acc = audio_up_acc + audio_out_rate;
         var upn = audio_up_acc / SND_DMX_RATE;
         audio_up_acc = audio_up_acc - upn * SND_DMX_RATE;
         for (var up = 0; up < upn; up += 1) {

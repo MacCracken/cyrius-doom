@@ -853,7 +853,14 @@ fn render_seg(seg_idx): i64 {
                     var sky_h = load64(tex_table + sky_tex_idx * TEX_ENTRY_SIZE + 16);
                     if (sky_w > 0) {
                         if (sky_h > 0) {
-                            var sky_col = (view_angle * sky_w / ANG360 + col) % sky_w;
+                            # Sky maps the full 360° turn to FOUR texture wraps
+                            # (DOOM's ANGLETOSKYSHIFT), and one screen-width to one
+                            # wrap — so the sky scrolls at ~1 texel/angle-unit,
+                            # near the wall rate, instead of the old 1-wrap-per-turn
+                            # (0.25 texel/unit) that made it look glued to the view
+                            # (audit F-R2). Turn term = view_angle*sky_w*4/ANG360;
+                            # per-column term = col*sky_w/SCREEN_WIDTH (~0.8 texel/col).
+                            var sky_col = (view_angle * sky_w * 4 / ANG360 + col * sky_w / SCREEN_WIDTH) % sky_w;
                             if (sky_col < 0) { sky_col += sky_w; }
                             var sky_step = fixed_div(sky_h << 16, HALF_HEIGHT << 16);
                             render_draw_tex_column(col, ct, ceil_screen - 1, sky_tex_idx, sky_col, 0, sky_step, 0);

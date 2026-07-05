@@ -117,7 +117,7 @@ fn doom_main(): i64 {
     # non-identity arena top (0x3FC00000); no warm-up needed.
     alloc_init();
     args_init();
-    sakshi_info("cyrius-doom v0.31.2", 19);
+    sakshi_info("cyrius-doom v0.31.3", 19);
 
     # WAD path: argv[1] on Linux. On agnos, agnsh `run /bin/doom` passes no argv
     # beyond the path, so default to /DOOM1.WAD (staged on the ext2 root).
@@ -415,6 +415,8 @@ fn doom_main(): i64 {
         audio_tick();
         texture_animate();
         level_tick_time();
+        # Credit a secret if the player is standing in a secret sector.
+        level_check_secret(player_find_sector());
 
         # Check for level transition
         if (next_level_flag == 1) {

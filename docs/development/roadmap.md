@@ -31,17 +31,17 @@
 
 ### July Fable audit — deferred items (2026-07-04)
 
-The [July Fable full-project audit](july-fable-audit.md) drove the **v0.31.2 playability pass**: all Tier-1 gameplay bugs (F-G1–F-G6), the one HIGH memory-safety hole (F-S1), the leaks (F-S2/F-S4), parser/IO hardening (F-S3/F-S5/F-S6), the UI/menu/input fixes (F-U1–F-U5, F-U7, F-U9, F-U10), and sprite rotation (F-R1) shipped there. The following audit items were **deferred** — each needs hardware the dev box lacks, careful A/B calibration, or AGNOS QEMU (not gated this cut):
+The [July Fable full-project audit](july-fable-audit.md) drove the **v0.31.2 playability pass** (all Tier-1 gameplay F-G1–F-G6, HIGH memory-safety F-S1, leaks F-S2/F-S4, hardening F-S3/F-S5/F-S6, UI/input F-U1–F-U5/F-U7/F-U9/F-U10, sprite rotation F-R1) and the **v0.31.3 vanilla-fidelity + sky pass** (the gameplay-review MED gaps — melee p_random, pickup rules, player-vs-thing collision, secret sectors — plus **F-R2** sky pan and **F-U8** audio rate negotiation). Remaining deferred items each need hardware the dev box lacks, are entangled with a bigger render rewrite, or need AGNOS QEMU:
 
 | # | Item | Why deferred |
 |---|------|--------------|
-| **F-R2** | Sky pans ~4× too slow (1 texture wrap per turn vs vanilla's 4 via ANGLETOSKYSHIFT); the per-column rate also wants ~0.8 texel/col | Needs careful rate calibration + turning-based A/B; a half-right constant looks worse than the current glued-sky |
-| **F-R3** | One-sided walls ignore `ML_DONTPEGBOTTOM` (door-track textures slide with the door) | Scoped render change; wants a door-track A/B against a reference, and interacts with the native-scale-V item |
-| **F-R4** | Masked-seg `dont_peg_bottom` (+ `sd_xoff`) stored but never read in `render_masked_segs` | Cosmetic; wire it up with F-R3 or drop the dead store |
-| **F-R5** | 24-bpp / 8-bpp `/dev/fb0` panels handled by the 32-bpp blit (1-byte row overrun on 24-bpp) | Needs real non-32-bpp framebuffer hardware to verify |
-| **F-R6** | Palette index 0 treated as transparent everywhere (vanilla uses post gaps) | Risky engine-wide change; needs a PLAYPAL/art usage audit first |
-| **F-U6** | AGNOS `E0`/`E1` scancode prefix is a per-call local → split extended-key across polls sticks/misfires | AGNOS-only; needs QEMU verification (not gated this cut per the reproduce-first/QEMU-verify process) |
-| **F-U8** | `OUT_RATE` 48000 vs the header/state.md "jack takes only 44100" — comments now contradict | Needs a metal `--audio-test` re-run on the analog jack; do not change device negotiation blind |
+| ~~F-R2~~ | ~~Sky pans ~4× too slow~~ **SHIPPED 0.31.3** — 4-wraps-per-turn (ANGLETOSKYSHIFT), visually verified on E1M1's outdoor courtyard | — |
+| ~~F-U8~~ | ~~OUT_RATE 48000 vs "jack takes only 44100"~~ **SHIPPED 0.31.3** — 48000→44100 negotiated fallback, upsampler reads the negotiated rate (math-verified drift-free); stale comments reconciled. Audible confirmation on the jack pending a user `--audio-test` (the agent context can't open `/dev/snd`). | — |
+| **F-R3** | One-sided walls ignore `ML_DONTPEGBOTTOM` (door-track textures slide with the door) | **Entangled with native-scale-V (F06):** the current stretch-to-fit renderer always fills ceiling→floor exactly, so there is no meaningful peg-top-vs-bottom distinction to implement until native-scale V lands. |
+| **F-R4** | Masked-seg `dont_peg_bottom` (+ `sd_xoff`) stored but never read in `render_masked_segs` | Same native-scale entanglement as F-R3; cosmetic dead store — wire it up with F-R3 or drop it. |
+| **F-R5** | 24-bpp / 8-bpp `/dev/fb0` panels handled by the 32-bpp blit (1-byte row overrun on 24-bpp) | Needs real non-32-bpp framebuffer hardware to verify (this box is 32-bpp / the `--ppm`+bridge path doesn't use the fb blit). |
+| **F-R6** | Palette index 0 treated as transparent everywhere | **Entangled with the masked-transparency rewrite:** index-0 IS the engine's transparency key (`texture_get_column` clears unfilled column rows to 0, the blitters skip 0). Making 0 opaque would turn every masked grate into a solid black rectangle. Proper post-gap transparency needs per-column fill tracking (the v0.28.6 masked-clipping slot). |
+| **F-U6** | AGNOS `E0`/`E1` scancode prefix is a per-call local → split extended-key across polls sticks/misfires | AGNOS-only; needs QEMU verification (not gated this cut per the reproduce-first/QEMU-verify process). |
 
 The current arc is **v0.28.x — graphics** (review / hardening / parity / performance). The language-adoption arc (v0.27.x) is complete. v0.28.0 was anchored on a multi-agent audit of the render path (`docs/audit/2026-06-07-v0.28-graphics-hardening.md`); it shipped the memory-safety hardening + safe perf, and the parity items it surfaced now drive 0.28.5–0.28.11 (0.28.1–.4 were consumed by the AGNOS bring-up arc and the 0.28.4 gameplay-correctness cut). The O4-gated perf micro-pass and the deepest renderer-fidelity work remain at v0.29.x.
 

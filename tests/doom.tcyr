@@ -407,6 +407,57 @@ fn main() {
     assert_eq(sprite_calc_rotation(100 << 16, 0, ANG90), 3, "thing's left side toward viewer -> rot 3");
 
     # ============================================================
+    test_group("pickups: health cap + no-pickup-at-full + ammo cap");
+    # ============================================================
+    player_x = 0; player_y = 0;
+    # Stimpack on top of the player.
+    thing_count = 0;
+    var pk = things;
+    store64(pk, 0); store64(pk + 8, 0);
+    store64(pk + 32, TTYPE_STIMPACK); store64(pk + 104, TF_ACTIVE | TF_PICKUP);
+    thing_count = 1;
+    player_health = 100;
+    things_check_pickups();
+    assert_eq(player_health, 100, "stimpack does not over-heal past 100");
+    assert((thing_flags(0) & TF_ACTIVE) != 0, "stimpack NOT consumed at full health");
+    player_health = 95;
+    things_check_pickups();
+    assert_eq(player_health, 100, "stimpack heals to a max of 100 (95+10 clamped)");
+    assert((thing_flags(0) & TF_ACTIVE) == 0, "stimpack consumed once it healed");
+    # Medikit at 80 -> 100 (not 105, not 200).
+    thing_count = 0;
+    store64(pk, 0); store64(pk + 8, 0);
+    store64(pk + 32, TTYPE_MEDIKIT); store64(pk + 104, TF_ACTIVE | TF_PICKUP);
+    thing_count = 1;
+    player_health = 80;
+    things_check_pickups();
+    assert_eq(player_health, 100, "medikit heals to a max of 100 (80+25 clamped)");
+    # Ammo cap: clipbox (+50) over the 200 bullet ceiling clamps.
+    thing_count = 0;
+    store64(pk, 0); store64(pk + 8, 0);
+    store64(pk + 32, TTYPE_CLIPBOX); store64(pk + 104, TF_ACTIVE | TF_PICKUP);
+    thing_count = 1;
+    player_ammo_bullets = 195;
+    things_check_pickups();
+    assert_eq(player_ammo_bullets, 200, "bullets capped at 200 (195+50 clamped)");
+
+    # ============================================================
+    test_group("collision: player vs solid things");
+    # ============================================================
+    # A solid thing (radius 10) 30u east; player radius 16 -> combined 26u.
+    thing_count = 0;
+    var so = things;
+    store64(so, 30 << 16); store64(so + 8, 0);
+    store64(so + 80, 10 << 16);                    # radius
+    store64(so + 104, TF_ACTIVE | TF_SOLID);
+    thing_count = 1;
+    assert_eq(player_check_things(0, 0), 1, "30u away (>26) is clear of the solid thing");
+    assert_eq(player_check_things(20 << 16, 0), 0, "10u away (<26) is blocked by the solid thing");
+    # A corpse (TF_CORPSE, no SOLID) does not block.
+    store64(so + 104, TF_ACTIVE | TF_CORPSE);
+    assert_eq(player_check_things(20 << 16, 0), 1, "a corpse (non-solid) does not block");
+
+    # ============================================================
     # WAD tests require DOOM1.WAD — skip if not available
     # ============================================================
 

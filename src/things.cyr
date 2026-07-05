@@ -585,8 +585,11 @@ fn thing_ai_tick(idx): i64 {
         } else {
             # Deal damage to player
             if (dist < MONSTER_MELEE_RANGE) {
-                # Melee: 3-24 damage (approx with fixed range)
-                var dmg = 3 + (tick_get_count() % 22);
+                # DOOM imp/demon melee roll: (p_random % 8 + 1) * 3 = 3..24.
+                # Was `3 + tick_get_count() % 22` — a deterministic function of
+                # the game clock (the time-correlation class purged from player
+                # weapons in 0.30.0); p_random makes it a real random roll.
+                var dmg = (p_random() % 8 + 1) * 3;
                 player_take_damage(dmg);
             }
             # Return to chase
@@ -661,10 +664,9 @@ fn things_check_pickups(): i64 {
             case 2007: { player_ammo_bullets += 10; picked = 1; }  # CLIP
             case 2008: { player_ammo_shells += 4;  picked = 1; }   # SHELLS
             case 2010: { player_ammo_rockets += 1; picked = 1; }   # ROCKET
-            case 2011: { player_health += 10; picked = 1; }        # STIMPACK
-            case 2012: { player_health += 25; picked = 1; }        # MEDIKIT
-            case 2013: { player_health += 100; picked = 1; }       # SOULSPHERE
-            case 2014: { player_health += 1; picked = 1; }         # HEALTH_POTION
+            # STIMPACK/MEDIKIT handled outside the switch (cap 100, skip at full)
+            case 2013: { player_health += 100; picked = 1; }       # SOULSPHERE (max 200)
+            case 2014: { player_health += 1; picked = 1; }         # HEALTH_POTION (max 200)
             # Ammo boxes (2046-2049)
             case 2046: { player_ammo_rockets += 5; picked = 1; }
             case 2047: { player_ammo_cells += 20; picked = 1; }
@@ -672,14 +674,37 @@ fn things_check_pickups(): i64 {
             case 2049: { player_ammo_shells += 20; picked = 1; }
         }
 
+        # Stimpack/medikit heal to a MAX of 100 (DOOM maxhealth) and are NOT
+        # picked up at full health — previously they added into the shared 200
+        # clamp and were consumed even at 100 (audit pickup-rules gap).
+        if (ttype == TTYPE_STIMPACK && player_health < 100) {
+            player_health += 10;
+            if (player_health > 100) { player_health = 100; }
+            picked = 1;
+        }
+        if (ttype == TTYPE_MEDIKIT && player_health < 100) {
+            player_health += 25;
+            if (player_health > 100) { player_health = 100; }
+            picked = 1;
+        }
+
         # Armor has conditional logic (don't pick up if already at max tier)
         if (ttype == TTYPE_ARMOR_BONUS) { player_armor += 1; picked = 1; }
         if (ttype == TTYPE_ARMOR_GREEN && player_armor < 100) { player_armor = 100; picked = 1; }
         if (ttype == TTYPE_ARMOR_BLUE && player_armor < 200) { player_armor = 200; picked = 1; }
 
-        # Clamp health
+        # Clamp health + armor (soulsphere/potion/bonus can exceed 100, cap 200)
         if (player_health > 200) { player_health = 200; }
         if (player_armor > 200) { player_armor = 200; }
+
+        # DOOM maxammo (no backpack in shareware): bullets 200, shells 50,
+        # rockets 50, cells 300. Ammo was previously uncapped — you could
+        # stockpile without limit (audit pickup-rules gap). (A pure-ammo box
+        # picked up while already at max still vanishes — a smaller follow-up.)
+        if (player_ammo_bullets > 200) { player_ammo_bullets = 200; }
+        if (player_ammo_shells > 50) { player_ammo_shells = 50; }
+        if (player_ammo_rockets > 50) { player_ammo_rockets = 50; }
+        if (player_ammo_cells > 300) { player_ammo_cells = 300; }
 
         if (picked == 1) {
             # Remove item
