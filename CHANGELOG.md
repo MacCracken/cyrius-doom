@@ -5,6 +5,15 @@ All notable changes to cyrius-doom will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.31.5] - 2026-07-04
+
+### Changed
+
+- **Bumped vendored `vani-core` 0.9.5 → 0.9.9** (`[deps.vani]` tag + `lib/vani-core.cyr`).
+  vani-core 0.9.9 carries the agnos `audio_*` backend and is stdlib-folded (cyrius 6.4.3).
+  doom's own hand-rolled `sys_snd_*` agnos path is unchanged, so this is a version-currency
+  bump. Requires vani **0.9.9** tagged (the `[deps.vani]` git dep resolves against it).
+
 ## [0.31.4] - 2026-07-04
 
 **Music — DOOM MUS playback wired in alongside the SFX.** The engine had a PCM SFX mixer

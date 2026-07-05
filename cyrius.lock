@@ -1,8 +1,4 @@
-commit	b20393ab1e6ced9c1b4a9b2c34c35935120f00ca	vani	https://github.com/MacCracken/vani.git	0.9.5
 commit	6a125ef8d107df5d57857e054f391257eaa9ce7a	bsp	https://github.com/MacCracken/bsp.git	1.2.0
-commit	6f55be476600bb413a59d5da31288e5bdfff81c2	yukti	https://github.com/MacCracken/yukti.git	2.2.4
-commit	c610b178e61590b684c9158e45c5efc3aad66527	patra	https://github.com/MacCracken/patra.git	1.9.5
-commit	b3ee389719c97bebbe47310aab6ac423413a3d54	sakshi	https://github.com/MacCracken/sakshi.git	2.2.5
 d9f3b17ddbbe1bba48917c3a679807b01c39c4a1ce776efdbdfbb7a1680e86e4  lib/tagged.cyr
 b3bd7477cac799687a501e1849484d2c952fa4b4c394f3bcd318e181177c56e1  lib/net.cyr
 e84c090fd0f8532700d967ca3190837780a52a42630f4c6a0a4567ad9a49ab6b  lib/cffi.cyr
@@ -63,7 +59,7 @@ c183908dd1904c574ac20960428b4c4f63a36fb4d18a76895d5f34ca0cfc99ca  lib/tls_native
 dd083116c877c777f44f0d9e754dde477f6f42e99d5399fdc9e15ae4cf6fb06f  lib/tls_native_lowlevel.cyr
 25a5b8a14a4868dee2ba48f2c9e3c8066682b0fc80038a40a2d3a4ac7310e24b  lib/mabda.cyr
 861dedc4d9c07fcf1e431551e469890953a1b02e321354585742c1ed281a9fcf  lib/syscalls.cyr
-eb9480f693d0c4c7b83c4c880c0b46952248012b5fb5651ae2b814f3cc04b0ed  lib/vani-core.cyr
+69af7734b6f2b240f2c6b70cff1980a91fafa016b85f2852c26a24ddc9ebec40  lib/vani-core.cyr
 d496ea7657da7cd7275c4cccbcbc5422adc79e43d513a065fcda86bf23a87384  lib/thread_local.cyr
 bd63b07681c88830f82749303a490ed557df70999b60184a8f7b811f15735823  lib/tls_native_keysched.cyr
 be905dd172bb49be11a97c0c89444fabc790d9bd25a95957363e713f1e5eb309  lib/alloc_windows.cyr

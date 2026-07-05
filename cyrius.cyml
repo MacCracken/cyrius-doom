@@ -32,7 +32,7 @@ stdlib = ["string", "alloc", "fmt", "vec", "str", "io", "fs", "args", "syscalls"
 # as bsp below — git tag + dist single-file module.
 [deps.vani]
 git = "https://github.com/MacCracken/vani.git"
-tag = "0.9.5"
+tag = "0.9.9"
 modules = ["dist/vani-core.cyr"]
 
 # bsp — spatial geometry primitives. Consumed as a single-file vendor
