@@ -16,7 +16,7 @@ include "lib/bsp.cyr"
 # `vani_*` higher-level helpers (XRUN recovery, format negotiation,
 # latency presets, mixer, ring buffers) live in dist/vani.cyr; switch
 # `modules` in cyrius.cyml if a later sound rework wants them.
-include "lib/vani-core.cyr"
+include "vendor/vani-core.cyr"
 include "src/fixed.cyr"
 include "src/tables.cyr"
 include "src/wad.cyr"

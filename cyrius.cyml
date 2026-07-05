@@ -27,13 +27,14 @@ output = "build/doom"
 # 0.9.0 did internally to its own stdlib list.
 stdlib = ["string", "alloc", "fmt", "vec", "str", "io", "fs", "args", "syscalls", "hashmap", "tagged", "fnptr", "freelist", "process", "sakshi"]
 
-# vani — audio device I/O. Provides `audio_*` (lifted from cyrius
-# stdlib) plus the higher-level `vani_*` API. Same `[deps.X]` shape
-# as bsp below — git tag + dist single-file module.
-[deps.vani]
-git = "https://github.com/MacCracken/vani.git"
-tag = "0.9.9"
-modules = ["dist/vani-core.cyr"]
+# vani — audio_* PCM shim. VENDORED as a committed single file
+# (`vendor/vani-core.cyr`), NOT a git `[deps.vani]` dep: since vani's
+# 0.9.9 all-stdlib cut, resolving vani as a git dep drags in its whole
+# `[deps].stdlib` (yukti/patra/chrono/…) even though vani-core only needs
+# the shim → "dep vani requires 'yukti'" errors. Vendoring compiles just
+# the shim against doom's own stdlib list. Refresh: copy vani's
+# `dist/vani-core.cyr` on a vani release. Mirrors cyrius-polyomino/-bb.
+# (Provenance: vani 0.9.9.)
 
 # bsp — spatial geometry primitives. Consumed as a single-file vendor
 # (`lib/bsp.cyr`) produced from bsp's `dist/bsp.cyr` bundle. 1.1.1 added

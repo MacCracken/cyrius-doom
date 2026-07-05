@@ -9,10 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Bumped vendored `vani-core` 0.9.5 → 0.9.9** (`[deps.vani]` tag + `lib/vani-core.cyr`).
-  vani-core 0.9.9 carries the agnos `audio_*` backend and is stdlib-folded (cyrius 6.4.3).
-  doom's own hand-rolled `sys_snd_*` agnos path is unchanged, so this is a version-currency
-  bump. Requires vani **0.9.9** tagged (the `[deps.vani]` git dep resolves against it).
+- **`vani-core` 0.9.5 → 0.9.9, and converted from a git `[deps.vani]` dep to a
+  committed `vendor/vani-core.cyr`** (mirroring cyrius-polyomino / cyrius-bb).
+  Since vani's 0.9.9 all-stdlib cut, resolving vani as a git dep dragged in its
+  whole `[deps].stdlib` (yukti/patra/chrono/…) — `cyrius deps` failed with
+  "dep vani requires 'yukti'". Vendoring the single-file shim compiles only what
+  doom uses against doom's own stdlib list. vani-core 0.9.9 carries the agnos
+  `audio_*` backend; doom's hand-rolled `sys_snd_*` agnos path is unchanged, so
+  this is a version-currency bump. No release-ordering dependency (vendored copy,
+  refresh from vani's `dist/vani-core.cyr` on a vani release).
 
 ## [0.31.4] - 2026-07-04
 
