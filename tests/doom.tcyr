@@ -23,6 +23,9 @@ include "src/input.cyr"
 include "src/player.cyr"
 include "src/things.cyr"
 include "src/sprite.cyr"
+# music.cyr needs only SND_DMX_RATE from audio.cyr (not otherwise included here).
+enum MusRateStub { SND_DMX_RATE = 11025; }
+include "src/music.cyr"
 
 # Hermetic no-op stubs for cross-module side-effects the combat path calls.
 # sound.cyr / level.cyr / tick.cyr / doors.cyr aren't included here (they pull
@@ -456,6 +459,47 @@ fn main() {
     # A corpse (TF_CORPSE, no SOLID) does not block.
     store64(so + 104, TF_ACTIVE | TF_CORPSE);
     assert_eq(player_check_things(20 << 16, 0), 1, "a corpse (non-solid) does not block");
+
+    # ============================================================
+    test_group("music: MUS synth voice (note-on -> tonal output)");
+    # ============================================================
+    # Exercise the synth directly (sequencer frozen via a large music_wait) so
+    # it's WAD-free. A4 (MIDI 69, ~440 Hz) full volume on channel 0.
+    music_init();
+    music_playing = 1;
+    music_wait = 1000000;              # freeze the sequencer (no score needed)
+    music_note_on(0, 69, 127);
+    var mactive = 0;
+    for (var mv = 0; mv < MUSIC_VOICES; mv += 1) {
+        if (load64(mv_state + mv * 8) != MV_FREE) { mactive += 1; }
+    }
+    assert_eq(mactive, 1, "note-on creates exactly one voice");
+    var mpeak = 0; var mcross = 0; var mprev = 0;
+    for (var mi = 0; mi < 2000; mi += 1) {
+        var ms = music_render_sample();
+        var ma = ms;
+        if (ma < 0) { ma = 0 - ma; }
+        if (ma > mpeak) { mpeak = ma; }
+        if (mprev < 0) { if (ms >= 0) { mcross += 1; } }
+        else { if (ms < 0) { mcross += 1; } }
+        mprev = ms;
+    }
+    assert(mpeak > 0, "voice produces non-silent output");
+    assert(mpeak < 32768, "output stays within S16 (no clip)");
+    assert(mcross > 20, "output is tonal (A4 -> many zero-crossings)");
+    # note-off releases the voice; env ramps to free.
+    music_note_off(0, 69);
+    var mg = 0;
+    while (load64(mv_state) != MV_FREE && mg < 4000) { music_render_sample(); mg += 1; }
+    assert_eq(load64(mv_state), MV_FREE, "note-off releases the voice");
+    # Percussion (channel 15) is skipped in v1 — no voice.
+    music_silence();
+    music_note_on(15, 40, 127);
+    var mperc = 0;
+    for (var mp = 0; mp < MUSIC_VOICES; mp += 1) {
+        if (load64(mv_state + mp * 8) != MV_FREE) { mperc += 1; }
+    }
+    assert_eq(mperc, 0, "percussion channel 15 takes no voice (v1)");
 
     # ============================================================
     # WAD tests require DOOM1.WAD — skip if not available

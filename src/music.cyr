@@ -1,0 +1,362 @@
+# music.cyr -- DOOM MUS music playback
+# Usage: include "src/music.cyr" (after tables.cyr, wad.cyr, audio.cyr)
+#
+# Parses a MUS lump (Paul Radek's DMX format — magic "MUS\x1a"), sequences its
+# score at the 140 Hz MUS tick rate, and synthesises the active notes with a
+# simple polyphonic wavetable (the shared 1024-entry sine table + a click-free
+# linear envelope). The mono music sample is summed into the SFX mixer's output
+# stage (audio.cyr audio_mix_chunk), so it rides the same 11025->OUT_RATE
+# upsampler and ALSA / sys_snd_* sink as the SFX.
+#
+# This WIRES IN the music (correct notes/timing/melody through the real audio
+# path). It is NOT OPL2/GENMIDI FM-accurate — that (and MUS percussion, channel
+# 15, which v1 skips) is a documented follow-up. See
+# docs/audit/2026-07-04-mus-music.md for the format + the malicious-MUS security
+# surface every read below is bounded against.
+
+enum MusConst {
+    MUSIC_MAX     = 65536;   # MUS lumps are <=64 KB (all fields 16-bit)
+    MUSIC_VOICES  = 16;      # polyphony cap (LRU-steal like the SFX mixer)
+    MUS_TICK_RATE = 140;     # MUS score ticks per second
+    # Phase is 16.16 into the 1024-entry sine table; wrap mask = 1024*65536-1.
+    MUS_PHASE_MASK = 67108863;
+    # Envelope: attack 0->65536 over ~64 samples (~6 ms), release over ~512.
+    MUS_ATTACK_RATE  = 1024;
+    MUS_RELEASE_RATE = 128;
+    MUS_ENV_FULL     = 65536;
+    # Voice states
+    MV_FREE    = 0;
+    MV_ATTACK  = 1;
+    MV_SUSTAIN = 2;
+    MV_RELEASE = 3;
+    # Output amplitude shift: sine(±65536) * gain(env 0..256 * vol 0..127) >> 20
+    # ~= ±2000 per full voice, leaving headroom for polyphony + the SFX sum.
+    # (Tunable — the music_volume slider scales the final level 0..15.)
+    MUS_AMP_SHIFT = 20;
+}
+
+# --- score state ---
+var music_score = 0;         # heap copy of the MUS lump
+var music_len = 0;           # bytes copied
+var music_score_start = 0;   # offset of the first event
+var music_score_end = 0;     # one past the last score byte (bounded to the lump)
+var music_pos = 0;           # current read offset
+var music_playing = 0;
+var music_wait = 0;          # MUS ticks to wait before the next event batch
+var music_tick_acc = 0;      # sample->tick accumulator (adds MUS_TICK_RATE/sample)
+var music_volume = 8;        # master music volume 0..15 (0 = off)
+
+# --- synthesis tables/state ---
+var music_note_inc = 0;      # 128 entries: per-note 16.16 phase increment
+var music_chan_vol = 0;      # 16 entries: per-channel volume 0..127
+
+# --- voice arrays (MUSIC_VOICES each) ---
+var mv_state = 0;
+var mv_chan = 0;
+var mv_note = 0;
+var mv_phase = 0;
+var mv_inc = 0;
+var mv_vol = 0;              # combined note*chan volume, 0..127
+var mv_env = 0;             # 16.16 envelope level
+
+fn music_init(): i64 {
+    if (music_score != 0) { return 0; }   # idempotent
+    music_score = alloc(MUSIC_MAX);
+    music_chan_vol = alloc(16 * 8);
+    music_note_inc = alloc(128 * 8);
+    mv_state = alloc(MUSIC_VOICES * 8);
+    mv_chan  = alloc(MUSIC_VOICES * 8);
+    mv_note  = alloc(MUSIC_VOICES * 8);
+    mv_phase = alloc(MUSIC_VOICES * 8);
+    mv_inc   = alloc(MUSIC_VOICES * 8);
+    mv_vol   = alloc(MUSIC_VOICES * 8);
+    mv_env   = alloc(MUSIC_VOICES * 8);
+
+    # Build the per-note phase-increment table for the 1024-entry sine table at
+    # SND_DMX_RATE: inc = f_fixed * 1024 / 11025, where f_fixed is the note
+    # frequency in 16.16 Hz. f[0] (MIDI note 0) = 8.1758 Hz; each semitone up
+    # multiplies by 2^(1/12) (=1.059463, 16.16 = 69433).
+    var f = 535824;   # 8.1758 * 65536
+    for (var n = 0; n < 128; n += 1) {
+        store64(music_note_inc + n * 8, f * 1024 / SND_DMX_RATE);
+        f = fixed_mul(f, 69433);
+    }
+    for (var c = 0; c < 16; c += 1) { store64(music_chan_vol + c * 8, 127); }
+    for (var v = 0; v < MUSIC_VOICES; v += 1) { store64(mv_state + v * 8, MV_FREE); }
+    return 0;
+}
+
+# Silence every voice immediately (map change / stop).
+fn music_silence(): i64 {
+    for (var v = 0; v < MUSIC_VOICES; v += 1) { store64(mv_state + v * 8, MV_FREE); }
+    return 0;
+}
+
+# Load the MUS lump for a map name ("E1M1" -> "D_E1M1"). Validates the header
+# and clamps the score window to the lump; returns 0 on success, -1 on failure
+# (missing lump, too small, bad magic). On failure music stays stopped.
+fn music_load(mapname): i64 {
+    music_init();
+    music_playing = 0;
+    music_silence();
+
+    var nb[16];
+    store8(&nb, 68);           # 'D'
+    store8(&nb + 1, 95);       # '_'
+    var mlen = strlen(mapname);
+    if (mlen > 12) { mlen = 12; }
+    memcpy(&nb + 2, mapname, mlen);
+    store8(&nb + 2 + mlen, 0);
+
+    var lump = wad_find_lump(&nb);
+    if (lump < 0) { return -1; }
+    var sz = wad_lump_size(lump);
+    if (sz < 16) { return -1; }               # need the 16-byte header
+    if (sz > MUSIC_MAX) { sz = MUSIC_MAX; }
+    wad_read_lump_into(lump, music_score, sz);
+    music_len = sz;
+
+    # Magic "MUS\x1a"
+    if (load8(music_score) != 77) { return -1; }       # 'M'
+    if (load8(music_score + 1) != 85) { return -1; }   # 'U'
+    if (load8(music_score + 2) != 83) { return -1; }   # 'S'
+    if (load8(music_score + 3) != 26) { return -1; }   # 0x1a
+
+    var score_len = read_le16(music_score + 4);
+    var score_start = read_le16(music_score + 6);
+    # Clamp the score window to what the lump actually holds (audit §2).
+    if (score_start < 16) { score_start = 16; }
+    if (score_start > music_len) { score_start = music_len; }
+    var end = score_start + score_len;
+    if (end > music_len) { end = music_len; }
+    music_score_start = score_start;
+    music_score_end = end;
+    music_pos = score_start;
+    music_wait = 0;
+    music_tick_acc = 0;
+    for (var c = 0; c < 16; c += 1) { store64(music_chan_vol + c * 8, 127); }
+    return 0;
+}
+
+fn music_start(): i64 {
+    if (music_score_end <= music_score_start) { return 0; }   # nothing to play
+    music_pos = music_score_start;
+    music_wait = 0;
+    music_tick_acc = 0;
+    music_silence();
+    music_playing = 1;
+    return 0;
+}
+
+fn music_stop(): i64 {
+    music_playing = 0;
+    music_silence();
+    return 0;
+}
+
+# Assign a voice for (chan, note, vol). Skips percussion (channel 15 — no drum
+# kit in v1). Prefers a free voice, else steals the one nearest release/lowest.
+fn music_note_on(chan, note, vol): i64 {
+    if (chan == 15) { return 0; }             # percussion: skipped (follow-up)
+    if (note < 0) { note = 0; }
+    if (note > 127) { note = 127; }
+    var cv = load64(music_chan_vol + chan * 8);
+    var combined = asr(vol * cv, 7);           # note*chan volume, 0..127
+    if (combined > 127) { combined = 127; }
+
+    var slot = -1;
+    for (var v = 0; v < MUSIC_VOICES; v += 1) {
+        if (load64(mv_state + v * 8) == MV_FREE) { slot = v; }
+    }
+    if (slot < 0) {
+        # Steal the lowest-env voice (nearest to done).
+        var best = 0; var bestenv = load64(mv_env);
+        for (var v2 = 1; v2 < MUSIC_VOICES; v2 += 1) {
+            var e = load64(mv_env + v2 * 8);
+            if (e < bestenv) { bestenv = e; best = v2; }
+        }
+        slot = best;
+    }
+    store64(mv_state + slot * 8, MV_ATTACK);
+    store64(mv_chan + slot * 8, chan);
+    store64(mv_note + slot * 8, note);
+    store64(mv_phase + slot * 8, 0);
+    store64(mv_inc + slot * 8, load64(music_note_inc + note * 8));
+    store64(mv_vol + slot * 8, combined);
+    store64(mv_env + slot * 8, 0);
+    return 0;
+}
+
+# Release the voice(s) matching (chan, note) — start their release ramp.
+fn music_note_off(chan, note): i64 {
+    for (var v = 0; v < MUSIC_VOICES; v += 1) {
+        var st = load64(mv_state + v * 8);
+        if (st == MV_ATTACK || st == MV_SUSTAIN) {
+            if (load64(mv_chan + v * 8) == chan) {
+                if (load64(mv_note + v * 8) == note) {
+                    store64(mv_state + v * 8, MV_RELEASE);
+                }
+            }
+        }
+    }
+    return 0;
+}
+
+# Release every active voice on a channel (system "all notes off").
+fn music_all_off(chan): i64 {
+    for (var v = 0; v < MUSIC_VOICES; v += 1) {
+        if (load64(mv_chan + v * 8) == chan) {
+            var st = load64(mv_state + v * 8);
+            if (st == MV_ATTACK || st == MV_SUSTAIN) {
+                store64(mv_state + v * 8, MV_RELEASE);
+            }
+        }
+    }
+    return 0;
+}
+
+# Read a MUS variable-length delay from music_pos (7 bits/byte, high bit =
+# continue). Bounded by the score end AND a small guard (audit §4).
+fn music_read_varlen(): i64 {
+    var delay = 0;
+    var guard = 0;
+    while (guard < 8) {
+        guard += 1;
+        if (music_pos >= music_score_end) { return delay; }
+        var b = load8(music_score + music_pos);
+        music_pos += 1;
+        delay = delay * 128 + (b & 127);
+        if ((b & 128) == 0) { return delay; }
+    }
+    return delay;
+}
+
+# Process one event batch (events up to and including the next `last`-flagged
+# one, which sets music_wait). Every read is bounded to music_score_end; hitting
+# the end loops the track (DOOM loops music). Iteration-guarded (audit §7).
+fn music_process_batch(): i64 {
+    var guard = 0;
+    while (guard < 512) {
+        guard += 1;
+        if (music_pos >= music_score_end) {
+            music_pos = music_score_start;   # loop
+            music_wait = 0;
+            return 0;
+        }
+        var b = load8(music_score + music_pos);
+        music_pos += 1;
+        var last = asr(b, 7) & 1;
+        var typ = asr(b, 4) & 7;
+        var chan = b & 15;
+
+        if (typ == 0) {                       # release note
+            if (music_pos >= music_score_end) { return 0; }
+            var rn = load8(music_score + music_pos) & 127;
+            music_pos += 1;
+            music_note_off(chan, rn);
+        }
+        if (typ == 1) {                       # play note (+ optional volume)
+            if (music_pos >= music_score_end) { return 0; }
+            var nb = load8(music_score + music_pos);
+            music_pos += 1;
+            var note = nb & 127;
+            var vol = 127;
+            if ((nb & 128) != 0) {
+                if (music_pos >= music_score_end) { return 0; }
+                vol = load8(music_score + music_pos) & 127;
+                music_pos += 1;
+            }
+            music_note_on(chan, note, vol);
+        }
+        if (typ == 2) {                       # pitch bend (ignored in v1)
+            if (music_pos >= music_score_end) { return 0; }
+            music_pos += 1;
+        }
+        if (typ == 3) {                       # system event
+            if (music_pos >= music_score_end) { return 0; }
+            var sysc = load8(music_score + music_pos) & 127;
+            music_pos += 1;
+            if (sysc == 11) { music_all_off(chan); }   # all notes off
+        }
+        if (typ == 4) {                       # change controller
+            if (music_pos + 1 >= music_score_end) { return 0; }
+            var ctl = load8(music_score + music_pos) & 127;
+            var val = load8(music_score + music_pos + 1) & 127;
+            music_pos += 2;
+            if (ctl == 3) { store64(music_chan_vol + chan * 8, val); }   # channel volume
+        }
+        if (typ == 6) {                       # score end -> loop
+            music_pos = music_score_start;
+            music_wait = 0;
+            return 0;
+        }
+        # types 5 and 7 carry no operands.
+
+        if (last == 1) {
+            music_wait = music_read_varlen();
+            return 0;
+        }
+    }
+    return 0;
+}
+
+# Render one 11025 Hz source sample of music (mono, signed). Advances the MUS
+# clock (140/11025 tick per sample) and processes elapsed ticks, then sums the
+# active voices with their envelopes. Returns 0 quickly when not playing.
+fn music_render_sample(): i64 {
+    if (music_playing == 0) { return 0; }
+
+    # Advance the score clock.
+    music_tick_acc += MUS_TICK_RATE;
+    while (music_tick_acc >= SND_DMX_RATE) {
+        music_tick_acc -= SND_DMX_RATE;
+        if (music_wait > 0) {
+            music_wait -= 1;
+        }
+        # Process batches while the wait is elapsed (handles delay-0 chains);
+        # guarded so a pathological all-delay-0 score can't spin forever.
+        var bguard = 0;
+        while (music_wait == 0 && bguard < 64) {
+            bguard += 1;
+            music_process_batch();
+            if (music_playing == 0) { bguard = 64; }
+        }
+    }
+
+    # Sum active voices.
+    var mix = 0;
+    for (var v = 0; v < MUSIC_VOICES; v += 1) {
+        var st = load64(mv_state + v * 8);
+        if (st != MV_FREE) {
+            var env = load64(mv_env + v * 8);
+            # Advance envelope.
+            if (st == MV_ATTACK) {
+                env += MUS_ATTACK_RATE;
+                if (env >= MUS_ENV_FULL) { env = MUS_ENV_FULL; store64(mv_state + v * 8, MV_SUSTAIN); }
+                store64(mv_env + v * 8, env);
+            } else {
+                if (st == MV_RELEASE) {
+                    env -= MUS_RELEASE_RATE;
+                    if (env <= 0) { env = 0; store64(mv_state + v * 8, MV_FREE); }
+                    store64(mv_env + v * 8, env);
+                }
+            }
+            # Advance phase, sample the sine table.
+            var ph = (load64(mv_phase + v * 8) + load64(mv_inc + v * 8)) & MUS_PHASE_MASK;
+            store64(mv_phase + v * 8, ph);
+            var idx = asr(ph, 16);
+            if (idx < 0) { idx = 0; }
+            if (idx > 1023) { idx = 1023; }
+            var sv = load64(sine_table + idx * 8);
+            # gain = env(0..65536 -> 0..256) * vol(0..127)
+            var gain = asr(env, 8) * load64(mv_vol + v * 8);
+            mix += asr(sv * gain, MUS_AMP_SHIFT);
+        }
+    }
+    return mix;
+}
+
+fn music_shutdown(): i64 {
+    music_stop();
+    return 0;
+}

@@ -162,6 +162,21 @@ Re-targeted from the original 0.27.0 thesis. Cyrius's compiler-optimization trac
 
 ---
 
+## Music (v0.31.4 wired the base; fidelity follow-ups)
+
+`src/music.cyr` (v0.31.4) parses/sequences the MUS lumps and plays them through a simple
+sine+envelope synth. Follow-ups toward fidelity:
+
+| # | Item | Detail |
+|---|------|--------|
+| 1 | **OPL2 FM synthesis via `GENMIDI`** | Real DOOM timbre. The IWAD's `GENMIDI` lump (11908 B) maps GM instruments to 2-operator OPL2 patches; needs an OPL2 emulator (operator FM + envelope generators + feedback) + GENMIDI parsing. Large module — the biggest fidelity win. |
+| 2 | **MUS percussion (channel 15)** | v1 skips the drum channel. Map percussion notes to a noise/drum voice (or the OPL rhythm mode once #1 lands). E1M1 is drum-driven, so this is high-impact for feel. |
+| 3 | **Pitch bend + fine controllers** | v1 ignores pitch-bend (type 2) and most controllers (keeps volume + all-notes-off). Apply bend to the voice phase; honour expression/pan. |
+| 4 | **Per-map + intermission/victory tracks** | `D_INTER` (intermission), `D_VICTOR` (E1M8 end) tracks — wire them to the intermission/ending screens (map + title `D_INTRO` already wired). |
+| 5 | **Amplitude/level tuning** | `MUS_AMP_SHIFT` + `music_volume` default set blind (no audio on the dev box); tune on a real jack via `--music-test`. |
+
+---
+
 ## v1.0.0 — Ship
 
 | # | Item | Status | Detail |

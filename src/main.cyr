@@ -32,6 +32,7 @@ include "src/things.cyr"
 include "src/status.cyr"
 include "src/sound.cyr"
 include "src/audio.cyr"
+include "src/music.cyr"
 include "src/doors.cyr"
 include "src/automap.cyr"
 include "src/level.cyr"
@@ -72,6 +73,11 @@ fn load_map(reset_player): i64 {
     things_spawn_from_map();
     audio_init();
     audio_preload();
+    # Load + start this map's MUS track (D_<name>). music_load returns -1 if the
+    # lump is missing/invalid; only start on success so a bad track is silent,
+    # not a crash.
+    if (music_load(name) == 0) { music_start(); }
+    else { music_stop(); }
     doors_init();
     automap_active = 0;
     level_reset_stats();
@@ -117,7 +123,7 @@ fn doom_main(): i64 {
     # non-identity arena top (0x3FC00000); no warm-up needed.
     alloc_init();
     args_init();
-    sakshi_info("cyrius-doom v0.31.3", 19);
+    sakshi_info("cyrius-doom v0.31.4", 19);
 
     # WAD path: argv[1] on Linux. On agnos, agnsh `run /bin/doom` passes no argv
     # beyond the path, so default to /DOOM1.WAD (staged on the ext2 root).
@@ -171,12 +177,14 @@ fn doom_main(): i64 {
     var ppm_mode = 0;
     var ppm_menu = 0;
     var audio_test = 0;
+    var music_test = 0;
     var direct_map = 0;
     for (var ai = 2; ai < argc(); ai += 1) {
         var arg = argv(ai);
         if (streq(arg, "--ppm") == 1) { ppm_mode = 1; }
         if (streq(arg, "--ppm-menu") == 1) { ppm_menu = 1; }
         if (streq(arg, "--audio-test") == 1) { audio_test = 1; }
+        if (streq(arg, "--music-test") == 1) { music_test = 1; }
         # Direct-map arg "E<ep>M<mp>" (e.g. E1M3). Require the full 4-char shape
         # before indexing — strlen >= 4 keeps arg+1/arg+2/arg+3 in-bounds, and
         # the 'M' at index 2 rejects malformed args like "E" or "E1X3" (F-U10).
@@ -237,6 +245,8 @@ fn doom_main(): i64 {
         menu_draw_lump("M_SVOL", 60, 38);
         menu_draw_lump("M_SFXVOL", 80, 64);
         menu_draw_thermo(80, 80, sfx_volume);
+        menu_draw_lump("M_MUSVOL", 80, 96);
+        menu_draw_thermo(80, 112, music_volume);
         menu_draw_lump("M_SKULL1", 64, 61);
         framebuf_write_ppm("/tmp/doom_sound.ppm");
         sakshi_info("wrote /tmp/doom_sound.ppm", 25);
@@ -279,6 +289,27 @@ fn doom_main(): i64 {
             at_t += 1;
             tick_wait();
         }
+        audio_shutdown();
+        wad_close();
+        doom_exit(0);
+    }
+
+    # Music self-test: play the current map's MUS track through the mixer for
+    # ~15 s, then exit. load_map() above already ran music_load()+music_start()
+    # for the default map (E1M1). Confirms the MUS sequencer + synth reach the
+    # audio device. No framebuffer needed.
+    if (music_test == 1) {
+        sakshi_info("music test ~15s", 15);
+        tick_init();
+        var mt_total = 35 * 15;
+        var mt_t = 0;
+        while (mt_t < mt_total) {
+            tick_begin();
+            audio_tick();
+            mt_t += 1;
+            tick_wait();
+        }
+        music_shutdown();
         audio_shutdown();
         wad_close();
         doom_exit(0);
@@ -329,14 +360,19 @@ fn doom_main(): i64 {
     tick_init();
 
     if (direct_map == 0) {
+        # Title/menu music (D_INTRO), replacing the map track load_map started.
+        if (music_load("INTRO") == 0) { music_start(); }
         var mr = menu_run();
         if (mr < 0) {
             # User quit from menu
             input_shutdown();
+            music_shutdown();
             wad_close();
             sakshi_info("quit from menu", 14);
             doom_exit(0);
         }
+        # Back to the current map's own MUS track now that play is starting.
+        if (music_load(level_get_name()) == 0) { music_start(); } else { music_stop(); }
         # The initial load_map above spawned this first level's things at the
         # DEFAULT skill — the menu (which sets game_skill) only ran just now. Re-
         # spawn from the still-loaded map data so the CHOSEN difficulty applies to
@@ -447,6 +483,7 @@ fn doom_main(): i64 {
     # Shutdown
     input_shutdown();
     sound_shutdown();
+    music_shutdown();
     audio_shutdown();
     framebuf_write_ppm("/tmp/doom_final.ppm");
     wad_close();

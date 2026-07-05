@@ -1,0 +1,77 @@
+# Fuzz: MUS music sequencer + synth on malicious/corrupt score data.
+# Feeds random bytes as the score with fuzzed (but in-alloc) score windows and
+# renders samples — the sequencer's bounds checks (music_process_batch,
+# music_read_varlen) + iteration guards must never OOB-read or hang. See
+# docs/audit/2026-07-04-mus-music.md.
+
+include "lib/string.cyr"
+include "lib/alloc.cyr"
+include "lib/vec.cyr"
+include "lib/str.cyr"
+include "lib/fmt.cyr"
+include "lib/io.cyr"
+include "lib/args.cyr"
+include "lib/sakshi.cyr"
+
+include "src/fixed.cyr"
+include "src/tables.cyr"
+include "src/wad.cyr"
+enum MusRateStub { SND_DMX_RATE = 11025; }
+include "src/music.cyr"
+
+var _fz_state = 91117;
+fn _fz_rand() {
+    _fz_state = _fz_state * 6364136223846793005 + 1442695040888963407;
+    return _fz_state;
+}
+fn _fz_u(lim): i64 {
+    var r = _fz_rand();
+    if (r < 0) { r = 0 - r; }
+    if (lim <= 0) { return 0; }
+    return r % lim;
+}
+
+fn main() {
+    alloc_init();
+    args_init();
+    tables_init();
+    music_init();
+
+    var iters = 1000;
+    if (argc() > 1) { iters = str_to_int(str_from(argv(1))); }
+
+    # Seed the score buffer with random bytes once.
+    for (var j = 0; j < MUSIC_MAX; j += 8) { store64(music_score + j, _fz_rand()); }
+
+    for (var i = 0; i < iters; i += 1) {
+        # Mutate a handful of bytes each iteration for content variety.
+        for (var m = 0; m < 32; m += 1) {
+            store8(music_score + _fz_u(MUSIC_MAX), _fz_u(256));
+        }
+        # Fuzzed score window — kept inside the alloc (music_load's own clamp
+        # guarantees this at runtime; here we exercise the sequencer directly).
+        var sz = 16 + _fz_u(MUSIC_MAX - 16);
+        var start = _fz_u(sz);
+        var span = _fz_u(sz - start + 1);
+        var end = start + span;
+        if (end > sz) { end = sz; }
+        music_len = sz;
+        music_score_start = start;
+        music_score_end = end;
+        music_pos = start;
+        music_wait = 0;
+        music_playing = 1;
+        music_silence();
+
+        # Render ~600 source samples — drives the sequencer over the garbage
+        # score plus the synth. Must not crash, OOB, or hang.
+        for (var k = 0; k < 600; k += 1) { music_render_sample(); }
+    }
+
+    var ob[64]; var oa = vec_new();
+    vec_push(oa, iters);
+    var on = fmt_sprintf(&ob, 64, "fuzz_mus: %d iterations OK", oa);
+    file_write(1, &ob, on); file_write(1, "\n", 1);
+    return 0;
+}
+main();

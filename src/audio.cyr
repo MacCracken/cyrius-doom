@@ -494,9 +494,28 @@ fn audio_mix_chunk(): i64 {
         var s16l = 0;
         var s16r = 0;
         if (sfx_volume > 0) {
-            s16l = asr((accl << 8) * (sfx_volume + 1), 4) & 0xFFFF;
-            s16r = asr((accr << 8) * (sfx_volume + 1), 4) & 0xFFFF;
+            s16l = asr((accl << 8) * (sfx_volume + 1), 4);
+            s16r = asr((accr << 8) * (sfx_volume + 1), 4);
         }
+        # Music: one mono source sample from the MUS synth, summed into the same
+        # output at its own master volume (music_volume). Called exactly once per
+        # source sample — it advances the MUS clock + voice phases — so it runs
+        # even at volume 0 (clock keeps time); only the ADD is gated. When no
+        # music is playing music_render_sample returns 0, so the SFX-only mix is
+        # byte-identical to before.
+        var msamp = music_render_sample();
+        if (music_volume > 0) {
+            var mscaled = asr(msamp * (music_volume + 1), 4);
+            s16l = s16l + mscaled;
+            s16r = s16r + mscaled;
+        }
+        # Clamp the combined SFX+music mix to signed 16-bit, then mask for store16.
+        if (s16l > 32767) { s16l = 32767; }
+        if (s16l < 0 - 32768) { s16l = 0 - 32768; }
+        if (s16r > 32767) { s16r = 32767; }
+        if (s16r < 0 - 32768) { s16r = 0 - 32768; }
+        s16l = s16l & 0xFFFF;
+        s16r = s16r & 0xFFFF;
         # Fractional nearest-neighbour upsample audio_out_rate/SND_DMX_RATE
         # (48000/11025 ~= 4.354x; == 4 exactly at the 44100 fallback). Drift-free
         # via the module-global accumulator carried across chunks: this source

@@ -5,6 +5,51 @@ All notable changes to cyrius-doom will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.31.4] - 2026-07-04
+
+**Music — DOOM MUS playback wired in alongside the SFX.** The engine had a PCM SFX mixer
+but no music at all. This adds a `music.cyr` module that parses the map's MUS lump
+(`D_<map>`, Paul Radek's DMX format), sequences it at the 140 Hz MUS tick rate, and
+synthesises the notes into the existing audio output — so the real DOOM soundtrack plays
+through the same ALSA (Linux) / `sys_snd_*` (agnos) path as the SFX. Verified structurally
+(the synth reproduces E1M1's actual pitches — E2/D2/C3/D3, the "At Doom's Gate" bass riff —
+non-clipping) and fuzzed against malicious scores; **audible confirmation on the jack is a
+user `--music-test`** (the agent context can't open `/dev/snd`). Research + the
+malicious-MUS security surface: [`docs/audit/2026-07-04-mus-music.md`](docs/audit/2026-07-04-mus-music.md).
+
+### Added
+
+- **`src/music.cyr` — MUS sequencer + polyphonic wavetable synth.** Parses the MUS header
+  (bounds-checked: magic, `scoreStart`/`scoreLen` clamped to the lump), sequences the score
+  (play/release/controller/system/pitch-bend/end events + variable-length delays, every
+  read bounded to the score end with iteration guards), and synthesises up to 16 voices
+  from the shared 1024-entry sine table with a click-free linear envelope and a note→phase
+  table (equal-temperament, built at init). Channel volume (controller 3) and all-notes-off
+  (system 11) are honoured; percussion (channel 15) is skipped in v1.
+- **Mixer integration** — `music_render_sample()` is summed into `audio_mix_chunk`'s output
+  stage at its own `music_volume` (0–15), riding the same 11025→`audio_out_rate` upsampler
+  as the SFX. When no music plays it returns 0, so the SFX-only mix is byte-identical.
+- **Wiring** — `load_map` loads + starts the map's `D_<map>` track; the title/menu plays
+  `D_INTRO`; `music_shutdown` at exit. Music loops on score-end (like DOOM).
+- **Menu music-volume slider** — the Options→Sound screen now shows **both** an Sfx Volume
+  and a Music Volume thermometer (cursor-selectable, live preview); the volume comment in
+  `menu.cyr` about "no music subsystem yet" is resolved.
+- **`--music-test`** — plays the current map's track through the mixer for ~15 s (headless
+  audible check, mirroring `--audio-test`).
+- **`fuzz/fuzz_mus.cyr`** — fuzzes the sequencer on random/corrupt score data (1000 iters
+  clean); the parse bounds + guards never OOB-read or hang.
+- Regression test `music: MUS synth voice` (note-on → one tonal, non-clipping voice;
+  note-off releases; percussion skipped). WAD-free suite 99 → **105**, full 137 → **143**.
+
+### Notes
+
+- **Not FM-accurate yet.** Real DOOM used OPL2 FM synthesis driven by the `GENMIDI` lump;
+  v1 is a simple sine+envelope synth (correct notes/timing, different timbre). OPL2/GENMIDI
+  FM + MUS percussion are documented follow-ups on the roadmap.
+- **Toolchain drift** — the local `cycc` auto-updated to **6.4.3** while `cyrius.cyml` pins
+  6.4.2; 0.31.4 was built/tested/fuzzed on 6.4.3 (deps still verify 100/0, so the lock is
+  unaffected). Bumping the pin is a separate toolchain decision (its own QEMU re-verify).
+
 ## [0.31.3] - 2026-07-04
 
 **Vanilla-fidelity gameplay pass + sky-pan fix.** Follow-on to the 0.31.2 July Fable

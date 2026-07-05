@@ -86,6 +86,7 @@ src/
   status.cyr      — HUD: bitmap font, health/ammo/armor/face/keys
   sound.cyr       — PC speaker tone queue via ioctl
   audio.cyr       — WAD SFX loading + ALSA playback via vani
+  music.cyr       — MUS (D_*) parser + sequencer + wavetable synth, mixed into audio out
   doors.cyr       — door / lift sector animation, tagged sectors, walk triggers
   automap.cyr     — 2D overhead map (TAB toggle, Bresenham lines)
   level.cyr       — episode/map tracking, exit lines, level stats
