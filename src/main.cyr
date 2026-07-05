@@ -105,7 +105,7 @@ fn doom_main(): i64 {
     # non-identity arena top (0x3FC00000); no warm-up needed.
     alloc_init();
     args_init();
-    sakshi_info("cyrius-doom v0.31.0", 19);
+    sakshi_info("cyrius-doom v0.31.1", 19);
 
     # WAD path: argv[1] on Linux. On agnos, agnsh `run /bin/doom` passes no argv
     # beyond the path, so default to /DOOM1.WAD (staged on the ext2 root).
@@ -250,56 +250,20 @@ fn doom_main(): i64 {
         var ry = player_y + fixed_mul(fixed_sin(player_angle + 768), pan_d);
         var at_total = 35 * 8;
         var at_t = 0;
-        # NOTE: the per-SFX sakshi_info logs were REMOVED from this loop. On iron each
-        # log renders to the framebuffer console (a full-screen SCROLL = slow) at the
-        # exact SFX-onset tick, stalling the game loop enough to underrun the ring ->
-        # a per-SFX echo/dropout. The real game never logs per-frame, so those logs
-        # made --audio-test a worse case than gameplay. Triggers stay; logging is gone.
         while (at_t < at_total) {
             tick_begin();
-            if (at_t == 0)   { audio_play_name("DSPISTOL"); }
-            if (at_t == 35)  { audio_play_name("DSSHOTGN"); }
-            if (at_t == 70)  { audio_play_name("DSDOROPN"); }
-            if (at_t == 105) { audio_play_name("DSITEMUP"); }
-            if (at_t == 140) { audio_play_name("DSPLPAIN"); }
-            if (at_t == 175) { audio_play_name("DSBAREXP"); }
-            if (at_t == 210) { audio_play_at("DSPISTOL", lx, ly); }
-            if (at_t == 245) { audio_play_at("DSPISTOL", rx, ry); }
+            if (at_t == 0)   { sakshi_info("sfx: pistol", 11); audio_play_name("DSPISTOL"); }
+            if (at_t == 35)  { sakshi_info("sfx: shotgun", 12); audio_play_name("DSSHOTGN"); }
+            if (at_t == 70)  { sakshi_info("sfx: door", 9); audio_play_name("DSDOROPN"); }
+            if (at_t == 105) { sakshi_info("sfx: pickup", 11); audio_play_name("DSITEMUP"); }
+            if (at_t == 140) { sakshi_info("sfx: pain", 9); audio_play_name("DSPLPAIN"); }
+            if (at_t == 175) { sakshi_info("sfx: explosion", 14); audio_play_name("DSBAREXP"); }
+            if (at_t == 210) { sakshi_info("sfx: LEFT (pan)", 15); audio_play_at("DSPISTOL", lx, ly); }
+            if (at_t == 245) { sakshi_info("sfx: RIGHT (pan)", 16); audio_play_at("DSPISTOL", rx, ry); }
             audio_tick();
             at_t += 1;
             tick_wait();
         }
-        #ifdef CYRIUS_TARGET_AGNOS
-        # FB telemetry (archaemenid has no serial): a FILL-vs-TICK graph. One white
-        # vertical bar per tick, height = the ring fill at the START of that tick
-        # (pre-refill = worst point) as a fraction of the 16384-frame ring. A red
-        # horizontal reference line marks the TARGET depth doom refills to.
-        # READ THE SHAPE:
-        #   bars hug/reach the red line, flat        => ring HELD -> if echo, snd_avail/LPIB LIES
-        #                                                (real position reg wrong) = DMA-position-buffer fix.
-        #   bars flat but LOW (well under red)        => loop under-fills every tick (LPIB under-reports).
-        #   bars periodically DIP to the baseline     => intermittent STALLS drain the ring (spacing = cause;
-        #                                                every ~8th bar = the per-SFX sakshi/render stall).
-        #   bars sawtooth just below the red line     => normal fill/drain (healthy).
-        var g_base = 155;                                        # baseline y (fill=0)
-        var g_h = 130;                                           # full-ring bar height (px)
-        var g_ty = g_base - AUDIO_AGNOS_TARGET * g_h / AUDIO_RING_FR;   # target reference line y
-        framebuf_clear(0);
-        framebuf_hline(0, audio_fill_idx, g_ty, 176);           # red TARGET reference line
-        framebuf_hline(0, audio_fill_idx, g_base, 4);           # white baseline
-        var g_t = 0;
-        while (g_t < audio_fill_idx) {
-            var g_av = load64(&audio_fill_hist + g_t * 8);
-            var g_fill = (AUDIO_RING_FR - 1) - g_av;
-            if (g_fill < 0) { g_fill = 0; }
-            var g_bh = g_fill * g_h / AUDIO_RING_FR;            # bar height 0..g_h
-            var g_y = g_base - g_bh;
-            while (g_y < g_base) { framebuf_pixel(g_t, g_y, 4); g_y = g_y + 1; }   # vertical bar at column g_t
-            g_t = g_t + 1;
-        }
-        framebuf_flip();
-        syscall(41, 12000);   # hold ~12s so the graph is photographable before doom exits
-        #endif
         audio_shutdown();
         wad_close();
         doom_exit(0);

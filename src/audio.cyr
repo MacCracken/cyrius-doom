@@ -87,10 +87,6 @@ var audio_chan_lvol = 0;   # per-voice left-channel volume, 0..256 (256 = full)
 var audio_chan_rvol = 0;   # per-voice right-channel volume, 0..256
 var audio_mix_buf   = 0;   # OUT_BUF_BYTES scratch, S16_LE stereo @ OUT_RATE
 var audio_up_acc    = 0;   # Bresenham upsample accumulator (48000/11025), carried across ticks -> drift-free
-var audio_fill_idx = 0;    # DBG telemetry: per-tick pre-refill ring-fill history index (0..287)
-var audio_fill_hist[288];  # DBG: snd_avail sampled at the START of each tick (pre-refill = worst fill that tick).
-                           # Module-global var[N] = N*8 bytes -> 288 u64 slots (>= the 280-tick audio-test).
-                           # Rendered as a fill-vs-tick graph at test end: reveals holding vs dips vs flat-low.
 
 # Open + configure a playback device for OUT_RATE/OUT_CH/OUT_BITS, returning the
 # configured vani handle (already through HW_PARAMS) or 0 if none works.
@@ -526,15 +522,6 @@ fn audio_tick(): i64 {
     if (audio_mix_buf == 0) { return 0; }
 
     #ifdef CYRIUS_TARGET_AGNOS
-    # DBG: sample the ring fill ONCE at the start of the tick (pre-refill = the worst
-    # fill this tick, right before the loop tops it back up) into the per-tick history.
-    var av0 = sys_snd_avail(audio_dev - 1);
-    if (av0 >= 0) {
-        if (audio_fill_idx < 288) {
-            store64(&audio_fill_hist + audio_fill_idx * 8, av0);
-            audio_fill_idx = audio_fill_idx + 1;
-        }
-    }
     var iters = 0;
     while (iters < AUDIO_AGNOS_MAXITERS) {
         var av = sys_snd_avail(audio_dev - 1);

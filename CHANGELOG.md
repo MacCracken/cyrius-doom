@@ -5,6 +5,36 @@ All notable changes to cyrius-doom will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.31.1] - 2026-07-04
+
+**DOOM audio IRON-VALIDATED on archaemenid — "ALL DOOM SOUNDS PERFECT."** The 0.31.0 audio
+retarget shipped, but the first iron burns had a residual echo/dropout that a long chase
+(deeper adaptive buffer, log removal, DMX-pad skip, an LPIB-rate experiment) only mitigated
+— because **the real root cause was in agnos, not doom**: the kernel's LAPIC timer was
+uncalibrated and ran ~12× slow on real Zen (a hardcoded QEMU-tuned reload count), so the
+100 Hz HDA servicer couldn't keep the 48 kHz ring fed. **Fixed kernel-side in agnos 1.52.8**
+(boot-time LAPIC calibration). With a correct system clock, doom's audio is clean on iron.
+
+### Changed
+- **Restored the per-SFX `sakshi_info` logs in `--audio-test`** (`main.cyr`). They were removed
+  mid-chase on a wrong theory that the console-render stall caused the glitch; with the timer
+  fixed they cost nothing (Linux plays fine with the same logs — so agnos does too). The 8
+  `sfx: pistol` / `shotgun` / … lines are back, marking each SFX as it fires.
+- **Skip the DMX 16-sample lead/tail pad in `audio_load`** (Chocolate/PrBoom parity) — removes
+  ~1.5 ms of "empty air" before each SFX. Harmless correctness win.
+
+### Removed
+- The temporary FB fill-vs-tick **graph telemetry + 12 s hold** from `--audio-test`, and the
+  `audio_fill_hist`/`audio_fill_idx` DBG state from `audio.cyr`. They were the diagnostic that
+  helped localize the timer bug; no longer needed.
+
+### Notes
+- The agnos-side adaptive producer (`audio_tick` reads `sys_snd_avail` and fills to
+  `AUDIO_AGNOS_TARGET`) stays — proper flow control. The target is currently **12288 frames
+  (~256 ms)**, deepened during the chase to mask the slow clock; now that the clock is fixed it
+  is conservative and **can be trimmed toward ~60–90 ms for snappier in-game SFX latency** (a
+  follow-up, gated on an iron listen). Kept deep here because it is the known-good state.
+
 ## [0.31.0] - 2026-07-04
 
 **Sound on agnos — DOOM SFX out the sovereign HDA output (the audio arc's Gate 4).**
