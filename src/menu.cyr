@@ -265,7 +265,13 @@ fn menu_handle_input(): i64 {
 
     # Select (E key / use)
     if (input_use() == 1) {
-        if (menu_screen == MENU_MAIN) {
+        # Snapshot the screen BEFORE any transition. The branches below run as
+        # sequential (non-exclusive) ifs, so using the live `menu_screen` made
+        # "New Game" (which sets it to MENU_SKILL) fall straight through the
+        # MENU_SKILL branch in the same call — starting the game without ever
+        # showing the skill screen (audit F-U1). Keying off the snapshot fixes it.
+        var scr = menu_screen;
+        if (scr == MENU_MAIN) {
             if (menu_cursor == 0) {
                 # New Game -> skill select
                 menu_screen = MENU_SKILL;
@@ -281,12 +287,14 @@ fn menu_handle_input(): i64 {
                 menu_result = -1;
             }
         }
-        if (menu_screen == MENU_SKILL) {
-            # Skill selected, start game
+        if (scr == MENU_SKILL) {
+            # Skill selected: record it (cursor 0..4 -> skill 1..5) and start
+            # (audit F-U2 — the choice used to be discarded).
+            game_skill = menu_cursor + 1;
             menu_result = 1;
             menu_active = 0;
         }
-        if (menu_screen == MENU_OPTIONS) {
+        if (scr == MENU_OPTIONS) {
             # "Sound Volume" (item 5) opens the live Sound sub-menu; the other
             # options remain display-only stubs.
             if (menu_cursor == 5) {
@@ -358,6 +366,7 @@ fn menu_run(): i64 {
 
         menu_tick();
         audio_tick();   # pump the SFX mixer so the volume-slider preview plays
+        sound_tick();   # drain PC-speaker menu tones instead of leaving them stuck (F-U7)
 
         if (menu_result != 0) { return menu_result; }
 

@@ -38,9 +38,13 @@ include "src/level.cyr"
 include "src/menu.cyr"
 
 var game_running = 0;
+# Previous-tick TAB state, for edge-detecting the automap toggle (audit F-U4).
+var prev_tab = 0;
 
-# Load (or reload) a map
-fn load_map(): i64 {
+# Load (or reload) a map. `reset_player` = 1 gives a full pistol-start reset
+# (new game / death-respawn); = 0 carries the player's inventory into the next
+# level and only repositions + clears the per-level keys (audit F-G6).
+fn load_map(reset_player): i64 {
     var name = level_get_name();
     # Single structured line instead of sakshi "loading map" + bare "map: <name>".
     var lm[96];
@@ -56,7 +60,15 @@ fn load_map(): i64 {
     }
     map_print_stats();
     map_find_player_start();
-    player_init();
+    if (reset_player == 1) {
+        player_init();
+    } else {
+        # Level advance: keep health/armor/weapons/ammo, reposition to the new
+        # start, and reset keys (keys are per-level in DOOM).
+        player_spawn_at_start();
+        player_keys = 0;
+        render_set_weapon(player_weapon);
+    }
     things_spawn_from_map();
     audio_init();
     audio_preload();
@@ -105,7 +117,7 @@ fn doom_main(): i64 {
     # non-identity arena top (0x3FC00000); no warm-up needed.
     alloc_init();
     args_init();
-    sakshi_info("cyrius-doom v0.31.1", 19);
+    sakshi_info("cyrius-doom v0.31.2", 19);
 
     # WAD path: argv[1] on Linux. On agnos, agnsh `run /bin/doom` passes no argv
     # beyond the path, so default to /DOOM1.WAD (staged on the ext2 root).
@@ -165,7 +177,10 @@ fn doom_main(): i64 {
         if (streq(arg, "--ppm") == 1) { ppm_mode = 1; }
         if (streq(arg, "--ppm-menu") == 1) { ppm_menu = 1; }
         if (streq(arg, "--audio-test") == 1) { audio_test = 1; }
-        if (load8(arg) == 69) {
+        # Direct-map arg "E<ep>M<mp>" (e.g. E1M3). Require the full 4-char shape
+        # before indexing — strlen >= 4 keeps arg+1/arg+2/arg+3 in-bounds, and
+        # the 'M' at index 2 rejects malformed args like "E" or "E1X3" (F-U10).
+        if (load8(arg) == 69 && strlen(arg) >= 4 && load8(arg + 2) == 77) {
             var ep = load8(arg + 1) - 48;
             var mp = load8(arg + 3) - 48;
             if (ep >= 1 && ep <= 3 && mp >= 1 && mp <= 9) {
@@ -229,8 +244,8 @@ fn doom_main(): i64 {
         doom_exit(0);
     }
 
-    # Load initial map
-    if (load_map() != 0) { doom_exit(1); }
+    # Load initial map (fresh game — full pistol-start reset)
+    if (load_map(1) != 0) { doom_exit(1); }
 
     # Audio self-test: play a sequence of real DOOM SFX through the full mixer,
     # paced at 35Hz, then exit. No framebuffer needed — confirms the ALSA output
@@ -238,7 +253,7 @@ fn doom_main(): i64 {
     # actually producing sound out of the speaker/jack. load_map() above already
     # ran audio_init()+audio_preload(), so the cache + device are ready.
     if (audio_test == 1) {
-        sakshi_info("audio test: 6 sfx + L/R pan, ~8s", 31);
+        sakshi_info("audio test: 6 sfx + L/R pan, ~8s", 32);
         tick_init();   # the 35Hz clock isn't set up until the game loop below
         # Two positional sources 400u to the player's left / right of facing, to
         # audibly verify the stereo pan (audio_play_at). player_x/y/angle are set
@@ -322,16 +337,29 @@ fn doom_main(): i64 {
             sakshi_info("quit from menu", 14);
             doom_exit(0);
         }
+        # The initial load_map above spawned this first level's things at the
+        # DEFAULT skill — the menu (which sets game_skill) only ran just now. Re-
+        # spawn from the still-loaded map data so the CHOSEN difficulty applies to
+        # E1M1 too, not just from the first level-advance onward (audit F-U2). The
+        # map geometry / doors / level stats are skill-independent and stay as
+        # loaded; only the skill-filtered thing set is rebuilt.
+        things_spawn_from_map();
+        things_print_stats();
     }
 
-    sakshi_info("WASD=move arrows=turn E=use TAB=map Q=quit", 43);
+    sakshi_info("WASD=move arrows=turn E=use TAB=map Q=quit", 42);
 
     game_running = 1;
     while (game_running == 1) {
         tick_begin();
         input_poll();
         if (input_quit == 1) { game_running = 0; continue; }
-        if ((input_flags & INP_TAB) != 0) { automap_toggle(); }
+        # Edge-detect TAB: toggle the automap only on a fresh press, not every
+        # tick the key is held/autorepeating (audit F-U4).
+        var tab_now = 0;
+        if ((input_flags & INP_TAB) != 0) { tab_now = 1; }
+        if (tab_now == 1 && prev_tab == 0) { automap_toggle(); }
+        prev_tab = tab_now;
 
         player_tick();
 
@@ -352,20 +380,28 @@ fn doom_main(): i64 {
             status_render();
             framebuf_flip();
 
-            # Wait for any key to respawn
+            # Wait for a FRESH key press to respawn. input_flags is
+            # level-triggered (held keys / tty autorepeat / AGNOS persistent
+            # state), so dying while holding a movement key used to dismiss the
+            # death screen instantly. Require keys to release first, then a new
+            # press (audit F-U3).
+            var dead_released = 0;
             var dead_wait = 1;
             while (dead_wait == 1) {
                 tick_begin();
                 input_poll();
                 audio_tick();
-                if (input_flags != 0) { dead_wait = 0; }
+                sound_tick();   # drain any in-flight PC-speaker tone (F-U7)
+                if (input_flags == 0) { dead_released = 1; }
+                if (dead_released == 1 && input_flags != 0) { dead_wait = 0; }
                 if (input_quit == 1) { game_running = 0; dead_wait = 0; }
                 tick_wait();
             }
 
             if (game_running == 1) {
                 sakshi_info("respawn", 7);
-                if (load_map() != 0) {
+                # Death respawn: full pistol-start reset.
+                if (load_map(1) != 0) {
                     game_running = 0;
                 }
             }
@@ -385,7 +421,8 @@ fn doom_main(): i64 {
             level_intermission();
             level_advance();
             sakshi_info("level transition", 16);
-            if (load_map() != 0) {
+            # Level advance: carry inventory forward (audit F-G6).
+            if (load_map(0) != 0) {
                 sakshi_error("next map failed", 15);
                 game_running = 0;
                 continue;

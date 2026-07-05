@@ -88,6 +88,11 @@ fn sprite_build_lookup(): i64 {
 # Reusable prefix buffer (avoid alloc per call)
 var _spr_prefix = 0;
 
+# Dedicated per-frame sprite patch buffer. Lazily allocated ONCE and reused —
+# it used to be `alloc(16384)` inside sprite_render_all, i.e. 16 KB leaked
+# every frame on the never-free bump allocator (~560 KB/s @ 35 Hz, audit F-S2).
+var spr_patch_buf = 0;
+
 fn sprite_find_lump(thing_type): i64 {
     if (_spr_prefix == 0) { _spr_prefix = alloc(16); }
     var prefix = _spr_prefix;
@@ -206,10 +211,14 @@ fn sprite_find_frame(thing_type, rotation, frame): i64 {
 fn sprite_calc_rotation(thing_x, thing_y, thing_angle): i64 {
     var ang_to_thing = fixed_atan2(thing_y - view_y, thing_x - view_x);
     var rel = angle_sub(ang_to_thing, thing_angle);
-    # Map 0..1023 to 1..8
-    # Each rotation covers 128 angle units (45 degrees)
-    # Add half a rotation (64) for centering
-    var rot = ((rel + 64) * 8 / ANG360) + 1;
+    # Map 0..1023 to 1..8. Each rotation covers 128 angle units (45 deg); +64
+    # centres the band. The ANG180 term is the fix (audit F-R1): `rel` is the
+    # view->thing direction minus the thing's facing, but the sprite VIEW we
+    # want is the thing->view direction, i.e. + 180 deg. Without it a monster
+    # facing you resolved to rotation 5 (its BACK) — every 8-view monster showed
+    # its back while approaching and its face while retreating.
+    var band = ((rel + ANG180 + 64) & ANG_MASK);
+    var rot = (band * 8 / ANG360) + 1;
     if (rot > 8) { rot -= 8; }
     if (rot < 1) { rot = 1; }
     return rot;
@@ -261,8 +270,9 @@ fn sprite_render_all(): i64 {
         store64(sprite_dist + (j + 1) * 8, key_dist);
     }
 
-    # Dedicated sprite patch buffer (so wad_read_lump doesn't clobber it)
-    var spr_patch_buf = alloc(16384);
+    # Dedicated sprite patch buffer (so wad_read_lump doesn't clobber it).
+    # Lazy-init once; see the file-scope declaration (audit F-S2).
+    if (spr_patch_buf == 0) { spr_patch_buf = alloc(16384); }
 
     for (var si = 0; si < sprite_visible; si += 1) {
         var thing_idx = load64(sprite_order + si * 8);

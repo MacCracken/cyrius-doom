@@ -121,6 +121,10 @@ fn map_thing_x(idx): i64 { return load64(map_things + idx * MAP_THING_SIZE); }
 fn map_thing_y(idx): i64 { return load64(map_things + idx * MAP_THING_SIZE + 8); }
 fn map_thing_angle(idx): i64 { return load64(map_things + idx * MAP_THING_SIZE + 16); }
 fn map_thing_type(idx): i64 { return load64(map_things + idx * MAP_THING_SIZE + 24); }
+# THINGS options/flags word: skill bits (0x01 easy=skill1-2, 0x02 medium=skill3,
+# 0x04 hard=skill4-5), 0x08 deaf/ambush, 0x10 multiplayer-only. Read by the
+# skill-filtered spawn (audit F-U2); previously stored but never accessed.
+fn map_thing_options(idx): i64 { return load64(map_things + idx * MAP_THING_SIZE + 32); }
 # Subsector flag helpers migrated to the bsp library in 0.26.0 —
 # use `bsp_is_subsector(child)` / `bsp_subsector_idx(child)` instead.
 

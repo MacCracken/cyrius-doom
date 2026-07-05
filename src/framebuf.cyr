@@ -295,13 +295,22 @@ fn framebuf_flip(): i64 {
     return 0;
 }
 
+# Reusable PPM row buffer (960 = 320px * 3 bytes). Lazily allocated once — it
+# used to be alloc(960) per call, which leaks in the GTK-bridge path that writes
+# a PPM every frame (audit F-S4).
+var ppm_row_buf = 0;
+
 fn framebuf_write_ppm(path): i64 {
-    var fd = file_open(path, 65, 0x1A4);
+    # O_CREAT|O_WRONLY|O_TRUNC|O_NOFOLLOW (0x41 | 0x200 | 0x20000). O_TRUNC drops
+    # any stale trailing bytes from a pre-existing larger file; O_NOFOLLOW refuses
+    # to follow a symlink at these fixed, predictable /tmp paths (audit F-S6).
+    var fd = file_open(path, 0x20241, 0x1A4);
     if (fd < 0) { return -1; }
 
     file_write(fd, "P6\n320 200\n255\n", 15);
 
-    var row_buf = alloc(960);
+    if (ppm_row_buf == 0) { ppm_row_buf = alloc(960); }
+    var row_buf = ppm_row_buf;
     for (var y = 0; y < SCREEN_HEIGHT; y += 1) {
         for (var x = 0; x < SCREEN_WIDTH; x += 1) {
             var ci = load8(screen_buf + y * SCREEN_WIDTH + x);

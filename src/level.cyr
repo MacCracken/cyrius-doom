@@ -245,12 +245,22 @@ fn level_intermission(): i64 {
 
     framebuf_flip();
 
-    # Wait for input (any key advances)
+    # Wait for a FRESH key press to advance (edge-triggered). A level is almost
+    # always exited with a key held (walk-over exit, or E on a switch), and
+    # input_flags is level-triggered, so this used to flash past in ~28 ms.
+    # Require keys to release first, then a new press (audit F-U3).
+    var wi_released = 0;
     var waiting = 1;
     while (waiting == 1) {
         tick_begin();
         input_poll();
-        if (input_flags != 0) { waiting = 0; }
+        # Keep the audio mixer fed and drain any PC-speaker tone while the
+        # intermission holds — otherwise the AGNOS ring underruns into a
+        # stale-content echo and the exit-switch beep can hang (audit F-U7).
+        audio_tick();
+        sound_tick();
+        if (input_flags == 0) { wi_released = 1; }
+        if (wi_released == 1 && input_flags != 0) { waiting = 0; }
         if (input_quit == 1) { waiting = 0; }
         tick_wait();
     }

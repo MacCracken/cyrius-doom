@@ -517,7 +517,7 @@ fn render_init_visplanes(): i64 {
 # tex_y_start = texture Y at screen y1 (16.16 fixed), tex_y_step = dY per screen pixel (16.16)
 # light_level = COLORMAP level (0-31)
 fn render_draw_tex_column(x, y1, y2, tex_idx, tex_col, tex_y_start, tex_y_step, light_level): i64 {
-    if (tex_col_buf == 0) { tex_col_buf = alloc(256); }
+    if (tex_col_buf == 0) { tex_col_buf = alloc(TEX_COL_MAX); }
     if (tex_idx < 0) { return 0; }
 
     var th = texture_get_column(tex_idx, tex_col, tex_col_buf);
@@ -1150,7 +1150,7 @@ fn render_flat_spans(): i64 {
 
 fn render_masked_segs(): i64 {
     if (masked_segs == 0) { return 0; }
-    if (tex_col_buf == 0) { tex_col_buf = alloc(256); }
+    if (tex_col_buf == 0) { tex_col_buf = alloc(TEX_COL_MAX); }
 
     for (var mi = 0; mi < masked_count; mi += 1) {
         var base = masked_segs + mi * MASKED_ENTRY_SIZE;

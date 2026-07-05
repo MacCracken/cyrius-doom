@@ -277,6 +277,136 @@ fn main() {
     assert(thing_health(0) < 200, "rocket splash damaged the target");
 
     # ============================================================
+    test_group("combat: melee wind-up (F-G1 regression)");
+    # ============================================================
+    # A chasing monster in melee range with clear LOS must ARM a 15-tick
+    # attack wind-up and NOT deal damage until it elapses. The F-G1 bug reset
+    # tics to 0 the same tick the wind-up was set, so damage landed instantly
+    # and repeated every ~2 ticks (~245 DPS instant kill). No map is loaded, so
+    # thing_check_sight sees an open field (LOS clear).
+    thing_count = 0;
+    var mw = things;                          # imp 32 units ahead, already chasing
+    store64(mw, 32 << 16); store64(mw + 8, 0);
+    store64(mw + 32, TTYPE_IMP); store64(mw + 40, STATE_CHASE); store64(mw + 48, 60);
+    store64(mw + 56, CAT_MONSTER); store64(mw + 80, 20 << 16);
+    store64(mw + 96, 0);                       # tics = 0 on entry (as after SEE)
+    store64(mw + 104, TF_ACTIVE | TF_SOLID | TF_SHOOTABLE); store64(mw + 112, 0);
+    thing_count = 1;
+    player_x = 0; player_y = 0; player_angle = 0;
+    player_health = 100;
+
+    thing_ai_tick(0);
+    assert_eq(thing_state(0), STATE_ATTACK, "in-range chaser arms an attack");
+    assert_eq(thing_tics(0), 15, "attack wind-up tics survive (not clobbered to 0)");
+    assert_eq(player_health, 100, "no damage during the wind-up tick");
+
+    # Tick the wind-up down: 15 decrement ticks bring tics 15->0, still no
+    # damage; the tick that finds tics==0 is the one that deals the hit.
+    var wt = 0;
+    while (wt < 15) { thing_ai_tick(0); wt += 1; }
+    assert_eq(player_health, 100, "no damage through the whole 15-tick wind-up");
+    thing_ai_tick(0);                          # tics==0 now: damage lands, back to CHASE
+    assert(player_health < 100, "damage lands once the wind-up elapses");
+    assert(player_health >= 76, "single melee hit is 3-24 dmg, not an instant kill");
+
+    # F-G4: chase movement is now collision-checked (player_check_position).
+    # With no map loaded, collision passes everywhere, so a chaser must still
+    # close distance on open ground — i.e. the new check must not freeze it.
+    thing_count = 0;
+    var mv = things;                          # imp 200 units ahead, chasing
+    store64(mv, 200 << 16); store64(mv + 8, 0);
+    store64(mv + 32, TTYPE_IMP); store64(mv + 40, STATE_CHASE); store64(mv + 48, 60);
+    store64(mv + 56, CAT_MONSTER); store64(mv + 80, 20 << 16);
+    store64(mv + 96, 0);
+    store64(mv + 104, TF_ACTIVE | TF_SOLID | TF_SHOOTABLE); store64(mv + 112, 0);
+    thing_count = 1;
+    player_x = 0; player_y = 0; player_angle = 0; player_health = 100;
+    var mx0 = thing_x(0);
+    thing_ai_tick(0);
+    assert(thing_x(0) < mx0, "chaser moves toward the player on open ground");
+    assert(thing_x(0) > 190 << 16, "chaser steps ~1 unit/tick (not teleporting)");
+    assert_eq(thing_state(0), STATE_CHASE, "still chasing (200u > attack range)");
+
+    # ============================================================
+    test_group("combat: spent barrel is not a bullet shield (F-G5)");
+    # ============================================================
+    # A detonated barrel used to keep TF_SHOOTABLE forever (its DIE->DEAD
+    # transition lived in the monster-only AI path), so it absorbed every shot
+    # aimed at the monster behind it. Barrel 50u ahead, monster 300u ahead
+    # (out of the 128u splash radius) — after the barrel blows, a fired ray must
+    # reach the monster.
+    thing_count = 0;
+    var bar = things;                         # barrel at (+50,0)
+    store64(bar, 50 << 16); store64(bar + 8, 0);
+    store64(bar + 32, TTYPE_BARREL); store64(bar + 40, STATE_SPAWN);
+    store64(bar + 48, 20); store64(bar + 56, CAT_DECOR); store64(bar + 80, 10 << 16);
+    store64(bar + 104, TF_ACTIVE | TF_SOLID | TF_SHOOTABLE); store64(bar + 112, 0);
+    var beh = things + THING_SIZE;            # monster at (+300,0), past the splash
+    store64(beh, 300 << 16); store64(beh + 8, 0);
+    store64(beh + 32, TTYPE_IMP); store64(beh + 40, STATE_SPAWN); store64(beh + 48, 100);
+    store64(beh + 56, CAT_MONSTER); store64(beh + 80, 20 << 16);
+    store64(beh + 104, TF_ACTIVE | TF_SHOOTABLE); store64(beh + 112, 0);
+    thing_count = 2;
+    player_x = 0; player_y = 0; player_angle = 0; player_health = 100;
+
+    thing_damage(0, 100);                     # blow the barrel
+    assert_eq(thing_state(0), STATE_DIE, "shot barrel detonates -> STATE_DIE");
+    assert((thing_flags(0) & TF_SHOOTABLE) == 0, "spent barrel drops TF_SHOOTABLE");
+    assert_eq(thing_health(1), 100, "far monster took no splash (250u > 128u radius)");
+    var bhit = player_fire_ray(0, 2048 << 16, 10);
+    assert_eq(bhit, 1, "ray passes the spent barrel and hits the monster (idx 1)");
+    assert_eq(thing_health(1), 90, "monster behind the barrel took the shot");
+
+    # Decoration death still advances to an inert corpse (does not freeze).
+    var bg = 0;
+    while (thing_state(0) == STATE_DIE && bg < 20) { thing_ai_tick(0); bg += 1; }
+    assert_eq(thing_state(0), STATE_DEAD, "spent barrel advances to an inert corpse");
+
+    # ============================================================
+    test_group("player: inventory carry across levels (F-G6)");
+    # ============================================================
+    # player_spawn_at_start (the level-advance path) repositions WITHOUT
+    # touching inventory; player_init (new game / respawn) does a full reset.
+    # Needs map_sectors + player_start allocated for the reposition path;
+    # no BSP -> player_find_sector returns sector 0.
+    map_sectors = alloc(MAP_MAX_SECTORS * MAP_SECTOR_SIZE);
+    player_start = alloc(24);
+    map_num_nodes = 0;
+
+    player_init();
+    assert_eq(player_weapons, 6, "player_init: pistol-start weapons (fist+pistol)");
+    assert_eq(player_ammo_bullets, 50, "player_init: 50 bullets");
+    # Earn some gear mid-episode.
+    player_weapons = player_weapons | 8;      # shotgun
+    player_ammo_shells = 20;
+    player_health = 175;
+    player_armor = 100;
+    player_keys = KEY_CARD_BLUE;
+    # Level advance keeps gear, resets per-level keys.
+    player_spawn_at_start();
+    player_keys = 0;                           # load_map(0) does this after spawn
+    assert_eq(player_weapons, 14, "level advance keeps weapons (shotgun retained)");
+    assert_eq(player_ammo_shells, 20, "level advance keeps shells");
+    assert_eq(player_health, 175, "level advance keeps health");
+    assert_eq(player_armor, 100, "level advance keeps armor");
+    assert_eq(player_keys, 0, "keys are cleared per level");
+    # A full reset (new game / respawn) does wipe back to pistol start.
+    player_init();
+    assert_eq(player_weapons, 6, "player_init wipes weapons back to pistol start");
+    assert_eq(player_health, 100, "player_init resets health");
+
+    # ============================================================
+    test_group("sprite: rotation faces the viewer (F-R1)");
+    # ============================================================
+    # A monster facing the viewer must show its FRONT sprite (rotation 1). The
+    # F-R1 bug omitted the ANG180 term, so a facing monster resolved to rot 5
+    # (its back). Viewer at origin; thing 100u due east.
+    view_x = 0; view_y = 0;
+    assert_eq(sprite_calc_rotation(100 << 16, 0, ANG180), 1, "thing facing viewer -> front (rot 1)");
+    assert_eq(sprite_calc_rotation(100 << 16, 0, 0), 5, "thing facing away -> back (rot 5)");
+    assert_eq(sprite_calc_rotation(100 << 16, 0, ANG90), 3, "thing's left side toward viewer -> rot 3");
+
+    # ============================================================
     # WAD tests require DOOM1.WAD — skip if not available
     # ============================================================
 

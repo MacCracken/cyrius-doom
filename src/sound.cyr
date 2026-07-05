@@ -115,15 +115,19 @@ fn sound_tick(): i64 {
     if (sound_enabled == 0) { return 0; }
 
     # Start queued sound
+    var just_started = 0;
     if (sound_queue_ticks > 0) {
         sound_set_freq(sound_queue_freq);
         sound_playing = 1;
         sound_ticks_left = sound_queue_ticks;
         sound_queue_ticks = 0;
+        just_started = 1;
     }
 
-    # Count down current sound
-    if (sound_playing == 1) {
+    # Count down current sound — but NOT on the tick it started, or a 1-tick tone
+    # is turned on and off in the same call and never actually plays (audit F-U7:
+    # the dry-fire click, plasma, menu-move were all inaudible).
+    if (sound_playing == 1 && just_started == 0) {
         sound_ticks_left -= 1;
         if (sound_ticks_left <= 0) {
             sound_set_freq(0);

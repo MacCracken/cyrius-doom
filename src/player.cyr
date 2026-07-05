@@ -61,11 +61,29 @@ enum KeyBit {
 # Player initialization
 # ================================================================
 
-fn player_init(): i64 {
+# Position the player at the map's player-1 start. Called on EVERY map load
+# (fresh game, respawn, and level advance) — it touches position/angle only,
+# never inventory, so it can be reused by the level-advance path that must
+# carry weapons/ammo/health forward (audit F-G6).
+fn player_spawn_at_start(): i64 {
     player_x = player_start_x();
     player_y = player_start_y();
     player_z = 0;
     player_angle = player_start_angle();
+
+    # Find the floor height at player start
+    var sector = player_find_sector();
+    if (sector >= 0) {
+        player_z = map_sector_floorh(sector) << 16;
+    }
+
+    return 0;
+}
+
+# Full player reset: reposition + pistol-start inventory. Used for a new game
+# and for death-respawn — NOT for a normal level transition (see load_map).
+fn player_init(): i64 {
+    player_spawn_at_start();
 
     player_health = 100;
     player_armor = 0;
@@ -75,12 +93,6 @@ fn player_init(): i64 {
     player_weapons = 6;
     player_keys = 0;
     render_set_weapon(player_weapon);
-
-    # Find the floor height at player start
-    var sector = player_find_sector();
-    if (sector >= 0) {
-        player_z = map_sector_floorh(sector) << 16;
-    }
 
     return 0;
 }

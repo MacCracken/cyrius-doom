@@ -303,18 +303,29 @@ fn input_poll(): i64 {
         while (pos < n) {
             var ch = load8(&buf + pos);
             if (ch == KEY_ESC) {
-                if (pos + 2 < n) {
-                    var seq1 = load8(&buf + pos + 1);
-                    var seq2 = load8(&buf + pos + 2);
-                    if (seq1 == 91) {
-                        if (seq2 == 65) { store64(key_state + KEY_UP * 8, 1); }
-                        if (seq2 == 66) { store64(key_state + KEY_DOWN * 8, 1); }
-                        if (seq2 == 67) { store64(key_state + KEY_RIGHT * 8, 1); }
-                        if (seq2 == 68) { store64(key_state + KEY_LEFT * 8, 1); }
-                        pos += 3;
-                        continue;
+                if (pos + 1 < n && load8(&buf + pos + 1) == 91) {
+                    # CSI escape sequence (ESC '['). Scan to its final byte
+                    # (0x40..0x7E) and act only on that — so a bare arrow
+                    # (ESC [ A) and a modified arrow (ESC [ 1 ; 2 C) both resolve
+                    # to the arrow WITHOUT leaking the intermediate '1'/';'/'2'
+                    # into the key scan as spurious weapon selects, and a
+                    # sequence split at the buffer end is consumed instead of
+                    # being mis-read as a quit (audit F-U5).
+                    var q = pos + 2;
+                    var final = 0;
+                    while (q < n) {
+                        var fb = load8(&buf + q);
+                        q += 1;
+                        if (fb >= 64 && fb <= 126) { final = fb; break; }
                     }
+                    if (final == 65) { store64(key_state + KEY_UP * 8, 1); }
+                    if (final == 66) { store64(key_state + KEY_DOWN * 8, 1); }
+                    if (final == 67) { store64(key_state + KEY_RIGHT * 8, 1); }
+                    if (final == 68) { store64(key_state + KEY_LEFT * 8, 1); }
+                    pos = q;
+                    continue;
                 }
+                # A lone ESC (not the start of a CSI) is a real Escape press.
                 input_quit = 1;
                 pos += 1;
             } else {
@@ -346,16 +357,19 @@ fn input_poll(): i64 {
     if (load64(key_state + 68 * 8) == 1) { input_flags |= INP_STRAFE_RIGHT; }   # 'D'
     if (load64(key_state + KEY_SPACE * 8) == 1) { input_flags |= INP_USE; }
     if (load64(key_state + KEY_E * 8) == 1) { input_flags |= INP_USE; }
+    if (load64(key_state + 69 * 8) == 1) { input_flags |= INP_USE; }      # 'E' (Caps/Shift)
     # KEY_CTRL (132) is the DOOM-faithful fire button, but a raw Linux tty cannot
     # report a bare Ctrl (it is a modifier — only Ctrl+key yields a byte), so on
     # Linux this index is never set and F (102) is the working fire key. The
     # AGNOS scancode path (raw PS/2) does set 132, making Ctrl fire there.
     if (load64(key_state + KEY_CTRL * 8) == 1) { input_flags |= INP_FIRE; }
     if (load64(key_state + 102 * 8) == 1) { input_flags |= INP_FIRE; }
+    if (load64(key_state + 70 * 8) == 1) { input_flags |= INP_FIRE; }     # 'F' (Caps/Shift)
     if (load64(key_state + KEY_R * 8) == 1) { input_flags |= INP_RUN; }
     if (load64(key_state + 82 * 8) == 1) { input_flags |= INP_RUN; }      # 'R' (Caps/Shift) — keep run under Caps Lock
     if (load64(key_state + KEY_TAB * 8) == 1) { input_flags |= INP_TAB; }
     if (load64(key_state + KEY_Q * 8) == 1) { input_quit = 1; }
+    if (load64(key_state + 81 * 8) == 1) { input_quit = 1; }              # 'Q' (Caps/Shift)
 
     # Weapon select: keys 1-7 (ASCII 49-55)
     input_weapon = 0;

@@ -5,7 +5,153 @@ All notable changes to cyrius-doom will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.31.1] - 2026-07-04
+## [0.31.2] - 2026-07-04
+
+**Playability pass — acting on the July Fable full-project audit
+([`docs/development/july-fable-audit.md`](docs/development/july-fable-audit.md)).** Works
+down the audit's recommended fix order, each item a self-contained change. Gameplay
+state-machine correctness first (the bugs that made a level unwinnable or instantly
+lethal), then the one HIGH memory-safety hole and the per-frame allocator leak, then
+UI/input polish. No render-path perf regression — the mixer/AI fixes are off the hot path.
+
+### Security
+
+- **Texture-height buffer overflow closed (audit F-S1 — HIGH).** `texture_get_column`
+  bounded its column clear + patch composite by the texture's height, read straight from
+  the WAD's `TEXTURE1` header (`read_le16`, 0–65535) and never clamped — but both callers
+  pass a fixed 256-byte `tex_col_buf`. A WAD (any WAD accepted on the command line)
+  declaring a texture height > 256 that is referenced by an on-screen wall overflowed
+  that heap buffer by up to ~64 KB (zeros plus attacker-positioned patch pixels) the
+  first frame it drew. Now the height is clamped to a shared `TEX_COL_MAX = 256` before
+  it bounds any write, and both allocation sites reference the same constant so they
+  can't drift. Latent on DOOM1.WAD (max height 128); E1M1 render is byte-identical.
+  Verified with a canary test (height 4096 → zero bytes past the buffer).
+  ([`src/texture.cyr`](src/texture.cyr), [`src/render.cyr`](src/render.cyr))
+- **PNAMES / patch-post / PPM hardening (audit F-S3 / F-S5 / F-S6).**
+  (1) `texture_init` now guards `PNAMES` with `pn_size >= 4` before reading the count and
+  bounds the count by `(pn_size - 4) / 8`, so a truncated lump can't over-read past the
+  allocation (F-S3). (2) The patch post-walk in `texture_get_column` now breaks on
+  `post_ptr + 1 >= pdata_end`, matching the other decoders, so the length byte read stays
+  in-bounds (F-S5). (3) PPM files open with `O_TRUNC | O_NOFOLLOW` added — no stale
+  trailing bytes from a larger pre-existing file, and no following a symlink at the fixed
+  `/tmp` paths (F-S6). ([`src/texture.cyr`](src/texture.cyr), [`src/framebuf.cyr`](src/framebuf.cyr))
+
+### Fixed
+
+- **Melee monsters no longer deal instant-death contact damage (audit F-G1).** In
+  `thing_ai_tick`'s `STATE_CHASE` block, the "lost sight?" branch ran as a *separate*
+  `if` on the same tick the monster armed its 15-tick attack wind-up, and its `else`
+  (still-in-sight) path unconditionally reset `tics` to 0 — wiping the wind-up, so the
+  next tick's `STATE_ATTACK` saw `tics==0` and hit immediately, looping every ~2 ticks
+  (~245 DPS, sub-second death on any melee touch). Restructured to compute
+  `thing_check_sight` once per tick and gate the attack-transition vs. give-up-timer
+  reset through a single `if/else` so the wind-up survives. Also removes two redundant
+  `thing_check_sight` calls per chasing monster per tick. ([`src/things.cyr`](src/things.cyr))
+  Regression test added (`combat: melee wind-up`) — WAD-free suite 63 → 69 asserts,
+  full 101 → 107.
+- **Sprite renderer no longer leaks 16 KB per frame (audit F-S2).** `sprite_render_all`
+  called `alloc(16384)` for its patch buffer every frame — ~560 KB/s at 35 Hz on the
+  never-free bump allocator, unbounded RSS growth over a long session. Hoisted to a
+  file-scope `spr_patch_buf` with the standard lazy-init guard (matching
+  `weapon_patch_buf` / `_spr_prefix`); allocated once, reused thereafter. Render output
+  is byte-identical. ([`src/sprite.cyr`](src/sprite.cyr))
+- **PPM writer no longer leaks a row buffer per frame (audit F-S4).** `framebuf_write_ppm`
+  allocated its 960-byte row buffer on every call — a steady leak in the GTK-bridge path
+  that writes a PPM each frame. Hoisted to a lazily-initialised `ppm_row_buf`.
+  ([`src/framebuf.cyr`](src/framebuf.cyr))
+- **Doors and lifts are repeatable again — one-shot-per-map soft-lock fixed (audit
+  F-G2).** `doors_tick` had no handler for the terminal `DS_CLOSED` state and never
+  released a completed thinker, so a finished door/lift sat in the array forever bound
+  to its sector; `door_open`/`lift_activate` then bailed on `door_find_sector`, so the
+  door could never reopen and the lift could never be re-ridden (and the array capped at
+  `DOOR_MAX = 32` lifetime activations). Now terminal states call `door_free` (sector :=
+  -1) and a new `door_alloc_slot` reclaims freed slots, so doors/lifts re-trigger
+  normally and the pool no longer exhausts. `doors_tick`'s `switch` — flagged by the
+  audit as latent cycc return-smash risk — is rewritten as the codebase's standard flat
+  `if (state == …)` ladder over a state snapshot. ([`src/doors.cyr`](src/doors.cyr))
+- **"Open and stay open" doors latch instead of auto-closing (audit F-G3).** D1/W1/S1
+  specials (2, 31, 103) funnelled through the generic open-wait-close path, so a door
+  meant to stay open (and be unreopenable) instead shut after ~3 s and — with F-G2 —
+  sealed permanently, potentially trapping the player. Added a `DS_OPENING_STAY` state
+  and `door_open_stay`; those specials now raise once and latch (releasing their slot at
+  the top). ([`src/doors.cyr`](src/doors.cyr))
+- **Chasing monsters no longer phase through walls (audit F-G4).** `STATE_CHASE` set the
+  monster's x/y directly with zero collision — monsters walked through one-sided walls,
+  closed doors, and ledges into other rooms (worst during the lost-sight grace window).
+  Movement now goes through the player's collision core (`player_check_position`, which
+  blocks solid walls and closed doors z-independently): the monster tries the diagonal
+  step, then slides along a single axis to round a corner, else holds. (Step-height still
+  references the player's elevation — a small known inaccuracy, far better than none.)
+  Regression coverage: a chaser still closes distance on open ground (`72` WAD-free
+  asserts). ([`src/things.cyr`](src/things.cyr))
+- **Spent barrels stop shielding the monster behind them (audit F-G5).** A detonated
+  barrel kept `TF_SHOOTABLE` forever — its `STATE_DIE → STATE_DEAD` transition lived only
+  in the monster-only AI path (`thing_ai_tick` early-returned for decorations), so it
+  froze on a death frame as a permanent bullet-shield that silently absorbed every shot
+  fired across it. Now `thing_damage` drops shootable/solid the instant a barrel blows,
+  and `thing_ai_tick` advances a dying decoration to an inert `TF_CORPSE`. Regression
+  test fires through a spent barrel into the monster behind it. ([`src/things.cyr`](src/things.cyr))
+- **Inventory carries across level transitions (audit F-G6).** `load_map` unconditionally
+  called `player_init`, which reset health/armor/weapons/ammo to pistol start — so the
+  shotgun found in E1M1 was gone at the start of E1M2. Split off `player_spawn_at_start`
+  (reposition only) from `player_init` (full reset); `load_map` now takes a `reset_player`
+  flag — `1` for a new game / death-respawn (full reset, unchanged), `0` for a level
+  advance (keep health/armor/weapons/ammo, reposition, clear the per-level keys).
+  ([`src/player.cyr`](src/player.cyr), [`src/main.cyr`](src/main.cyr))
+- **Intermission and death screens no longer self-dismiss; TAB no longer flickers the
+  automap (audit F-U3 / F-U4).** All three read `input_flags`, which is level-triggered
+  (held keys, tty autorepeat, AGNOS persistent key-state) — so a level exited or a death
+  taken with a movement key held flashed the screen for ~28 ms, and holding TAB toggled
+  the automap at 35 Hz. The two wait loops now edge-detect a *fresh* press (wait for all
+  keys to release, then a new press), and the automap toggle latches on a 0→1 TAB
+  transition. Runtime-verified: one TAB press = exactly one toggle.
+  ([`src/main.cyr`](src/main.cyr), [`src/level.cyr`](src/level.cyr))
+- **"New Game" reaches the skill screen instead of instant-starting (audit F-U1).** The
+  menu's use handler ran sequential `if (menu_screen == …)` branches, so selecting New
+  Game (which sets `menu_screen = MENU_SKILL`) fell straight through the MENU_SKILL branch
+  in the same call and started the game at the default skill — the skill screen was
+  unreachable. The handler now snapshots the screen before dispatching. Runtime-verified:
+  New Game now lands on the skill screen (no game start). ([`src/menu.cyr`](src/menu.cyr))
+- **Skill selection actually changes the monster set (audit F-U2).** The THINGS options
+  word (skill bits + multiplayer flag) was stored but never read, so every skill spawned
+  the Ultra-Violence set and multiplayer-only things leaked into single-player.
+  `things_spawn_from_map` now filters on the selected `game_skill` (skill 1&2 → bit 0x01,
+  3 → 0x02, 4&5 → 0x04) and drops multiplayer-only things (0x10), matching vanilla
+  `P_SpawnMapThing`. The chosen skill is recorded from the menu (default HMP when the menu
+  is skipped, e.g. direct-map CLI). Because the initial `load_map` runs before `menu_run`,
+  the interactive path re-spawns the first level's things after the menu returns so the
+  selected difficulty applies to E1M1 too (not just from the first level-advance onward).
+  Verified on E1M1: skill 1 → 4, skill 3 → 6, skill 5 → 29 monsters (previously a flat 29
+  on every skill; and menu-selecting Nightmare now re-spawns E1M1 at 29). ([`src/things.cyr`](src/things.cyr),
+  [`src/map.cyr`](src/map.cyr), [`src/menu.cyr`](src/menu.cyr), [`src/main.cyr`](src/main.cyr))
+- **Sprite rotation was 180° off — monsters showed their backs while approaching (audit
+  F-R1).** `sprite_calc_rotation` omitted the ANG180 term, so `rel` (view→thing minus the
+  thing's facing) picked the opposite of the correct sprite view: a monster facing you
+  resolved to rotation 5 (its back). Added the ANG180 term. Regression test pins
+  facing-viewer → front (rot 1), facing-away → back (rot 5), left-side → rot 3.
+  `render_frame` **2.858 ms** (variance-level; the rotation calc is off the pixel loop).
+  ([`src/sprite.cyr`](src/sprite.cyr))
+- **Linux input hardening (audit F-U5 / F-U9 / F-U10).** (F-U5) The tty decoder now
+  handles a CSI escape sequence as a unit: it scans `ESC [ … <final>` to the final byte
+  and acts only on that, so a modified arrow (`ESC [ 1 ; 2 C`) no longer leaks its `1`/`2`
+  into the weapon-select scan, and a sequence split across a full 32-byte read is consumed
+  rather than mis-read as a quit (a bare arrow and Shift+arrow both resolve to the arrow;
+  a lone ESC still quits). Runtime-verified: arrows still turn, no spurious quit/weapon
+  swap. (F-U9) Uppercase `E`/`F`/`Q` are now aliased to use/fire/quit, so Caps Lock no
+  longer disables them. (F-U10) The direct-map arg is validated (`strlen >= 4` and `'M'` at
+  index 2) before indexing, closing the OOB read on a short arg and rejecting malformed
+  forms like `E1X3`; two `sakshi_info` length arguments were off by one (banner 43→42,
+  audio-test 31→32). ([`src/input.cyr`](src/input.cyr), [`src/main.cyr`](src/main.cyr))
+- **PC-speaker tone lifecycle + audio pumping in wait loops (audit F-U7).** `sound_tick`
+  started a queued tone and counted it down in the *same* call, so every 1-tick tone (the
+  dry-fire click, plasma, menu-move) was turned on and off within microseconds and never
+  played — fixed with a `just_started` guard. The death-wait loop pumped `audio_tick` but
+  not `sound_tick` (a tone mid-playback at death left the speaker beeping); the
+  intermission loop pumped neither (AGNOS ring underrun → stale-content echo). Both wait
+  loops (and the menu loop) now pump `sound_tick` — and the intermission also pumps
+  `audio_tick`. ([`src/sound.cyr`](src/sound.cyr), [`src/main.cyr`](src/main.cyr),
+  [`src/level.cyr`](src/level.cyr), [`src/menu.cyr`](src/menu.cyr))
+
 
 **DOOM audio IRON-VALIDATED on archaemenid — "ALL DOOM SOUNDS PERFECT."** The 0.31.0 audio
 retarget shipped, but the first iron burns had a residual echo/dropout that a long chase

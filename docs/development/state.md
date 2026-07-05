@@ -1,6 +1,6 @@
 # cyrius-doom — Current State
 
-> **Last refresh**: 2026-06-29 (v0.30.7 — **positional/stereo SFX + Sound-menu live preview**. Monster death/pain + explosion sounds now attenuate with distance and pan across the stereo field: `audio_play_at(name,sx,sy)` (full ≤160 u, linear to silence at 1200 u, inaudible beyond; pan by source angle vs player facing, DOOM stereo-swing 96 law); the mixer is truly stereo now (per-voice `lvol`/`rvol`, separate L/R accumulators) — **a centered full voice stays bit-identical to the 0.30.6 mono mix**. Sound slider previews live (DSPISTOL on step; `audio_tick` pumped in `menu_run`). `--audio-test` gained LEFT/RIGHT pan pings (8 sfx, ~8 s) for headless stereo verification. Menu polish: defensive thermo `[0,15]` clamp + else-gated slider. Binary 621,080→**623,520 B** [+2,440]; `doom_agnos` 610,152 B. `render_frame` **2.956 ms** (variance-level — mixer off the render path). Tests 63/63 + 101/101; fuzz 1000/50000; deps 37/0; DCE 1001/294,063 B. Pre-cut 27-agent review: 17/17 confirmed as correctness verifications (L/R direction correct, centered bit-identity, overflow/sign-safe, AGNOS no-op), zero defects; 4 INFO/LOW cosmetic nits noted only. **AGNOS QEMU not gated** — kernel mid-overhaul; audio `#ifdef`-guarded off there.) | **Refresh cadence**: every release (ideally bumped by the release post-hook).
+> **Last refresh**: 2026-07-04 (v0.31.2 — **playability pass from the July Fable audit** ([`july-fable-audit.md`](july-fable-audit.md)). 13 committable bites down the audit's fix order. Gameplay state-machine correctness: melee wind-up no longer clobbered (instant-death contact fixed, F-G1); doors/lifts release their thinker slots so they're repeatable (one-shot soft-lock fixed, F-G2) + D1/W1/S1 "open & stay" doors latch (F-G3); chasing monsters are collision-checked (no more wall-phasing, F-G4); spent barrels drop shootable (no more bullet-shield, F-G5); inventory carries across levels (F-G6). One HIGH memory-safety hole closed: WAD texture-height clamp (F-S1, canary-verified). Leaks fixed: per-frame sprite alloc (F-S2) + PPM row buffer (F-S4). Parser/IO hardening: PNAMES bound (F-S3), patch post off-by-one (F-S5), PPM `O_TRUNC|O_NOFOLLOW` (F-S6). UI: New Game reaches the skill screen (F-U1) + skill actually filters spawns (F-U2, E1M1 skill 1/3/5 → 4/6/29 monsters); intermission/death edge-detect a fresh press + TAB latches (F-U3/F-U4); Linux escape-seq/CSI decode + Caps-Lock E/F/Q aliases + map-arg bounds (F-U5/F-U9/F-U10); PC-speaker tone lifecycle + audio pump in wait loops (F-U7). Render: sprite rotation 180° fix — monsters face you (F-R1). Binary 554,320→**558,448 B**; `doom_agnos` **553,784 B**. `render_frame` **2.856 ms** (variance-level). Tests **90/90** + **128/128** (+27 regression asserts); fuzz 1000/50000/2000; deps **100/0**; DCE 1002/272,320 B. **AGNOS QEMU not gated** — kernel mid-overhaul; audio path unchanged for agnos in this cut. Deferred to roadmap (hardware/risky/AGNOS-only): F-R2 sky-pan rate, F-R3 one-sided pegging, F-R4 masked dead field, F-R5 24bpp, F-R6 palette-0, F-U6 AGNOS scancode prefix, F-U8 OUT_RATE re-verify.) | **Refresh cadence**: every release (ideally bumped by the release post-hook).
 >
 > CLAUDE.md is preferences / process / procedures (durable). This file is **state** (volatile — binary sizes, version, in-flight slots, dep tags, gates). Anything that rots within a minor lives here. See [first-party-documentation § CLAUDE.md](https://github.com/MacCracken/agnosticos/blob/main/docs/development/planning/first-party-documentation.md#claudemd).
 
@@ -8,40 +8,40 @@
 
 ## Current version
 
-**[`VERSION`](../../VERSION)** = `0.30.7` (single source of truth — `cyrius.cyml` reads it via `${file:VERSION}`).
+**[`VERSION`](../../VERSION)** = `0.31.2` (single source of truth — `cyrius.cyml` reads it via `${file:VERSION}`).
 
 | Surface | Pin |
 |---|---|
-| Cyrius toolchain | `cycc 6.3.5` (in `cyrius.cyml`). **Drift closed at 0.30.4** — the manifest now matches the launcher's actual cycc (`cyrius --version` → `manifest-pin: 6.3.5`, no drift). The 6.2.44→6.3.5 band re-verified green on Linux (101/101 + fuzz + bench); carries 6.3.5 CO-01 (forward-call ABI fix) + 6.3.0 (per-var `_base` indirection). |
-| `[deps.bsp]` | `1.2.0` (git tag; bumped at 0.30.6 — source-module change, no ABI surface; `lib/bsp.cyr` hash moved, lock re-verified 37/0) |
-| `[deps.vani]` | `0.9.5` (git tag, `core` profile — `dist/vani-core.cyr`, 22 `audio_*` symbols; code byte-identical to 0.9.4) |
+| Cyrius toolchain | `cycc 6.4.2` (in `cyrius.cyml`; bumped at 0.31.0 for the `sys_snd_*` audio-syscall peer). `cyrius --version` → `manifest-pin: 6.4.2`, no drift. The 6.4.2 `cyrius lib sync --full` grew the vendored `lib/` snapshot, so the resolved lock is now **100 entries** (was 37 on the 6.1–6.3 stdlib). |
+| `[deps.bsp]` | `1.2.0` (git tag; bumped at 0.30.6 — source-module change, no ABI surface) |
+| `[deps.vani]` | `0.9.5` (git tag, `core` profile — `dist/vani-core.cyr`, 22 `audio_*` symbols) |
 | stdlib | `string`, `alloc`, `fmt`, `vec`, `str`, `io`, `fs`, `args`, `syscalls`, `hashmap`, `tagged`, `fnptr`, `freelist`, `process`, `sakshi` |
 
 ## Current binary
 
 | Metric | Value |
 |---|---|
-| `build/doom` | **623,520 B** (cycc 6.3.5; +2,440 B over 0.30.6's 621,080 — positional/stereo mixer, `audio_play_at`, menu live-preview + `--audio-test` pan pings). `build/doom_agnos` = **610,152 B** (builds clean; audio `#ifdef`-guarded off; AGNOS QEMU not gated this cut — kernel mid-overhaul). |
-| Unreachable fns (NOP-sled today, real shrink under O3) | 1001 / 294,063 B |
+| `build/doom` | **558,448 B** (cycc 6.4.2; +4,128 B over 0.31.1's 554,320 — the July-Fable playability pass: collision-checked chase, door-thinker lifecycle, skill filter, edge-detection, CSI decode, texture clamp, regression logic). `build/doom_agnos` = **553,784 B** (builds clean; AGNOS QEMU not gated this cut — kernel mid-overhaul). |
+| Unreachable fns (NOP-sled today, real shrink under O3) | 1002 / 272,320 B |
 | Recovery target under Cyrius O3 real DCE | ~260 KB |
-| Frame time | `render_frame` **2.956 ms** / `+sprites` 2.980 ms (E1M1, 0.30.7, cycc 6.3.5). Variance-level vs 0.30.6's 2.950 ms — the stereo/positional mixer runs in the game loop (off the render path). ~7.4× headroom on the 22 ms budget. |
-| Hot math | `fixed_mul` 7 ns / `asr` 4 ns / `texture_get_column` ~690 ns / `pcache_get_hit` 7 ns |
+| Frame time | `render_frame` **2.856 ms** / `+sprites` 2.848 ms (E1M1, 0.31.2, cycc 6.4.2). Variance-level — the gameplay/collision/AI fixes are off the render path (the sprite-alloc-leak removal + rotation fix are the only render-adjacent touches). ~7.7× headroom on the 22 ms budget. |
+| Hot math | `fixed_mul` 6 ns / `asr` 4 ns / `texture_get_column` ~690 ns / `pcache_get_hit` 7 ns |
 
 Frame-time budget: 22 ms per tick @ 35 Hz. Current: ~12× headroom.
 
-## Gates (last green, 2026-06-29)
+## Gates (last green, 2026-07-04)
 
 | Gate | Result |
 |---|---|
-| `cyrius deps --verify` | **37 verified, 0 failed** (lock unchanged from 0.30.6 — no dep moves at 0.30.7; regenerate via `rm -rf lib && cyrius deps` if a cross-target build pollutes `./lib/`). CI runs `cyrius deps` then this gate. |
-| `cyrius build src/main.cyr build/doom` | OK, **623,520 B** (cycc **6.3.5**). Clean-from-scratch (`rm -rf build`) build passes. |
-| `cyrius build --agnos src/main.cyr build/doom_agnos` | OK, **610,152 B** (audio path `#ifdef CYRIUS_TARGET_AGNOS`-guarded off; `audio_play_at` is a guarded no-op there). **AGNOS QEMU not gated this cut** — the agnos kernel is mid-RAM/W^X-overhaul. |
-| `./build/doom wad/DOOM1.WAD --audio-test` | Plays 6 centered SFX + **LEFT/RIGHT positional pan pings** over ~8 s; **verified audible on the analog jack** (card1/D0, S16/stereo/44100). Logs `audio: ALSA playback`. |
-| `./build/doom wad/DOOM1.WAD --ppm-menu` | Renders all 5 menu screens incl. the new **Sound** screen (`/tmp/doom_sound.ppm`, 192,015 B; thermometer slider + knob visually verified). |
-| `cyrius test tests/doom.tcyr` (WAD-free, CI subset) | **63/63** (+26: a `combat:` group — p_random determinism/range, ammo deduction, damage/state transitions, hitscan select + LOS, splash falloff, rocket projectile). |
-| `./build/test_doom wad/DOOM1.WAD` (full) | **101/101** (37 WAD-free combat+math + 64 WAD-gated). |
-| `fuzz_wad` / `fuzz_fixed` / `fuzz_weapon` | **1000 / 50000 / 2000 clean** (self-reported iteration counts). `fuzz_fixed` is the canary for the 6.3.0 per-var `_base` codegen on the fixed-point path — clean. |
-| `./build/doom wad/DOOM1.WAD --ppm` | E1M1 PPM at 192,015 B; map summary `V=467 L=475 SD=648 S=85 SG=732 SS=237 N=236 T=138` (138 raw map things; 134 after the 4 player starts are filtered). Render unchanged. |
+| `cyrius deps --verify` | **100 verified, 0 failed** (the 6.4.2 `lib sync --full` snapshot; was 37 on the 6.1–6.3 stdlib). Regenerate via `rm -rf lib && cyrius deps` if a cross-target build pollutes `./lib/`. CI runs `cyrius deps` then this gate. |
+| `cyrius build src/main.cyr build/doom` | OK, **558,448 B** (cycc **6.4.2**). Clean-from-scratch (`rm -rf build`) build passes. |
+| `cyrius build --agnos src/main.cyr build/doom_agnos` | OK, **553,784 B**. **AGNOS QEMU not gated this cut** — the agnos kernel is mid-overhaul; the July-Fable pass is gameplay/input/parser logic that is target-agnostic (no agnos-specific branches changed except pumping `sound_tick` in wait loops, which is a no-op on agnos). |
+| `./build/doom wad/DOOM1.WAD --audio-test` | Plays 6 centered SFX + LEFT/RIGHT pan pings over ~8 s (analog jack, S16/stereo). Audio path unchanged in 0.31.2. |
+| `./build/doom wad/DOOM1.WAD --ppm-menu` | Renders all 5 menu screens (`192,015 B` each). |
+| `cyrius test tests/doom.tcyr` (WAD-free, CI subset) | **90/90** (+27 over 0.31.1's 63: `combat: melee wind-up` (F-G1), `chase collision-checked move` (F-G4), `spent barrel not a shield` (F-G5), `player inventory carry` (F-G6), `sprite rotation faces the viewer` (F-R1)). |
+| `./build/test_doom wad/DOOM1.WAD` (full) | **128/128** (90 WAD-free + 38 WAD-gated). |
+| `fuzz_wad` / `fuzz_fixed` / `fuzz_weapon` | **1000 / 50000 / 2000 clean**. |
+| `./build/doom wad/DOOM1.WAD --ppm` | E1M1 PPM at 192,015 B; map summary `V=467 L=475 SD=648 S=85 SG=732 SS=237 N=236 T=138` (138 raw map things). **Spawn count now skill-filtered** (F-U2): default HMP = 96 things (6 monsters, 52 items, 38 decor); skill 1 → 4 monsters, skill 5 → 29 (was a flat 29 on every skill). |
 | All 9 shareware maps (E1M1–E1M9) | E1M1/E1M3/E1M7/E1M9 PPM-rendered + **visually verified** at the 0.29.4 cut: the black-hole/void family is gone (≤0.1% viewport black). Remaining wall items catalogued on the roadmap (closed-sector-clip-inversion = closed-door-in-play, U-swap mirror, SLADRIP no-op, FLAT_MAX, bsp asr). |
 | bsp 1.1.3 standalone (upstream) | 79/79 tests, 13/13 benches sub-μs, 25K fuzz iters |
 | Lint / fmt | clean across all 20 src modules + vendored libs |
@@ -61,7 +61,10 @@ Current arc: **v0.28.x graphics** (review/hardening/parity/performance). The v0.
 
 | Slot | Status | What |
 |---|---|---|
-| **v0.30.7** | prepared 2026-06-29 (Linux verified — build/tests/fuzz/bench + `--audio-test` L/R pan + `--ppm-menu`; AGNOS QEMU not gated — kernel mid-overhaul) | **Positional/stereo SFX + Sound-menu live preview.** `audio_play_at` adds distance attenuation (full ≤160 u → silence at 1200 u) + stereo pan (DOOM swing-96 law); mixer is now per-voice stereo (`lvol`/`rvol`); monster death/pain + explosion are spatial, centered sounds bit-identical to 0.30.6. Sound slider previews live (DSPISTOL + pumped `audio_tick` in `menu_run`); `--audio-test` LEFT/RIGHT pings; defensive thermo clamp + else-gated slider. Pre-cut 27-agent review: 17/17 confirmed (L/R correct, centered bit-identity, overflow/sign-safe, AGNOS no-op), zero defects. Binary 621,080→623,520 B; `render_frame` 2.956 ms; 63/63 + 101/101; fuzz 1000/50000. |
+| **v0.31.2** | prepared 2026-07-04 (Linux verified — clean build/90+128 tests/1000-50000-2000 fuzz/bench/deps 100-0/PPM+menu; AGNOS builds clean, QEMU not gated — kernel mid-overhaul) | **Playability pass from the July Fable audit** ([`july-fable-audit.md`](july-fable-audit.md)) — 13 committable bites down the audit's fix order. Tier-1 gameplay: F-G1 melee wind-up clobber (instant-death fixed), F-G2/F-G3 door/lift thinker lifecycle + stay-open doors (soft-lock fixed), F-G4 collision-checked chase, F-G5 spent-barrel shield, F-G6 inventory carry. HIGH security: F-S1 texture-height clamp (canary-verified). Leaks: F-S2 sprite alloc, F-S4 PPM row buf. Hardening: F-S3/F-S5/F-S6. UI: F-U1 menu fall-through, F-U2 skill filter, F-U3/F-U4 edge-detection, F-U5/F-U9/F-U10 input, F-U7 audio pumping. Render: F-R1 sprite rotation. +27 regression asserts. Binary 554,320→558,448 B. Deferred → roadmap: F-R2/F-R3/F-R4/F-R5/F-R6, F-U6, F-U8. |
+| **v0.31.1** | 2026-07-04 | Audio iron-validated on archaemenid (root cause was an agnos LAPIC-timer miscalibration, fixed kernel-side in agnos 1.52.8); restored per-SFX logs, DMX pad skip. |
+| **v0.31.0** | 2026-07-04 | Sound on AGNOS via `sys_snd_*` (#64–#69); OUT_RATE 44100→48000 + Bresenham upsampler; adaptive ring-fill producer; toolchain 6.3.5→**6.4.2** (lock grew 37→100 via `lib sync --full`). |
+| **v0.30.7** | shipped 2026-06-29 | Positional/stereo SFX + Sound-menu live preview. `audio_play_at` distance attenuation + stereo pan; per-voice stereo mixer. Binary 621,080→623,520 B. |
 | **v0.30.6** | shipped 2026-06-29 | **SFX volume + Sound menu + ALSA hardening + bsp bump.** Options→Sound sub-menu (`MENU_SOUND`) with a DOOM thermometer slider → master `sfx_volume` (0–15) gain in `audio_tick` (v=15 bit-identical full, v=0 mute). `-ESTRPIPE` suspend/resume recovery; `audio_set_sw_params` gated on `audio_explicit_params` (fallback-buffer silence fixed). bsp 1.1.5→1.2.0 (no ABI; lock 37/0). Pre-cut 29-agent review: 20/20 confirmed, zero defects; 3 nice-to-haves → roadmap. Binary 619,224→621,080 B; `render_frame` 2.950 ms; 63/63 + 101/101; fuzz 1000/50000. |
 | **v0.30.5** | shipped 2026-06-29 | **Audio revive.** The dead ALSA/WAD-SFX path (`audio_play` had zero callers) is now live: 8-voice non-blocking software mixer (`audio_tick`), analog-card auto-pick (`audio_open_best` — old hardcoded card0 was HDMI), S16/stereo/44100 output (U8→S16 + mono→stereo + clean 4× upsample from 11025, since HDA rejects S8/mono/11025), idempotent init + `audio_shutdown` at exit, AGNOS `#ifdef` guards + `audio_load` null-cache guard, DMX validation, `--audio-test` harness, real WAD sounds wired to weapon/door/pickup/pain/death events. Pre-cut 29-agent review: 18 confirmed, 1 HIGH fixed (AGNOS null-write), MED/LOW → roadmap. Binary 613,720→619,224 B; `render_frame` 3.082 ms; 63/63 + 101/101; fuzz 1000/50000; deps 37/0. |
 | **v0.30.4** | shipped 2026-06-29 | **Toolchain + dependency bump.** cyrius pin 6.2.44→6.3.5 (drift closed), vani 0.9.4→0.9.5, bsp 1.1.3→1.1.5; `cyrius.lock` regenerated (37/0, transitive trio unmoved). No logic changes (only the banner). Picks up cyrius CVE-32 resolver fix. Binary 612,672→613,720 B; `render_frame` 2.971 ms; 63/63 + 101/101; fuzz clean. |
@@ -102,7 +105,7 @@ After 0.28.x: **v0.29.x** O4 micro-perf pass + deep renderer fidelity (F06 nativ
 
 | # | Issue | Workaround |
 |---|---|---|
-| 2 | `lib/yukti.cyr:39: duplicate fn 'sys_stat' (last definition wins)` — stdlib defines `sys_stat` and vani's transitively-bundled yukti also defines it (unannotated). | Codegen-identical, warning-only. Did not fire under cycc 6.0.29 or 6.0.83, but kept tracked until yukti drops `sys_stat` from its dist surface. Gated on a yukti rebundle. |
+| 2 | `lib/yukti.cyr:57: duplicate symbol 'ERR_TIMEOUT' redefined with conflicting value (last definition wins)` — on cycc 6.4.2 the yukti duplicate-symbol warning is now `ERR_TIMEOUT` (was `sys_stat` on the 6.0–6.3 stdlib; the earlier dup-fn moved/resolved when the lib snapshot changed). | Warning-only, last-definition-wins, codegen builds clean. Kept tracked until yukti re-bundles without the collision. Gated on a yukti rebundle. |
 > Issue #3 (cycc `--agnos` 3-operand-chained-constant-multiply miscompile — `alloc(320*200*4)` folded to 800 not 256000 on `--agnos` only, root cause of the 0.29.1 AGNOS world-tick freeze) was **resolved in 0.29.2** by the toolchain pin bump to cycc 6.1.37. The 0.29.1 2-operand workarounds in `framebuf.cyr` + `render.cyr` were reverted to the clean chained form and the fold **verified on the actual `--agnos` binary in QEMU** (serial: fb_buf=256000, scalelight=6144, zlight=16384). Confirmed broken on cycc 6.1.29 + 6.1.35.
 >
 > Issue #1 (cycc 6.0.1 lockfile-writer regression — empty `cyrius.lock`) was **resolved in 0.27.5**: toolchain pin bumped to 6.0.29, whose `cyrius deps` writes a canonical lock; `cyrius deps --verify` is unconditional again. The 0.28.4 pin bump to 6.1.29 changed the bundled stdlib, so the committed lock was **regenerated** against it (`rm -rf lib && cyrius deps` → **37 entries**, verify 37/0). `./lib/` is a gitignored build artifact, so the lock must always match the pinned toolchain's stdlib — regenerate + commit it whenever the pin moves. (An earlier 0.28.4 attempt mis-diagnosed this as a "writer regression" and added a CI lock-restore guard; that guard verified the *stale* lock against the *new* stdlib and broke CI — reverted.)

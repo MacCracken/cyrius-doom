@@ -115,6 +115,10 @@ enum ThingLayout {
 var things = 0;
 var thing_count = 0;
 
+# Selected skill (1=ITYTD .. 5=NM), set from the skill menu (audit F-U2).
+# Default 3 (Hurt Me Plenty) — used when the menu is skipped (direct-map CLI).
+var game_skill = 3;
+
 enum ThingFlags {
     TF_ACTIVE = 1;
     TF_SOLID = 2;
@@ -265,6 +269,17 @@ fn things_spawn_from_map(): i64 {
 
         # Skip player starts
         if (ttype >= TTYPE_PLAYER1 && ttype <= TTYPE_PLAYER4) { continue; }
+
+        # Skill + single-player filter (audit F-U2). The THINGS options word was
+        # stored but never read, so every skill spawned the same set and
+        # multiplayer-only things leaked into single-player. Skill 1&2 -> 0x01,
+        # 3 -> 0x02, 4&5 -> 0x04; 0x10 = multiplayer-only (never in SP).
+        var opts = map_thing_options(i);
+        if ((opts & 16) != 0) { continue; }
+        var skill_bit = 4;
+        if (game_skill <= 2) { skill_bit = 1; }
+        else { if (game_skill == 3) { skill_bit = 2; } }
+        if ((opts & skill_bit) == 0) { continue; }
 
         var cat = thing_classify(ttype);
         var idx = thing_count;
@@ -458,12 +473,31 @@ fn thing_animate(idx): i64 {
 fn thing_ai_tick(idx): i64 {
     var flags = thing_flags(idx);
     if ((flags & TF_ACTIVE) == 0) { return 0; }
-    if ((flags & TF_SHOOTABLE) == 0) { return 0; }
 
     var cat = thing_category(idx);
-    if (cat != CAT_MONSTER) { return 0; }
-
     var state = thing_state(idx);
+
+    # Non-monster things: only a detonated decoration (barrel) needs ticking —
+    # advance its death frames to an inert corpse. Done BEFORE the shootable
+    # gate below so a barrel that already dropped TF_SHOOTABLE at detonation
+    # still progresses to STATE_DEAD instead of freezing forever on a die frame
+    # as a permanent bullet-shield (audit F-G5). Everything else non-monster
+    # (live items, static decor) is inert here.
+    if (cat != CAT_MONSTER) {
+        if (state == STATE_DIE) {
+            var dt = thing_tics(idx);
+            if (dt > 0) {
+                thing_set_tics(idx, dt - 1);
+            } else {
+                thing_set_state(idx, STATE_DEAD);
+                thing_set_flags(idx, TF_ACTIVE | TF_CORPSE);
+            }
+        }
+        return 0;
+    }
+
+    if ((flags & TF_SHOOTABLE) == 0) { return 0; }
+
     var tx = thing_x(idx);
     var ty = thing_y(idx);
 
@@ -494,31 +528,53 @@ fn thing_ai_tick(idx): i64 {
     }
 
     if (state == STATE_CHASE) {
-        # Move toward player
+        # Resolve line-of-sight ONCE — it gates both the attack transition and
+        # the give-up timer, and used to be recomputed up to 3x/tick here.
+        var sight = thing_check_sight(tx, ty, player_x, player_y);
+
+        # Move toward player, collision-checked (audit F-G4). Monsters used to
+        # set x/y directly with zero collision — phasing through one-sided walls,
+        # closed doors, and ledges into other rooms. Reuse the player's collision
+        # core (player_check_position blocks solid walls z-independently and
+        # closed doors via its ceiling-gap test). Try the diagonal; if blocked,
+        # slide along a single axis so a monster can round a corner; else hold.
         var ang = fixed_atan2(player_y - ty, player_x - tx);
         var mx = fixed_mul(fixed_cos(ang), MONSTER_CHASE_SPEED);
         var my = fixed_mul(fixed_sin(ang), MONSTER_CHASE_SPEED);
-        thing_set_x(idx, tx + mx);
-        thing_set_y(idx, ty + my);
         thing_set_angle(idx, ang);
-
-        # Check if in attack range
-        if (dist < MONSTER_ATTACK_RANGE) {
-            if (thing_check_sight(tx, ty, player_x, player_y) == 1) {
-                thing_set_state(idx, STATE_ATTACK);
-                thing_set_tics(idx, 15);
+        if (player_check_position(tx + mx, ty + my) == 1) {
+            thing_set_x(idx, tx + mx);
+            thing_set_y(idx, ty + my);
+        } else {
+            if (player_check_position(tx + mx, ty) == 1) {
+                thing_set_x(idx, tx + mx);
+            } else {
+                if (player_check_position(tx, ty + my) == 1) {
+                    thing_set_y(idx, ty + my);
+                }
             }
         }
 
-        # Lost sight? Go back to spawn after timeout
-        if (thing_check_sight(tx, ty, player_x, player_y) == 0) {
-            var tics = thing_tics(idx);
-            thing_set_tics(idx, tics + 1);
-            if (tics > 100) {
-                thing_set_state(idx, STATE_SPAWN);
-            }
+        # In range + visible: arm the attack wind-up. This MUST be exclusive
+        # with the give-up-timer reset below (via if/else): when this branch
+        # runs it sets tics=15, and a sibling `else { tics = 0 }` on the same
+        # tick would wipe the wind-up, making the next STATE_ATTACK land
+        # damage instantly (the ~245 DPS instant-death bug, audit F-G1).
+        if (dist < MONSTER_ATTACK_RANGE && sight == 1) {
+            thing_set_state(idx, STATE_ATTACK);
+            thing_set_tics(idx, 15);
         } else {
-            thing_set_tics(idx, 0);
+            # Lost sight? Give up after a grace window. Visible-but-not-in-range
+            # resets the timer.
+            if (sight == 0) {
+                var tics = thing_tics(idx);
+                thing_set_tics(idx, tics + 1);
+                if (tics > 100) {
+                    thing_set_state(idx, STATE_SPAWN);
+                }
+            } else {
+                thing_set_tics(idx, 0);
+            }
         }
     }
 
@@ -665,7 +721,13 @@ fn thing_damage(idx, damage): i64 {
         sound_monster_die();
         audio_play_at("DSPODTH1", thing_x(idx), thing_y(idx));
         # Barrels detonate instead of dying quietly — radius damage + chain.
-        if (ttype == TTYPE_BARREL) { thing_explode(idx, 128 << 16, 128); }
+        # Drop shootable/solid the instant they blow (keeping TF_ACTIVE for the
+        # explosion sprite + death-frame progression) so a spent barrel stops
+        # absorbing shots aimed at the monster behind it (audit F-G5).
+        if (ttype == TTYPE_BARREL) {
+            thing_set_flags(idx, TF_ACTIVE);
+            thing_explode(idx, 128 << 16, 128);
+        }
         return 0;
     }
 

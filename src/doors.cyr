@@ -26,6 +26,10 @@ enum DoorState {
     DS_LIFT_DOWN = 5;
     DS_LIFT_WAIT = 6;
     DS_LIFT_UP = 7;
+    # "Open and stay open" doors (D1/W1/S1 specials 2/31/46/103). These raise
+    # once and latch — they never wait+close. Distinct opening state so
+    # doors_tick knows to release the thinker (not schedule a close) at the top.
+    DS_OPENING_STAY = 8;
 }
 
 # Thinker entry: sector(8) state(8) height(8) target(8) wait(8) original(8) = 48 bytes
@@ -45,9 +49,33 @@ fn door_target(idx): i64 { return load64(door_thinkers + idx * DOOR_ENTRY_SIZE +
 fn door_wait(idx): i64 { return load64(door_thinkers + idx * DOOR_ENTRY_SIZE + 32); }
 fn door_original(idx): i64 { return load64(door_thinkers + idx * DOOR_ENTRY_SIZE + 40); }
 
+fn door_set_sector(idx, v): i64 { store64(door_thinkers + idx * DOOR_ENTRY_SIZE, v); return 0; }
 fn door_set_state(idx, v): i64 { store64(door_thinkers + idx * DOOR_ENTRY_SIZE + 8, v); return 0; }
 fn door_set_height(idx, v): i64 { store64(door_thinkers + idx * DOOR_ENTRY_SIZE + 16, v); return 0; }
 fn door_set_wait(idx, v): i64 { store64(door_thinkers + idx * DOOR_ENTRY_SIZE + 32, v); return 0; }
+
+# Release a completed thinker: mark the slot free (sector = -1) so its sector
+# can be triggered again, and so door_alloc_slot can reclaim the slot. Before
+# this, a finished door/lift sat in the array forever (state DS_CLOSED, never
+# handled), permanently blocking re-activation — doors/lifts were one-shot per
+# map and capped at DOOR_MAX total activations (audit F-G2).
+fn door_free(idx): i64 {
+    door_set_sector(idx, 0 - 1);
+    door_set_state(idx, DS_NONE);
+    return 0;
+}
+
+# Pick a slot for a new thinker: reuse a freed one if any, else append (bounded
+# by DOOR_MAX). Returns -1 only if all DOOR_MAX slots are simultaneously live.
+fn door_alloc_slot(): i64 {
+    for (var i = 0; i < door_count; i += 1) {
+        if (door_sector(i) < 0) { return i; }
+    }
+    if (door_count >= DOOR_MAX) { return 0 - 1; }
+    var idx = door_count;
+    door_count += 1;
+    return idx;
+}
 
 # Find the highest ceiling of sectors neighboring a given sector
 fn find_highest_neighbor_ceil(sector_idx): i64 {
@@ -93,44 +121,49 @@ fn find_lowest_neighbor_floor(sector_idx): i64 {
     return best;
 }
 
-# Check if sector already has an active thinker
+# Check if sector already has an active thinker (skips freed slots)
 fn door_find_sector(sector_idx): i64 {
     for (var i = 0; i < door_count; i += 1) {
+        if (door_sector(i) < 0) { continue; }
         if (door_sector(i) == sector_idx) { return i; }
     }
     return -1;
 }
 
-# Open a door (raise ceiling)
-fn door_open(sector_idx): i64 {
+# Open a door (raise ceiling). `open_state` selects the behaviour:
+#   DS_OPENING      -> open, wait, close  (DR/SR repeatable, DR-locked)
+#   DS_OPENING_STAY -> open and latch     (D1/W1/S1 stay-open)
+fn door_start(sector_idx, open_state): i64 {
     if (door_find_sector(sector_idx) >= 0) { return 0; }
-    if (door_count >= DOOR_MAX) { return 0; }
+    var idx = door_alloc_slot();
+    if (idx < 0) { return 0; }
 
-    var idx = door_count;
     var base = door_thinkers + idx * DOOR_ENTRY_SIZE;
-    var floor_h = map_sector_floorh(sector_idx);
     var ceil_h = map_sector_ceilh(sector_idx);
     var target = find_highest_neighbor_ceil(sector_idx) - 4;
 
     store64(base, sector_idx);
-    store64(base + 8, DS_OPENING);
+    store64(base + 8, open_state);
     store64(base + 16, ceil_h);
     store64(base + 24, target);
     store64(base + 32, 0);
     store64(base + 40, ceil_h);
 
-    door_count += 1;
     sound_door_open();
     audio_play_name("DSDOROPN");
     return 0;
 }
 
-# Activate a lift (lower floor)
+fn door_open(sector_idx): i64 { return door_start(sector_idx, DS_OPENING); }
+fn door_open_stay(sector_idx): i64 { return door_start(sector_idx, DS_OPENING_STAY); }
+
+# Activate a lift (lower floor, wait, raise). Repeatable — the thinker frees
+# itself once it returns to the top (audit F-G2), so it can be ridden again.
 fn lift_activate(sector_idx): i64 {
     if (door_find_sector(sector_idx) >= 0) { return 0; }
-    if (door_count >= DOOR_MAX) { return 0; }
+    var idx = door_alloc_slot();
+    if (idx < 0) { return 0; }
 
-    var idx = door_count;
     var base = door_thinkers + idx * DOOR_ENTRY_SIZE;
     var floor_h = map_sector_floorh(sector_idx);
     var target = find_lowest_neighbor_floor(sector_idx);
@@ -142,68 +175,88 @@ fn lift_activate(sector_idx): i64 {
     store64(base + 32, 0);
     store64(base + 40, floor_h);
 
-    door_count += 1;
     return 0;
 }
 
-# Tick all active door/lift thinkers
+# Tick all active door/lift thinkers.
+#
+# Flat, mutually-exclusive `if (state == …)` blocks over a snapshot of `state`
+# (the established codebase pattern — see thing_ai_tick — replacing the prior
+# `switch`, which the audit flagged as latent cycc return-smash risk). Terminal
+# states (fully open+latched, fully closed, lift back at top) call door_free(i)
+# so the sector can be re-triggered (audit F-G2 / F-G3).
 fn doors_tick(): i64 {
     for (var i = 0; i < door_count; i += 1) {
         var sec = door_sector(i);
+        if (sec < 0) { continue; }             # freed slot — skip
         var state = door_state(i);
         var h = door_height(i);
         var target = door_target(i);
         var w = door_wait(i);
         var orig = door_original(i);
 
-        # DS_OPENING=1, DS_OPEN=2, DS_CLOSING=3, DS_CLOSED=4
-        # DS_LIFT_DOWN=5, DS_LIFT_WAIT=6, DS_LIFT_UP=7
-        switch (state) {
-            case 1: {
-                h += DOOR_SPEED;
-                if (h >= target) {
-                    h = target;
-                    door_set_state(i, DS_OPEN);
-                    door_set_wait(i, DOOR_WAIT);
-                }
+        if (state == DS_OPENING) {
+            h += DOOR_SPEED;
+            if (h >= target) {
+                h = target;
+                door_set_state(i, DS_OPEN);
+                door_set_wait(i, DOOR_WAIT);
+            }
+            door_set_height(i, h);
+            store64(map_sectors + sec * MAP_SECTOR_SIZE + 8, h);
+        }
+        if (state == DS_OPENING_STAY) {
+            h += DOOR_SPEED;
+            if (h >= target) {
+                h = target;
+                door_set_height(i, h);
+                store64(map_sectors + sec * MAP_SECTOR_SIZE + 8, h);
+                door_free(i);                  # latch open, release the slot
+            } else {
                 door_set_height(i, h);
                 store64(map_sectors + sec * MAP_SECTOR_SIZE + 8, h);
             }
-            case 2: {
-                w -= 1;
-                door_set_wait(i, w);
-                if (w <= 0) { door_set_state(i, DS_CLOSING); }
-            }
-            case 3: {
-                h -= DOOR_SPEED;
-                if (h <= orig) {
-                    h = orig;
-                    door_set_state(i, DS_CLOSED);
-                }
+        }
+        if (state == DS_OPEN) {
+            w -= 1;
+            door_set_wait(i, w);
+            if (w <= 0) { door_set_state(i, DS_CLOSING); }
+        }
+        if (state == DS_CLOSING) {
+            h -= DOOR_SPEED;
+            if (h <= orig) {
+                h = orig;
+                door_set_height(i, h);
+                store64(map_sectors + sec * MAP_SECTOR_SIZE + 8, h);
+                door_free(i);                  # fully closed, release the slot
+            } else {
                 door_set_height(i, h);
                 store64(map_sectors + sec * MAP_SECTOR_SIZE + 8, h);
             }
-            case 5: {
-                h -= LIFT_SPEED;
-                if (h <= target) {
-                    h = target;
-                    door_set_state(i, DS_LIFT_WAIT);
-                    door_set_wait(i, LIFT_WAIT);
-                }
+        }
+        if (state == DS_LIFT_DOWN) {
+            h -= LIFT_SPEED;
+            if (h <= target) {
+                h = target;
+                door_set_state(i, DS_LIFT_WAIT);
+                door_set_wait(i, LIFT_WAIT);
+            }
+            door_set_height(i, h);
+            store64(map_sectors + sec * MAP_SECTOR_SIZE, h);
+        }
+        if (state == DS_LIFT_WAIT) {
+            w -= 1;
+            door_set_wait(i, w);
+            if (w <= 0) { door_set_state(i, DS_LIFT_UP); }
+        }
+        if (state == DS_LIFT_UP) {
+            h += LIFT_SPEED;
+            if (h >= orig) {
+                h = orig;
                 door_set_height(i, h);
                 store64(map_sectors + sec * MAP_SECTOR_SIZE, h);
-            }
-            case 6: {
-                w -= 1;
-                door_set_wait(i, w);
-                if (w <= 0) { door_set_state(i, DS_LIFT_UP); }
-            }
-            case 7: {
-                h += LIFT_SPEED;
-                if (h >= orig) {
-                    h = orig;
-                    door_set_state(i, DS_CLOSED);
-                }
+                door_free(i);                  # back at top, release the slot
+            } else {
                 door_set_height(i, h);
                 store64(map_sectors + sec * MAP_SECTOR_SIZE, h);
             }
@@ -272,7 +325,7 @@ fn doors_use(): i64 {
             case 27: { if ((player_keys & KEY_CARD_YELLOW) != 0) { door_open(door_sec); } }
             case 28: { if ((player_keys & KEY_CARD_RED) != 0) { door_open(door_sec); } }
             case 29: { door_open(door_sec); }
-            case 31: { door_open(door_sec); }
+            case 31: { door_open_stay(door_sec); }   # D1 open & stay
             case 63: { door_open(door_sec); }
             case 90: { door_open(door_sec); }
             case 117: { door_open(door_sec); }
@@ -304,7 +357,7 @@ fn doors_use(): i64 {
                     case 70: { lift_activate(si); }
                     case 71: { lift_activate(si); }
                     case 102: { lift_activate(si); }
-                    case 103: { door_open(si); }
+                    case 103: { door_open_stay(si); }   # S1 open & stay
                 }
             }
         }
@@ -365,8 +418,8 @@ fn doors_walk_trigger(old_x, old_y, new_x, new_y): i64 {
                 var stag = load64(map_sectors + si * MAP_SECTOR_SIZE + 48);
                 if (stag == tag) {
                     switch (special) {
-                        case 2: { door_open(si); }
-                        case 4: { door_open(si); }
+                        case 2: { door_open_stay(si); }   # W1 open & stay
+                        case 4: { door_open(si); }        # W1 open wait close
                         case 10: { lift_activate(si); }
                         case 38: { lift_activate(si); }
                         case 70: { lift_activate(si); }
