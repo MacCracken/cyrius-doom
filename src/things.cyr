@@ -333,6 +333,12 @@ fn things_spawn_from_map(): i64 {
         store64(base + 88, 56 << 16);
         store64(base + 96, 0);
         store64(base + 112, 0);
+        # Corpse decor spawns on its corpse frame (RC-S3): dead marine (15) =
+        # PLAY N, gibbed marine (10/12) = PLAY W. Decor never animates, so the
+        # spawn frame is the displayed frame — without this, 10/12 rendered as
+        # STANDING marines and 15 would too.
+        if (ttype == 15) { store64(base + 112, 13); }
+        if (ttype == 10 || ttype == 12) { store64(base + 112, 22); }
 
         thing_count += 1;
     }

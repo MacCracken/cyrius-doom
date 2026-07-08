@@ -7,6 +7,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.31.5] - 2026-07-04
 
+### Fixed
+
+**Bite A of the [2026-07-08 render-consistency audit](docs/audit/2026-07-08-render-consistency.md)**
+(2026-07-08) — the six self-contained quick wins, each verified against staged-viewpoint PPMs
+(repro coordinates in the audit appendix):
+
+- **RC-S3 — 12 shareware thing types were invisible.** They spawned and functioned
+  (`things.cyr` knows them) but had no `sprite_build_lookup` entry: spectre 58 (**63
+  invisible attacking monsters** across E1M3–M9; renders as a plain demon until a fuzz
+  effect exists), shell box 2049, rocket box 2046, rocket ammo 2010, backpack 8,
+  dead marine 15, blood pool 24, candelabra 35, blur sphere 2024, radsuit 2025,
+  computer map 2026, goggles 2045. Corpse decor now spawns on its corpse frame
+  (15 → PLAY N; gibs 10/12 → PLAY W — these two previously rendered as **standing
+  marines**). Verified: staged item/corpse views + spectre lump trace (SARG resolves;
+  its remaining crop is the known 0.28.6 clip keystone).
+- **RC-S4 — `fixed_atan2` compressed every octant to half range** (coefficient 128
+  where the diamond-angle form needs 256): outputs 65–191 were unreachable and the
+  result jumped 64→192 crossing the diagonal — wrong sprite rotation bands, monsters
+  chasing up to 22.5° off-course, stereo pan snapping 45°. Now full-range and continuous
+  to ≤2 angle units at the octant seam.
+- **RC-S5 — magnified sprites drew as shredded horizontal stripes.** The vertical
+  scaler iterated source rows (`scr_y = sy1 + src_y*sprite_h/ph`), skipping screen rows
+  whenever a sprite was closer than ~160 units. Columns now decode into a dense buffer
+  and the draw loop iterates screen rows sampling the source — same scheme the
+  horizontal axis already used. Verified: the close-range trooper staging shot.
+- **RC-W1 — sky-to-sky portal upper walls were drawn** where vanilla suppresses them
+  (`worldhigh = worldtop`): the E1M1 courtyard showed a screen-filling STARTAN3 band
+  instead of open sky. Both-ceilings-sky portals now draw the band as sky, V-anchored
+  with the ceiling sky above it (new shared `render_draw_sky_column`; F09 horizon
+  anchoring unchanged, still 0.28.7).
+- **RC-W2 — closed-sector portals are now promoted to solid walls** (vanilla
+  `R_AddLine`: back ceil ≤ back floor, back ceil ≤ front floor, or back floor ≥ front
+  ceil). Closed doors had `clip_top == clip_bottom` — a see-through seam of
+  farther-room pixels across the door face — and never occluded, so segs and sprites
+  kept rendering behind them. The upper/lower sections now also meet across the old
+  seam row (gap coverage), closed portals collapse the column clip (occludes the
+  sprite pass too), and no longer burn a masked-seg slot.
+- **RC-W5 — masked midtextures drew far-over-near** (forward iteration over the
+  front-to-back store): a farther grate overpainted a nearer one. Drawn in reverse
+  (painter's order) until 0.28.6 lands true depth clipping.
+
+Perf: `render_frame` **3.049 ms** vs **3.048 ms** for the pre-change tree rebuilt under
+the same compiler (A/B) — variance-level, no regression. Absolute numbers moved vs the
+0.31.4 row (2.870 ms) because the local toolchain drifted to **cycc 6.4.29**, which also
+shrinks the plain binary to **379,664 B** (untouched `texture_get_column` moved 678→727 ns
+in the same run — codegen drift, not this change; the 6.4.2 pin is unchanged). E1M1 spawn
+PPM differs from 0.31.4 only in sprite rows 94–121 (394 px: resampling + newly visible
+items); walls/flats byte-identical. All 9 shareware maps render clean (192,015 B PPMs).
+
+### Added
+
+- **+21 regression asserts** — `fixed_atan2` full-range octants (10, WAD-free: axis
+  anchors, four diagonals at 128/384/640/896, monotone + continuous seam) and sprite
+  lookup coverage for all 12 RC-S3 types (11, WAD-gated). Tests **105 → 115** WAD-free,
+  **143 → 164** full.
+
 ### Changed
 
 - **`vani-core` 0.9.5 → 0.9.9, and converted from a git `[deps.vani]` dep to a

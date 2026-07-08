@@ -154,6 +154,29 @@ fn main() {
     assert_eq(angle_sub(0, 1), ANG_MASK, "0-1 = 1023 (wrap)");
 
     # ============================================================
+    test_group("fixed_atan2: full-range octants (RC-S4 regression)");
+    # ============================================================
+    # The octant coefficient must be 256 (a quadrant is 256 angle units, the
+    # diagonal 128). With 128, outputs compressed to 0..64 / 192..256 and
+    # jumped 64->192 as ay crossed ax — wrong sprite rotations, off-course
+    # chase headings, snapping stereo pan.
+
+    assert_eq(fixed_atan2(0, 65536), 0, "atan2(0,+x) = 0");
+    assert_eq(fixed_atan2(65536, 0), ANG90, "atan2(+y,0) = ANG90");
+    assert_eq(fixed_atan2(0, -65536), ANG180, "atan2(0,-x) = ANG180");
+    assert_eq(fixed_atan2(-65536, 0), ANG270, "atan2(-y,0) = ANG270");
+    assert_eq(fixed_atan2(65536, 65536), 128, "atan2(+y,+x) diagonal = 128 (was 64)");
+    assert_eq(fixed_atan2(65536, -65536), 384, "atan2(+y,-x) diagonal = 384");
+    assert_eq(fixed_atan2(-65536, -65536), 640, "atan2(-y,-x) diagonal = 640");
+    assert_eq(fixed_atan2(-65536, 65536), 896, "atan2(-y,+x) diagonal = 896");
+    var at_lo = fixed_atan2(65535, 65536);
+    var at_hi = fixed_atan2(65537, 65536);
+    assert(at_hi - at_lo >= 0, "atan2 monotonic across the diagonal");
+    # The two octant branches truncate in opposite directions, so the seam is
+    # up to 2 angle units (~0.7 deg) — vs the 128-unit (45 deg) jump pre-fix.
+    assert(at_hi - at_lo <= 2, "atan2 continuous across the diagonal (was a 128-unit jump)");
+
+    # ============================================================
     test_group("combat: RNG (p_random)");
     # ============================================================
     # Deterministic LCG: same seed reproduces the sequence; bytes stay 0..255.
@@ -637,6 +660,28 @@ fn main() {
 
         render_load_sky();
         sprite_init();
+
+        # ============================================================
+        test_group("sprite: lookup coverage (RC-S3 regression)");
+        # ============================================================
+        # These 12 types spawned and functioned but had no lookup entry, so
+        # they rendered INVISIBLE (63 attacking spectres across E1M3-M9,
+        # every shell/rocket box, powerups, corpse decor).
+
+        var sp_l, sp_f = sprite_find_frame(58, 1, 0);
+        assert(sp_l >= 0, "spectre (58) resolves a SARG lump");
+        assert(sprite_find_lump(2049) >= 0, "shell box (2049) resolves SBOXA0");
+        assert(sprite_find_lump(2046) >= 0, "rocket box (2046) resolves BROKA0");
+        assert(sprite_find_lump(2010) >= 0, "rocket ammo (2010) resolves ROCKA0");
+        assert(sprite_find_lump(8) >= 0, "backpack (8) resolves BPAKA0");
+        assert(sprite_find_lump(24) >= 0, "blood pool (24) resolves POL5A0");
+        assert(sprite_find_lump(35) >= 0, "candelabra (35) resolves CBRAA0");
+        assert(sprite_find_lump(2024) >= 0, "blur sphere (2024) resolves PINSA0");
+        assert(sprite_find_lump(2025) >= 0, "radsuit (2025) resolves SUITA0");
+        var dp_l, dp_f = sprite_find_frame(15, 0, 13);
+        assert(dp_l >= 0, "dead marine (15) frame N resolves PLAYN0");
+        var gb_l, gb_f = sprite_find_frame(10, 0, 22);
+        assert(gb_l >= 0, "gibbed marine (10) frame W resolves PLAYW0");
 
         view_x = player_start_x();
         view_y = player_start_y();

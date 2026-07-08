@@ -81,6 +81,23 @@ fn sprite_build_lookup(): i64 {
     sprite_add_lookup(12, "PLAY");
     # Rocket-in-flight (synthetic projectile type, see things.cyr MissileConst).
     sprite_add_lookup(TTYPE_ROCKET_MISSILE, "MISL");
+    # 2026-07-08 audit RC-S3: these 12 shareware types spawned and functioned
+    # (things.cyr knows them) but had no lookup entry, so they were INVISIBLE —
+    # including 63 attacking spectres across E1M3-M9. Spectre renders as a
+    # plain demon until a fuzz effect exists. Corpse types (10/12/15) rely on
+    # things_spawn_from_map setting their PLAY corpse frame (W/W/N).
+    sprite_add_lookup(TTYPE_SPECTRE, "SARG");
+    sprite_add_lookup(8, "BPAK");
+    sprite_add_lookup(15, "PLAY");
+    sprite_add_lookup(24, "POL5");
+    sprite_add_lookup(35, "CBRA");
+    sprite_add_lookup(2010, "ROCK");
+    sprite_add_lookup(2024, "PINS");
+    sprite_add_lookup(2025, "SUIT");
+    sprite_add_lookup(2026, "PMAP");
+    sprite_add_lookup(2045, "PVIS");
+    sprite_add_lookup(2046, "BROK");
+    sprite_add_lookup(2049, "SBOX");
     return 0;
 }
 
@@ -92,6 +109,12 @@ var _spr_prefix = 0;
 # it used to be `alloc(16384)` inside sprite_render_all, i.e. 16 KB leaked
 # every frame on the never-free bump allocator (~560 KB/s @ 35 Hz, audit F-S2).
 var spr_patch_buf = 0;
+
+# Dense column scratch for the screen-driven vertical scaler (RC-S5): each
+# sprite column's posts decode into this before drawing, so the draw loop can
+# iterate SCREEN rows and sample the source. Index 0 = transparent, matching
+# the patch decoders. 256 bytes caps the source height (DOOM sprites max 128).
+var spr_col_buf = 0;
 
 fn sprite_find_lump(thing_type): i64 {
     if (_spr_prefix == 0) { _spr_prefix = alloc(16); }
@@ -273,6 +296,7 @@ fn sprite_render_all(): i64 {
     # Dedicated sprite patch buffer (so wad_read_lump doesn't clobber it).
     # Lazy-init once; see the file-scope declaration (audit F-S2).
     if (spr_patch_buf == 0) { spr_patch_buf = alloc(16384); }
+    if (spr_col_buf == 0) { spr_col_buf = alloc(256); }
 
     for (var si = 0; si < sprite_visible; si += 1) {
         var thing_idx = load64(sprite_order + si * 8);
@@ -399,7 +423,15 @@ fn sprite_render_all(): i64 {
             if (col_off >= psz) { continue; }
             var post_ptr = pdata + col_off;
 
-            # Read posts
+            # Decode the post-encoded column into a dense buffer first. The old
+            # loop iterated SOURCE rows and computed each one's screen row —
+            # source-driven, so a magnified sprite (sprite_h > ph, i.e. closer
+            # than ~160 units at 1:1) skipped screen rows between successive
+            # source rows and drew as shredded horizontal stripes (RC-S5).
+            var ph_c = ph;
+            if (ph_c > 256) { ph_c = 256; }
+            for (var zy = 0; zy < ph_c; zy += 1) { store8(spr_col_buf + zy, 0); }
+
             var safety = 0;
             while (safety < 128) {
                 if (post_ptr + 1 >= pend) { break; }
@@ -410,21 +442,30 @@ fn sprite_render_all(): i64 {
                 var pixels = post_ptr + 3;
 
                 for (var py = 0; py < length; py += 1) {
-                    var src_y = topdelta + py;
-                    var scr_y = sy1 + src_y * sprite_h / ph;
-                    if (scr_y < 0) { continue; }
-                    if (scr_y >= SCREEN_HEIGHT) { continue; }
-                    if (scr_y < clip_t) { continue; }
-                    if (scr_y > clip_b) { continue; }
-
-                    var pal = load8(pixels + py);
-                    if (pal != 0) {
-                        framebuf_pixel(scr_x, scr_y, render_shade(pal, spr_light));
-                    }
+                    var dy = topdelta + py;
+                    if (dy < ph_c) { store8(spr_col_buf + dy, load8(pixels + py)); }
                 }
 
                 post_ptr += 4 + length;
                 safety += 1;
+            }
+
+            # Screen-driven draw: iterate the on-screen rows and sample the
+            # source (nearest), exactly how the horizontal axis already works
+            # (src_col = c*pw/sprite_w). Dense in screen space at any scale.
+            var y_lo = sy1;
+            if (y_lo < 0) { y_lo = 0; }
+            if (y_lo < clip_t) { y_lo = clip_t; }
+            var y_hi = sy1 + sprite_h - 1;
+            if (y_hi > SCREEN_HEIGHT - 1) { y_hi = SCREEN_HEIGHT - 1; }
+            if (y_hi > clip_b) { y_hi = clip_b; }
+            for (var scr_y = y_lo; scr_y <= y_hi; scr_y += 1) {
+                var src_y = (scr_y - sy1) * ph / sprite_h;
+                if (src_y >= ph_c) { src_y = ph_c - 1; }
+                var pal = load8(spr_col_buf + src_y);
+                if (pal != 0) {
+                    framebuf_pixel(scr_x, scr_y, render_shade(pal, spr_light));
+                }
             }
         }
     }

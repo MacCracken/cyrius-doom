@@ -101,11 +101,17 @@ fn fixed_atan2(y, x): i64 {
         return ANG180;
     }
 
+    # Diamond-angle approximation over the first quadrant: exact at 0/45/90
+    # degrees, <= ~4 deg between. The coefficient must be 256 (a full quadrant
+    # is 256 units, so the diagonal is 128): with 128 each octant compressed to
+    # half its range (0..64 and 192..256), 65..191 was unreachable, and the
+    # result jumped 64->192 as ay crossed ax — wrong sprite rotation bands,
+    # off-course monster chase headings, and a 45-degree pan snap (RC-S4).
     var ang = 0;
     if (ax >= ay) {
-        ang = 128 * ay / (ax + ay);
+        ang = 256 * ay / (ax + ay);
     } else {
-        ang = 256 - 128 * ax / (ax + ay);
+        ang = 256 - 256 * ax / (ax + ay);
     }
 
     if (x < 0) {

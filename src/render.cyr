@@ -55,6 +55,27 @@ fn render_load_sky(): i64 {
     return 0;
 }
 
+# Draw sky texture rows [y1, y2] into screen column col. v_ref is the screen
+# row where texture V = 0, so stacked sky bands in one column (ceiling sky +
+# a sky-to-sky portal band below it) stay continuous — pass the same v_ref
+# (the column's clip top) for both. Horizontal mapping: full turn = FOUR
+# texture wraps (DOOM ANGLETOSKYSHIFT), one screen width = one wrap (F-R2).
+# V is still anchored per-column at v_ref, not the horizon — that parity gap
+# is F09 (0.28.7), unchanged here.
+fn render_draw_sky_column(col, y1, y2, v_ref): i64 {
+    if (sky_tex_idx < 0) { return 0; }
+    var sky_w = load64(tex_table + sky_tex_idx * TEX_ENTRY_SIZE + 8);
+    var sky_h = load64(tex_table + sky_tex_idx * TEX_ENTRY_SIZE + 16);
+    if (sky_w <= 0) { return 0; }
+    if (sky_h <= 0) { return 0; }
+    var sky_col = (view_angle * sky_w * 4 / ANG360 + col * sky_w / SCREEN_WIDTH) % sky_w;
+    if (sky_col < 0) { sky_col += sky_w; }
+    var sky_step = fixed_div(sky_h << 16, HALF_HEIGHT << 16);
+    render_draw_tex_column(col, y1, y2, sky_tex_idx, sky_col,
+    (y1 - v_ref) * sky_step, sky_step, 0);
+    return 0;
+}
+
 # Weapon sprite: drawn as screen overlay after all 3D rendering
 var weapon_lump = -1;
 var weapon_patch_buf = 0;
@@ -446,7 +467,7 @@ var vp_ceil_h = 0;
 # ================================================================
 # Masked midtexture drawsegs: deferred two-sided middle textures
 # Stored during BSP wall pass, rendered after walls before sprites
-# Each entry: 13 fields * 8 = 104 bytes
+# Each entry: 15 fields * 8 = 120 bytes (MASKED_ENTRY_SIZE)
 #   0: sx1   8: sx2   16: mid_tex  24: lightnum
 #  32: ty1  40: ty2   48: u_left   56: u_right   (screen-ordered texture-U)
 #  64: sd_xoff  72: sd_yoff  80: floor_h  88: ceil_h
@@ -742,6 +763,7 @@ fn render_seg(seg_idx): i64 {
     var is_twosided = map_linedef_flags(line_idx) & ML_TWOSIDED;
     var back_floor_h = floor_h;
     var back_ceil_h = ceil_h;
+    var back_is_sky = 0;
 
     if (is_twosided != 0) {
         var back_side_idx = map_linedef_side_left(line_idx);
@@ -750,18 +772,39 @@ fn render_seg(seg_idx): i64 {
             var back_sector = map_sidedef_sector(back_side_idx);
             back_floor_h = map_sector_floorh(back_sector);
             back_ceil_h = map_sector_ceilh(back_sector);
+            var bsky_name = map_sector_ceil_tex(back_sector);
+            if (load8(bsky_name) == 70 && load8(bsky_name + 1) == 95 &&
+            load8(bsky_name + 2) == 83 && load8(bsky_name + 3) == 75) {
+                back_is_sky = 1;
+            }
         }
+    }
+
+    # Closed-portal promotion (RC-W2, vanilla R_AddLine): a two-sided line is a
+    # SOLID wall when the back sector is closed (ceil <= floor — a shut door)
+    # or lies entirely outside the front opening. Without it, a closed door's
+    # equal back projections left clip_top == clip_bottom — a see-through seam
+    # of farther-room pixels across the door — and the column never occluded,
+    # so later segs and sprites kept rendering behind it.
+    var is_closed = 0;
+    if (is_twosided != 0) {
+        if (back_ceil_h <= back_floor_h) { is_closed = 1; }
+        if (back_ceil_h <= floor_h) { is_closed = 1; }
+        if (back_floor_h >= ceil_h) { is_closed = 1; }
     }
 
     # Store masked midtexture for deferred rendering (two-sided with mid texture).
     # Pass the screen-ordered U endpoints (already swap-corrected) so the
     # deferred pass mirrors the wall pass — masked midtextures had the same
-    # screen-order U-swap mirror bug.
+    # screen-order U-swap mirror bug. Closed portals have no opening (the draw
+    # pass would skip the entry) — don't burn a MASKED_MAX slot on them.
     if (is_twosided != 0) {
         if (mid_tex >= 0) {
-            render_store_masked(sx1, sx2, mid_tex, lightnum, ty1, ty2,
-            u_left, u_right, sd_xoff, sd_yoff,
-            floor_h, ceil_h, back_floor_h, back_ceil_h, dont_peg_bottom);
+            if (is_closed == 0) {
+                render_store_masked(sx1, sx2, mid_tex, lightnum, ty1, ty2,
+                u_left, u_right, sd_xoff, sd_yoff,
+                floor_h, ceil_h, back_floor_h, back_ceil_h, dont_peg_bottom);
+            }
         }
     }
 
@@ -847,26 +890,9 @@ fn render_seg(seg_idx): i64 {
         # Draw ceiling
         if (ceil_screen > ct) {
             if (is_sky == 1) {
-                # Sky: draw from sky texture mapped to view angle
-                if (sky_tex_idx >= 0) {
-                    var sky_w = load64(tex_table + sky_tex_idx * TEX_ENTRY_SIZE + 8);
-                    var sky_h = load64(tex_table + sky_tex_idx * TEX_ENTRY_SIZE + 16);
-                    if (sky_w > 0) {
-                        if (sky_h > 0) {
-                            # Sky maps the full 360° turn to FOUR texture wraps
-                            # (DOOM's ANGLETOSKYSHIFT), and one screen-width to one
-                            # wrap — so the sky scrolls at ~1 texel/angle-unit,
-                            # near the wall rate, instead of the old 1-wrap-per-turn
-                            # (0.25 texel/unit) that made it look glued to the view
-                            # (audit F-R2). Turn term = view_angle*sky_w*4/ANG360;
-                            # per-column term = col*sky_w/SCREEN_WIDTH (~0.8 texel/col).
-                            var sky_col = (view_angle * sky_w * 4 / ANG360 + col * sky_w / SCREEN_WIDTH) % sky_w;
-                            if (sky_col < 0) { sky_col += sky_w; }
-                            var sky_step = fixed_div(sky_h << 16, HALF_HEIGHT << 16);
-                            render_draw_tex_column(col, ct, ceil_screen - 1, sky_tex_idx, sky_col, 0, sky_step, 0);
-                        }
-                    }
-                }
+                # Sky: mapping documented on render_draw_sky_column (F-R2 rate;
+                # V anchored at the clip top = same v_ref the portal band uses).
+                render_draw_sky_column(col, ct, ceil_screen - 1, ct);
             } else {
                 if (ceil_flat < 0) {
                     framebuf_vline(col, ct, ceil_screen - 1, render_shade(ceil_base_pal, col_light));
@@ -913,26 +939,55 @@ fn render_seg(seg_idx): i64 {
             var back_floor_screen = HALF_HEIGHT - fixed_to_int(
             fixed_div(fixed_mul((back_floor_h << 16) - eye_h, PROJ_DIST), depth));
 
+            # Closed-portal gap coverage (RC-W2): once the portal is promoted
+            # to solid, the upper and lower sections must meet with no
+            # uncovered rows — the open-portal bounds left the row(s) between
+            # the two back projections undrawn (the see-through door seam).
+            # Extend the upper section's bottom / lower section's top across
+            # the gap; the texture V keeps stepping through the extension.
+            var upper_y2 = back_ceil_screen - 1;
+            var lower_y1 = back_floor_screen + 1;
+            if (is_closed == 1) {
+                var gap_end = back_floor_screen;
+                if (gap_end > floor_screen) { gap_end = floor_screen; }
+                if (gap_end > upper_y2) { upper_y2 = gap_end; }
+                var gap_start = back_ceil_screen;
+                if (gap_start < ceil_screen) { gap_start = ceil_screen; }
+                if (gap_start < lower_y1) { lower_y1 = gap_start; }
+            }
+
             # Upper wall
             if (back_ceil_screen > ceil_screen) {
-                if (upper_tex >= 0) {
-                    var uh = back_ceil_screen - ceil_screen;
-                    if (uh > 0) {
-                        var tex_h = texture_height(upper_tex);
-                        var ty_step = fixed_div(tex_h << 16, uh << 16);
-                        # Upper peg: if DONTPEGTOP, anchor at top (y_start = yoff)
-                        # else anchor at bottom of upper section
-                        var upper_ystart = sd_yoff << 16;
-                        if (dont_peg_top == 0) {
-                            upper_ystart = (tex_h - (ceil_h - back_ceil_h)) << 16;
-                            upper_ystart += (sd_yoff << 16);
-                        }
-                        render_draw_tex_column(col, ceil_screen, back_ceil_screen - 1,
-                        upper_tex, tex_u, upper_ystart, ty_step, col_light);
-                    }
+                if (is_sky == 1 && back_is_sky == 1) {
+                    # Sky-to-sky portal (RC-W1): vanilla draws NO upper wall
+                    # between two F_SKY1 ceilings (R_StoreWallRange treats
+                    # worldhigh = worldtop) — the band between the two sky
+                    # heights is open sky. Drawing it painted a screen-filling
+                    # texture band across the E1M1 courtyard. v_ref = ct keeps
+                    # this band continuous with the ceiling sky above it.
+                    var sky_y2 = upper_y2;
+                    if (sky_y2 > SCREEN_HEIGHT - 1) { sky_y2 = SCREEN_HEIGHT - 1; }
+                    render_draw_sky_column(col, ceil_screen, sky_y2, ct);
                 } else {
-                    framebuf_vline(col, ceil_screen, back_ceil_screen - 1,
-                    render_shade(wall_base_pal, col_light));
+                    if (upper_tex >= 0) {
+                        var uh = back_ceil_screen - ceil_screen;
+                        if (uh > 0) {
+                            var tex_h = texture_height(upper_tex);
+                            var ty_step = fixed_div(tex_h << 16, uh << 16);
+                            # Upper peg: if DONTPEGTOP, anchor at top (y_start = yoff)
+                            # else anchor at bottom of upper section
+                            var upper_ystart = sd_yoff << 16;
+                            if (dont_peg_top == 0) {
+                                upper_ystart = (tex_h - (ceil_h - back_ceil_h)) << 16;
+                                upper_ystart += (sd_yoff << 16);
+                            }
+                            render_draw_tex_column(col, ceil_screen, upper_y2,
+                            upper_tex, tex_u, upper_ystart, ty_step, col_light);
+                        }
+                    } else {
+                        framebuf_vline(col, ceil_screen, upper_y2,
+                        render_shade(wall_base_pal, col_light));
+                    }
                 }
             }
 
@@ -947,17 +1002,32 @@ fn render_seg(seg_idx): i64 {
                         if (dont_peg_bottom != 0) {
                             lower_ystart = (ceil_h - back_floor_h + sd_yoff) << 16;
                         }
-                        render_draw_tex_column(col, back_floor_screen + 1, floor_screen,
+                        # If the closed-gap extension moved the start row up,
+                        # back the texture V up by the same rows so the mapping
+                        # is unchanged where the sections meet.
+                        lower_ystart += (lower_y1 - (back_floor_screen + 1)) * ty_step;
+                        render_draw_tex_column(col, lower_y1, floor_screen,
                         lower_tex, tex_u, lower_ystart, ty_step, col_light);
                     }
                 } else {
-                    framebuf_vline(col, back_floor_screen + 1, floor_screen,
+                    framebuf_vline(col, lower_y1, floor_screen,
                     render_shade(128, col_light));
                 }
             }
 
-            if (back_ceil_screen > ct) { store64(clip_top + col * 8, back_ceil_screen); }
-            if (back_floor_screen < cb) { store64(clip_bottom + col * 8, back_floor_screen); }
+            if (is_closed == 1) {
+                # Solid promotion (RC-W2): occlude later segs (clip_solid +
+                # early-out count) AND the sprite pass, which reads only
+                # clip_top/clip_bottom — collapse them so no sprite pixel can
+                # land on this column behind the closed portal.
+                store64(clip_top + col * 8, SCREEN_HEIGHT);
+                store64(clip_bottom + col * 8, -1);
+                store64(clip_solid + col * 8, 1);
+                clip_count += 1;
+            } else {
+                if (back_ceil_screen > ct) { store64(clip_top + col * 8, back_ceil_screen); }
+                if (back_floor_screen < cb) { store64(clip_bottom + col * 8, back_floor_screen); }
+            }
         } else {
             # One-sided: mid texture
             if (mid_tex >= 0) {
@@ -1159,7 +1229,11 @@ fn render_masked_segs(): i64 {
     if (masked_segs == 0) { return 0; }
     if (tex_col_buf == 0) { tex_col_buf = alloc(TEX_COL_MAX); }
 
-    for (var mi = 0; mi < masked_count; mi += 1) {
+    # Draw in REVERSE storage order (RC-W5): the BSP pass stores masked segs
+    # front-to-back, so forward iteration painted a FARTHER grate over a nearer
+    # one. Reverse gives painter's order among masked segs until 0.28.6 adds
+    # true per-drawseg depth clipping.
+    for (var mi = masked_count - 1; mi >= 0; mi -= 1) {
         var base = masked_segs + mi * MASKED_ENTRY_SIZE;
         var sx1 = load64(base);
         var sx2 = load64(base + 8);
