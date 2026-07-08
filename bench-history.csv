@@ -29,3 +29,4 @@ date,version,binary_bytes,render_frame_ns,render_sprites_ns,fixed_mul_ns,texture
 2026-07-04,0.31.3,558456,2.952ms,2.952ms,6ns,687ns,7ns
 2026-07-04,0.31.4,566928,2.870ms,2.874ms,6ns,678ns,7ns
 2026-07-08,0.31.5,379664,3.049ms,3.045ms,6ns,727ns,7ns
+2026-07-08,0.31.5,383896,3.075ms,3.050ms,7ns,799ns,7ns

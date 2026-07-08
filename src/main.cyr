@@ -404,8 +404,12 @@ fn doom_main(): i64 {
             player_health = 0;
             # Red flash: fill screen with palette 176 (red) tinted
             framebuf_clear(176);
-            # Re-render the scene dimly behind the red
+            # Re-render the scene dimly behind the red — sprites included,
+            # both so masked grates still draw (they live in the sprite
+            # phase's merged walk since Bite B) and so the killer is visible
+            # in the death view.
             render_frame();
+            sprite_render_all();
             # Overlay red tint on every pixel
             for (var ry = 0; ry < SCREEN_HEIGHT; ry += 1) {
                 for (var rx = 0; rx < SCREEN_WIDTH; rx += 1) {

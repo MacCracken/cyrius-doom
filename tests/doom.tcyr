@@ -697,6 +697,42 @@ fn main() {
         }
         assert(nonzero > 20000, "rendered > 20000 non-black pixels");
         assert_eq(clip_count, 320, "all 320 columns clipped");
+        assert(ds_count > 0, "drawsegs recorded for the frame");
+        assert(ds_count < DS_MAX, "drawseg count under DS_MAX cap");
+
+        # ============================================================
+        test_group("sprite: depth clipping (RC-S1 regression)");
+        # ============================================================
+        # A barrel 136 units dead ahead in provably-clear view (the sight
+        # line crosses only a floor step). The old collapsed-clip sprite pass
+        # deleted it entirely: window geometry far BEHIND it narrowed the
+        # frame-final clip band above the barrel's rows. With per-drawseg
+        # depth clipping the sprite pass must paint it.
+        # (The combat groups above leave synthetic things behind — spawn the
+        # real E1M1 set so the barrel exists.)
+        things_spawn_from_map();
+        view_x = 1312 << 16;
+        view_y = (0 - 3400) << 16;
+        view_angle = 256;
+        render_frame();
+        var spr_before = alloc(1104);
+        var sbi = 0;
+        for (var sy = 105; sy <= 150; sy += 1) {
+            for (var sx = 149; sx <= 171; sx += 1) {
+                store8(spr_before + sbi, framebuf_get_pixel(sx, sy));
+                sbi += 1;
+            }
+        }
+        sprite_render_all();
+        var spr_changed = 0;
+        sbi = 0;
+        for (var sy = 105; sy <= 150; sy += 1) {
+            for (var sx = 149; sx <= 171; sx += 1) {
+                if (framebuf_get_pixel(sx, sy) != load8(spr_before + sbi)) { spr_changed += 1; }
+                sbi += 1;
+            }
+        }
+        assert(spr_changed > 50, "barrel dead ahead renders (was deleted by far-portal clip)");
 
         wad_close();
     } else {

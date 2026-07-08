@@ -5,7 +5,7 @@ description = "DOOM in Cyrius — clean-room, direct framebuffer, no libc, just 
 license = "GPL-3.0-only"
 repository = "https://github.com/MacCracken/cyrius-doom"
 language = "cyrius"
-cyrius = "6.4.2"
+cyrius = "6.4.30"
 
 [build]
 src = "src/main.cyr"

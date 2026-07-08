@@ -21,7 +21,7 @@
 | **(unslotted)** | **Audio output hardening** (remaining; HW_PARAMS-fallback thresholds + ESTRPIPE recovery shipped 0.30.6; **distance/positional attenuation + stereo pan + Sound-menu live-preview/polish shipped 0.30.7**): (3) **Per-sound peak normalization** or a finer **master-gain curve** — soft lumps like `DSITEMUP` (±19) play ~6× quieter than gunfire; kept faithful for now (the `sfx_volume` gain + per-voice `lvol/rvol` are the hooks). (4) **48000 Hz fallback** — jack also accepts it; needs fractional 11025→48000 resample vs the clean 4× for 44100; **untestable on the dev box (does 44100), so deferred until a card that needs it appears** (reproduce-first). (5) **Device-pick virtual-card heuristic** — the capture-sibling test can pick snd-aloop/dummy over the real codec; **needs an upstream vani CARD_INFO API** (out of this repo's scope; `lib/vani-core.cyr` is a gitignored resolved artifact). (6) **ALSA-vs-PC-speaker double-fire gating** — `sound_*` (PC speaker) and ALSA both fire per event; gate the beep when `audio_dev!=0`. Deferred: `sound.cyr` is included before `audio.cyr` so it can't cleanly read `audio_dev` without a reorder/shared flag; low value (PC speaker usually silent). (7) **0.30.7 review cosmetic nits** (all INFO/LOW, no functional impact): `menu_handle_input` dec/inc tie-break at `sfx_volume==0` (gate `inc` on `dec==0`); drop the unreachable `sep`/`lvol`/`rvol` clamps in `audio_play_at`; far-channel `rsep=256-sep` vs original DOOM `254-sep` (1–2 unit pan offset); 1-LSB attenuation boundary step at `dist==160<<16`. | updated — 2026-06-29 0.30.7 (positional + menu polish shipped; remaining items need upstream/other-hardware, contradict faithful-loudness, or are cosmetic) |
 | ~~(unslotted)~~ | ~~**Render-consistency audit Bite A — quick wins**~~ **SHIPPED 0.31.5** (2026-07-08, all six: RC-S3 sprite-lookup gaps + corpse frames, RC-S4 `fixed_atan2` octants, RC-S5 screen-driven V scaler, RC-W5 masked reverse order, RC-W1 sky-vs-sky suppression, RC-W2 closed-portal solid promotion — each staged-PPM-verified, +21 regression asserts) | — |
 | **(unslotted)** | **Render-consistency audit Bite C — gameplay sweep**: RC-G1 closing-door entombment (obstruction reverse), RC-G2 walk-trigger infinite-line firing (spurious exits), RC-G3 `doors_use` facing/LOS, RC-G4 sight gap test (shoot/wake through closed doors), RC-G5 missile spawn check + splash LOS, RC-G7 alloc-guard leaks (map_alloc ~600 KB/load, HUD 8 B/frame). RC-G6 AGNOS menu edge-latch rides the next QEMU-gated cut. RC-G8 LOW bundle held with 0.28.9–.11 | new — 2026-07-08 render audit |
-| **v0.28.6** | Sprite + masked-seg depth-aware clipping (F07 / F05b / F05) — **2026-07-08 audit recommends pulling this AHEAD of 0.28.5**: staged evidence shows the collapsed clip *deletes* near sprites outright (RC-S1) and x-rays sprites over solid walls (RC-S2), outranking flat bleed for visible damage | **next** (Bite A shipped 0.31.5) |
+| ~~**v0.28.6**~~ | ~~Sprite + masked-seg depth-aware clipping (F07 / F05b / F05)~~ **SHIPPED 0.31.5** (2026-07-08, Bite B — drawseg occlusion records + `render_clip_band_build`: RC-S1/RC-S2/RC-S9/RC-W6 fixed, plus RC-W9 screen-edge endpoint re-anchor found during implementation; staged-PPM verified incl. the audit barrel + E1M5 spectre) | — |
 | **v0.28.7** | Sky + wall-mapping parity (F09) | queued |
 | **v0.28.8** | Structural perf — sidedef/sector index + thing-sector caches (F12 / F15) | queued, bench-gated |
 | **v0.28.9–.11** | Original Black Book sub-audits: BSP+collision (.9), game-state (.10), security-refresh (.11) | queued |
@@ -52,7 +52,7 @@ Full findings + staged-viewpoint evidence + repro coordinates: [`docs/audit/2026
 | Bite | Contents | Where it lands |
 |---|---|---|
 | **A — quick wins** | ~~RC-S3, RC-S4, RC-S5, RC-W5, RC-W1, RC-W2~~ | **SHIPPED 0.31.5** (2026-07-08) — all six staged-PPM-verified, +21 regression asserts |
-| **B — depth clipping keystone** | RC-S1 near-sprite deletion, RC-S2 sprite x-ray, RC-S9 sprite-over-grate, RC-W6 masked-vs-clip | **v0.28.6, recommended ahead of 0.28.5** on this audit's evidence |
+| **B — depth clipping keystone** | ~~RC-S1, RC-S2, RC-S9, RC-W6~~ | **SHIPPED 0.31.5** (2026-07-08) — drawseg records + per-column depth bands; masked segs merged into the sprite phase's painter's walk. Bonus: **RC-W9** (seg scale/U endpoints not re-anchored after screen-edge clamping — texture swim at edges + the E1M7 right-edge stripe band) found during implementation and fixed in the same cut. |
 | **— visplane keystone** | RC-F1 row-union bleed, RC-F4 sub-41 ceilings, RC-W8 viewz + portal clip bounds | v0.28.5 (unchanged scope, follows B) |
 | **C — gameplay sweep** | RC-G1–G5, G7 (doors / sight gap / missile spawn / leaks); RC-G6 QEMU-gated | unslotted row above |
 | **D — parity polish** | RC-W3 native-scale V (0.29.x), RC-W4+RC-F3 sky anchor + flat V mirror (0.28.7), RC-S6/S7/S8, RC-G8 bundle | existing slots |
@@ -94,18 +94,18 @@ The per-row single-`(x1,x2,flat,light)` visplane model can't represent two flats
 | 4 | `FLAT_MAX = 64` silently truncates full-IWAD flats (shareware's 54 fit) | texture.cyr flat scan | full/registered IWADs exceed 64 → `flat_find = -1` fallback paths activate (gray vlines, scalelight-not-zlight shading); raise cap + log truncation |
 | 5 | Vendored bsp `asr()` is round-toward-zero, not floor | lib (bsp dep) | `fixed_to_int` inherits trunc semantics → one-texel flat mis-wrap over negative world coords + doubled texel band straddling world axes; fix upstream in bsp, bump pin |
 
-### v0.28.6 — Sprite + masked-seg depth-aware clipping
+### ~~v0.28.6 — Sprite + masked-seg depth-aware clipping~~ SHIPPED 0.31.5 (2026-07-08, Bite B)
 
-The single collapsed `clip_top`/`clip_bottom` pair holds the *farthest* opening at draw time, so sprites and masked midtextures can't be clipped against walls at the right depth. Build the per-drawseg silhouette infrastructure, then the dependent fixes.
+Implemented as drawseg occlusion records (screen range, endpoint scales, solid flag, eye-relative opening deltas; `DS_MAX=512` + one-shot overflow warn) + `render_clip_band_build` (per-column visibility for a subject at any depth — only *nearer* drawsegs occlude). All four items landed:
 
-> **2026-07-08 audit evidence (RC-S1/RC-S2)** upgrades this from "wrong-depth cropping" to **sprites deleted and x-rayed in normal play**: a barrel 136 units dead ahead in provably-clear line of sight renders zero pixels (a window assembly *behind* it narrows the clip band), while far-room monsters paint over near one-sided walls (solid columns never narrow the clip and the sprite pass never reads `clip_solid`). Recommend running this slot **before** 0.28.5.
+| # | Item | Disposition |
+|---|------|-------------|
+| 1 | Per-drawseg silhouettes (F07) | ✅ drawseg records; bands recomputed per subject from stored deltas × column scale (same projection the wall pass used) |
+| 2 | Masked-seg clip against wall silhouettes (F05b) | ✅ each masked entry clips per column vs nearer drawsegs (own scale lerped → oblique crossings resolve per-column) |
+| 3 | Masked-seg `clip_solid` over-paint guard (F05) | ✅ superseded — the depth test makes the "near grate / far wall" over-clip impossible by construction |
+| 4 | Sprite-vs-masked + sprite-vs-sprite ordering | ✅ masked segs sort far→near by midpoint depth and merge into the sprite pass's painter's walk; sprites keep their existing far→near sort |
 
-| # | Item | Reference | Detail |
-|---|------|-----------|--------|
-| 1 | Per-drawseg `mfloorclip`/`mceilingclip` recorded at seg depth | Black Book ch. 11 | F07; foundation for the rest |
-| 2 | Masked-seg clip against the wall silhouette | Black Book ch. 10 | F05b (rides on F07) |
-| 3 | Masked-seg `clip_solid` over-paint guard | — | F05 — correct **only** once F07/F05b land; the bare guard over-clips the "near grate / far wall" case (probed no-op on E1M1–E1M7, so 0.28.0 correctly skipped it) |
-| 4 | Sprite-vs-sprite + sprite-vs-masked clipping | Black Book ch. 11 | completeness |
+Bonus fix (RC-W9, found during implementation): seg scale/U interpolation endpoints are now re-anchored onto the clamped screen span — previously every seg crossing a screen edge compressed its depth/lighting/U line into the visible span (edge texture swim; the E1M7 right-edge stripe band).
 
 ### v0.28.7 — Sky + wall-mapping parity
 

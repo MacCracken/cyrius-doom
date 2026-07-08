@@ -469,7 +469,8 @@ var vp_ceil_h = 0;
 # Stored during BSP wall pass, rendered after walls before sprites
 # Each entry: 15 fields * 8 = 120 bytes (MASKED_ENTRY_SIZE)
 #   0: sx1   8: sx2   16: mid_tex  24: lightnum
-#  32: ty1  40: ty2   48: u_left   56: u_right   (screen-ordered texture-U)
+#  32: scale1  40: scale2   (perspective scale at the CLAMPED sx1/sx2 endpoints)
+#  48: uow1    56: uow2     (texture-U/z at the same endpoints, screen-ordered)
 #  64: sd_xoff  72: sd_yoff  80: floor_h  88: ceil_h
 #  96: back_floor_h  104: back_ceil_h  112: dont_peg_bottom
 # ================================================================
@@ -481,8 +482,8 @@ enum MaskedConst {
 var masked_segs = 0;
 var masked_count = 0;
 
-fn render_store_masked(sx1, sx2, mid_tex, lightnum_val, ty1_val, ty2_val,
-u_left_val, u_right_val, sd_xoff_val, sd_yoff_val,
+fn render_store_masked(sx1, sx2, mid_tex, lightnum_val, scale1_val, scale2_val,
+uow1_val, uow2_val, sd_xoff_val, sd_yoff_val,
 floor_h_val, ceil_h_val, back_floor_h_val, back_ceil_h_val, dpb): i64 {
     if (masked_segs == 0) { masked_segs = alloc(MASKED_MAX * MASKED_ENTRY_SIZE); }
     if (masked_count >= MASKED_MAX) { return 0; }
@@ -491,10 +492,10 @@ floor_h_val, ceil_h_val, back_floor_h_val, back_ceil_h_val, dpb): i64 {
     store64(base + 8, sx2);
     store64(base + 16, mid_tex);
     store64(base + 24, lightnum_val);
-    store64(base + 32, ty1_val);
-    store64(base + 40, ty2_val);
-    store64(base + 48, u_left_val);
-    store64(base + 56, u_right_val);
+    store64(base + 32, scale1_val);
+    store64(base + 40, scale2_val);
+    store64(base + 48, uow1_val);
+    store64(base + 56, uow2_val);
     store64(base + 64, sd_xoff_val);
     store64(base + 72, sd_yoff_val);
     store64(base + 80, floor_h_val);
@@ -503,6 +504,114 @@ floor_h_val, ceil_h_val, back_floor_h_val, back_ceil_h_val, dpb): i64 {
     store64(base + 104, back_ceil_h_val);
     store64(base + 112, dpb);
     masked_count += 1;
+    return 0;
+}
+
+# ================================================================
+# Drawseg list: one occlusion record per rendered seg (Bite B / 0.28.6).
+# The wall pass collapses clip_top/clip_bottom to the NARROWEST opening on
+# each column regardless of depth, so it cannot answer "what occludes a
+# thing at depth z?" — that deleted near sprites behind far windows (RC-S1)
+# and x-rayed far sprites over near solid walls (RC-S2). Drawsegs keep the
+# per-seg data needed to rebuild the occlusion at any depth:
+#   0: sx1   8: sx2      (clamped screen range)
+#  16: scale1  24: scale2 (perspective scale at those columns; lerp between)
+#  32: solid             (1 = one-sided or closed portal: full occlusion)
+#  40: d_open_top        (eye-relative height of the opening top, 16.16 —
+#                         min(front ceil, back ceil) - eye)
+#  48: d_open_bot        (eye-relative height of the opening bottom —
+#                         max(front floor, back floor) - eye)
+# Screen row of a height delta d at column scale s: HALF_HEIGHT - d*s
+# (same projection the wall pass used, since s = PROJ_DIST / depth).
+# ================================================================
+enum DrawsegConst {
+    DS_MAX = 512;
+    DS_ENTRY_SIZE = 64;
+}
+
+var ds_list = 0;
+var ds_count = 0;
+var ds_dropped = 0;
+var ds_warned = 0;
+
+fn render_store_drawseg(sx1, sx2, scale1_val, scale2_val, solid, d_top, d_bot): i64 {
+    if (ds_list == 0) { ds_list = alloc(DS_MAX * DS_ENTRY_SIZE); }
+    if (ds_count >= DS_MAX) { ds_dropped += 1; return 0; }
+    var base = ds_list + ds_count * DS_ENTRY_SIZE;
+    store64(base, sx1);
+    store64(base + 8, sx2);
+    store64(base + 16, scale1_val);
+    store64(base + 24, scale2_val);
+    store64(base + 32, solid);
+    store64(base + 40, d_top);
+    store64(base + 48, d_bot);
+    ds_count += 1;
+    return 0;
+}
+
+# Per-column visibility band for a subject (sprite or masked seg) spanning
+# screen columns [x1, x2], with the subject's own scale lerped subj_s1 →
+# subj_s2 across that span (a sprite passes its single scale twice). Every
+# drawseg NEARER than the subject at a column applies its occlusion: solid
+# closes the column; a portal clamps the band to its opening. Results land
+# in rc_band_top/rc_band_bot (band empty when top > bot).
+var rc_band_top = 0;
+var rc_band_bot = 0;
+
+fn render_clip_band_build(x1, x2, subj_s1, subj_s2): i64 {
+    if (rc_band_top == 0) {
+        rc_band_top = alloc(2560);
+        rc_band_bot = alloc(2560);
+    }
+    for (var x = x1; x <= x2; x += 1) {
+        store64(rc_band_top + x * 8, 0);
+        store64(rc_band_bot + x * 8, SCREEN_HEIGHT - 1);
+    }
+    var sspan = x2 - x1;
+    var subj_min = subj_s1;
+    if (subj_s2 < subj_min) { subj_min = subj_s2; }
+
+    for (var di = 0; di < ds_count; di += 1) {
+        var base = ds_list + di * DS_ENTRY_SIZE;
+        var dx1 = load64(base);
+        var dx2 = load64(base + 8);
+        if (dx2 < x1) { continue; }
+        if (dx1 > x2) { continue; }
+        var s1 = load64(base + 16);
+        var s2 = load64(base + 24);
+        # Fast reject: drawseg entirely farther than the subject.
+        var smax = s1;
+        if (s2 > smax) { smax = s2; }
+        if (smax <= subj_min) { continue; }
+        var solid = load64(base + 32);
+        var d_top = load64(base + 40);
+        var d_bot = load64(base + 48);
+        var o1 = dx1;
+        if (o1 < x1) { o1 = x1; }
+        var o2 = dx2;
+        if (o2 > x2) { o2 = x2; }
+        var dspan = dx2 - dx1;
+
+        for (var x = o1; x <= o2; x += 1) {
+            var dfrac = 0;
+            if (dspan > 0) { dfrac = fixed_div((x - dx1) << 16, dspan << 16); }
+            var ds_scale = fixed_lerp(s1, s2, dfrac);
+            var sfrac = 0;
+            if (sspan > 0) { sfrac = fixed_div((x - x1) << 16, sspan << 16); }
+            var subj_scale = fixed_lerp(subj_s1, subj_s2, sfrac);
+            # Per-column depth test: only a NEARER seg occludes the subject.
+            if (ds_scale <= subj_scale) { continue; }
+            if (solid == 1) {
+                store64(rc_band_top + x * 8, SCREEN_HEIGHT);
+                store64(rc_band_bot + x * 8, -1);
+            } else {
+                var t = HALF_HEIGHT - fixed_to_int(fixed_mul(d_top, ds_scale));
+                var b = HALF_HEIGHT - fixed_to_int(fixed_mul(d_bot, ds_scale));
+                if (t > load64(rc_band_top + x * 8)) { store64(rc_band_top + x * 8, t); }
+                if (b < load64(rc_band_bot + x * 8)) { store64(rc_band_bot + x * 8, b); }
+            }
+        }
+    }
     return 0;
 }
 
@@ -670,9 +779,14 @@ fn render_seg(seg_idx): i64 {
         seg_u_swapped = 1;
     }
 
-    # Clip to screen bounds
+    # Clip to screen bounds. Keep the UNCLAMPED endpoints: scale and u/z are
+    # interpolated in screen-x, so their endpoint values must be re-anchored
+    # onto the clamped span (below) or the whole line compresses into the
+    # visible part whenever a seg crosses a screen edge.
     if (sx2 < 0) { return 0; }
     if (sx1 >= SCREEN_WIDTH) { return 0; }
+    var sx1_orig = sx1;
+    var sx2_orig = sx2;
     if (sx1 < 0) { sx1 = 0; }
     if (sx2 >= SCREEN_WIDTH) { sx2 = SCREEN_WIDTH - 1; }
 
@@ -759,6 +873,42 @@ fn render_seg(seg_idx): i64 {
     var u_right = u_v2;
     if (seg_u_swapped == 1) { u_left = u_v2; u_right = u_v1; }
 
+    # Perspective-correct depth: for a flat wall, scale (= PROJ_DIST / z) is
+    # linear in screen-x while z is NOT. Interpolate scale across the span and
+    # derive z per column. Pre-0.28.4 lerp'd z directly, bowing wall top/bottom
+    # edges and mis-scaling texture height on oblique walls.
+    var wscale1 = fixed_div(PROJ_DIST, ty1);
+    var wscale2 = fixed_div(PROJ_DIST, ty2);
+
+    # Perspective-correct texture-U (F22): interpolate u*scale (proportional to
+    # u/z) and the scale (proportional to 1/z) separately, then U = (u/z)/(1/z)
+    # = lerp(uow) / col_scale. u_left/u_right (screen-ordered) are the texel U
+    # at the ORIGINAL projected endpoints.
+    var uow1 = u_left * wscale1;
+    var uow2 = u_right * wscale2;
+
+    # Re-anchor both interpolants onto the CLAMPED screen span (RC-W9, found
+    # during the Bite B drawseg work): the column loop lerps over [sx1, sx2],
+    # but the endpoint values belonged to the UNCLAMPED projection — clamping
+    # compressed the whole scale/U line into the visible span, shifting depth,
+    # lighting, and texture-U whenever a seg crossed a screen edge (texture
+    # swim at the edges while turning) and corrupting drawseg depths.
+    if (sx1 != sx1_orig || sx2 != sx2_orig) {
+        var ospan = sx2_orig - sx1_orig;
+        if (ospan > 0) {
+            var rt1 = fixed_div((sx1 - sx1_orig) << 16, ospan << 16);
+            var rt2 = fixed_div((sx2 - sx1_orig) << 16, ospan << 16);
+            var nw1 = fixed_lerp(wscale1, wscale2, rt1);
+            var nw2 = fixed_lerp(wscale1, wscale2, rt2);
+            var nu1 = fixed_lerp(uow1, uow2, rt1);
+            var nu2 = fixed_lerp(uow1, uow2, rt2);
+            wscale1 = nw1;
+            wscale2 = nw2;
+            uow1 = nu1;
+            uow2 = nu2;
+        }
+    }
+
     # Check for two-sided linedef (portal to another sector)
     var is_twosided = map_linedef_flags(line_idx) & ML_TWOSIDED;
     var back_floor_h = floor_h;
@@ -794,15 +944,15 @@ fn render_seg(seg_idx): i64 {
     }
 
     # Store masked midtexture for deferred rendering (two-sided with mid texture).
-    # Pass the screen-ordered U endpoints (already swap-corrected) so the
-    # deferred pass mirrors the wall pass — masked midtextures had the same
-    # screen-order U-swap mirror bug. Closed portals have no opening (the draw
-    # pass would skip the entry) — don't burn a MASKED_MAX slot on them.
+    # Pass the CLAMPED-endpoint scales + u/z values (swap-corrected and
+    # re-anchored above) so the deferred pass lerps the exact same lines the
+    # wall pass does. Closed portals have no opening (the draw pass would skip
+    # the entry) — don't burn a MASKED_MAX slot on them.
     if (is_twosided != 0) {
         if (mid_tex >= 0) {
             if (is_closed == 0) {
-                render_store_masked(sx1, sx2, mid_tex, lightnum, ty1, ty2,
-                u_left, u_right, sd_xoff, sd_yoff,
+                render_store_masked(sx1, sx2, mid_tex, lightnum, wscale1, wscale2,
+                uow1, uow2, sd_xoff, sd_yoff,
                 floor_h, ceil_h, back_floor_h, back_ceil_h, dont_peg_bottom);
             }
         }
@@ -816,22 +966,25 @@ fn render_seg(seg_idx): i64 {
     # exactly -VIEW_HEIGHT under the per-seg eye model.
     var ceil_delta = ((ceil_h - floor_h) << 16) - VIEW_HEIGHT;
 
-    # Perspective-correct depth: for a flat wall, scale (= PROJ_DIST / z) is
-    # linear in screen-x while z is NOT. Interpolate scale across the span and
-    # derive z per column. Pre-0.28.4 lerp'd z directly, bowing wall top/bottom
-    # edges and mis-scaling texture height on oblique walls.
-    var wscale1 = fixed_div(PROJ_DIST, ty1);
-    var wscale2 = fixed_div(PROJ_DIST, ty2);
+    # Eye height for this seg (front floor + 41) — loop-invariant.
+    var eye_h = (floor_h << 16) + VIEW_HEIGHT;
 
-    # Perspective-correct texture-U (F22): interpolate u*scale (proportional to
-    # u/z) and the scale (proportional to 1/z) separately, then U = (u/z)/(1/z)
-    # = lerp(uow) / col_scale. Interpolating u linearly in screen-x (affine)
-    # sheared textures on oblique walls; a perspective-correct DEPTH paired with
-    # an affine U is exactly the "half fix worse than none" the roadmap warned
-    # about, so depth and U are corrected together. u_left/u_right (computed
-    # above, screen-ordered) are the texel U at the sx1/sx2 endpoints.
-    var uow1 = u_left * wscale1;
-    var uow2 = u_right * wscale2;
+    # Record this seg as a drawseg occluder for the deferred masked+sprite
+    # pass (Bite B / 0.28.6). Solid = one-sided or closed portal (full-column
+    # occlusion for anything farther); portals occlude outside their opening.
+    # Recorded even when this seg's own columns end up clip-skipped: the seg
+    # still sits between the viewer and anything farther on those columns
+    # (the per-column depth test in render_clip_band_build sorts it out).
+    var ds_solid = 0;
+    if (is_twosided == 0) { ds_solid = 1; }
+    if (is_closed == 1) { ds_solid = 1; }
+    var d_open_top = (ceil_h << 16) - eye_h;
+    var d_bceil = (back_ceil_h << 16) - eye_h;
+    if (d_bceil < d_open_top) { d_open_top = d_bceil; }
+    var d_open_bot = (floor_h << 16) - eye_h;
+    var d_bfloor = (back_floor_h << 16) - eye_h;
+    if (d_bfloor > d_open_bot) { d_open_bot = d_bfloor; }
+    render_store_drawseg(sx1, sx2, wscale1, wscale2, ds_solid, d_open_top, d_open_bot);
 
     # Draw columns from sx1 to sx2
     for (var col = sx1; col <= sx2; col += 1) {
@@ -855,8 +1008,7 @@ fn render_seg(seg_idx): i64 {
 
         # Project floor and ceiling heights to screen Y
         # screen_y = HALF_HEIGHT - (height - eye_height) * PROJ_DIST / depth
-        var eye_h = (floor_h << 16) + VIEW_HEIGHT;
-
+        # (eye_h hoisted above the loop — it is per-seg, not per-column)
         var ceil_screen = HALF_HEIGHT - fixed_to_int(
         fixed_div(fixed_mul((ceil_h << 16) - eye_h, PROJ_DIST), depth));
         var floor_screen = HALF_HEIGHT - fixed_to_int(
@@ -1219,101 +1371,106 @@ fn render_flat_spans(): i64 {
 }
 
 # ================================================================
-# Render deferred masked midtextures
+# Render ONE deferred masked midtexture entry
 # ================================================================
-# Drawn after walls/flats, before sprites. Middle textures on two-sided
-# linedefs are transparent (palette index 0 = skip). They clip to the
-# opening between front and back sector floors/ceilings.
+# Called from the merged masked+sprite painter's walk in sprite_render_all
+# (Bite B / 0.28.6) — no longer a monolithic pass inside render_frame, so
+# grates and sprites interleave in true depth order (RC-S9). Middle textures
+# on two-sided linedefs are transparent (palette index 0 = skip). Each entry
+# clips to (a) the opening between front and back sector floors/ceilings and
+# (b) the per-column visibility band vs all NEARER drawsegs (RC-W6 — a grate
+# behind a solid wall or step edge no longer paints over it).
 
-fn render_masked_segs(): i64 {
+fn render_masked_one(mi): i64 {
     if (masked_segs == 0) { return 0; }
+    if (mi < 0) { return 0; }
+    if (mi >= masked_count) { return 0; }
     if (tex_col_buf == 0) { tex_col_buf = alloc(TEX_COL_MAX); }
 
-    # Draw in REVERSE storage order (RC-W5): the BSP pass stores masked segs
-    # front-to-back, so forward iteration painted a FARTHER grate over a nearer
-    # one. Reverse gives painter's order among masked segs until 0.28.6 adds
-    # true per-drawseg depth clipping.
-    for (var mi = masked_count - 1; mi >= 0; mi -= 1) {
-        var base = masked_segs + mi * MASKED_ENTRY_SIZE;
-        var sx1 = load64(base);
-        var sx2 = load64(base + 8);
-        var mtex = load64(base + 16);
-        var mlight = load64(base + 24);
-        var mty1 = load64(base + 32);
-        var mty2 = load64(base + 40);
-        var mu_left = load64(base + 48);
-        var mu_right = load64(base + 56);
-        var myoff = load64(base + 72);
-        var mfloor = load64(base + 80);
-        var mceil = load64(base + 88);
-        var mbfloor = load64(base + 96);
-        var mbceil = load64(base + 104);
+    var base = masked_segs + mi * MASKED_ENTRY_SIZE;
+    var sx1 = load64(base);
+    var sx2 = load64(base + 8);
+    var mtex = load64(base + 16);
+    var mlight = load64(base + 24);
+    var mscale1 = load64(base + 32);
+    var mscale2 = load64(base + 40);
+    var muow1 = load64(base + 48);
+    var muow2 = load64(base + 56);
+    var myoff = load64(base + 72);
+    var mfloor = load64(base + 80);
+    var mceil = load64(base + 88);
+    var mbfloor = load64(base + 96);
+    var mbceil = load64(base + 104);
 
-        # Opening: highest floor to lowest ceiling
-        var open_floor = mfloor;
-        if (mbfloor > open_floor) { open_floor = mbfloor; }
-        var open_ceil = mceil;
-        if (mbceil < open_ceil) { open_ceil = mbceil; }
-        if (open_floor >= open_ceil) { continue; }
+    # Opening: highest floor to lowest ceiling
+    var open_floor = mfloor;
+    if (mbfloor > open_floor) { open_floor = mbfloor; }
+    var open_ceil = mceil;
+    if (mbceil < open_ceil) { open_ceil = mbceil; }
+    if (open_floor >= open_ceil) { return 0; }
 
-        var tex_h = texture_height(mtex);
-        if (tex_h <= 0) { continue; }
+    var tex_h = texture_height(mtex);
+    if (tex_h <= 0) { return 0; }
 
-        var mscale1 = fixed_div(PROJ_DIST, mty1);
-        var mscale2 = fixed_div(PROJ_DIST, mty2);
-        # Perspective-correct U endpoints (F22), matching render_seg. mu_left /
-        # mu_right are the screen-ordered texel-U the wall pass stored (already
-        # swap-corrected and inclusive of the sidedef x-offset).
-        var muow1 = mu_left * mscale1;
-        var muow2 = mu_right * mscale2;
-        for (var col = sx1; col <= sx2; col += 1) {
-            # frac linear in screen-x (texture-U). Depth is perspective-correct.
-            var frac = 0;
-            if (sx2 != sx1) {
-                frac = fixed_div((col - sx1) << 16, (sx2 - sx1) << 16);
-            }
-            var col_scale = fixed_lerp(mscale1, mscale2, frac);
-            if (col_scale <= 0) { col_scale = 1; }
-            var depth = fixed_div(PROJ_DIST, col_scale);
-            if (depth <= 0) { depth = 256; }
+    # Occlusion bands vs every drawseg nearer than this masked seg (its own
+    # scale lerps across the span, so obliquely-crossing segs resolve
+    # per-column). Scale/uow endpoints load directly — the wall pass stored
+    # the re-anchored values.
+    render_clip_band_build(sx1, sx2, mscale1, mscale2);
 
-            var eye_h = (mfloor << 16) + VIEW_HEIGHT;
+    for (var col = sx1; col <= sx2; col += 1) {
+        var band_t = load64(rc_band_top + col * 8);
+        var band_b = load64(rc_band_bot + col * 8);
+        if (band_t > band_b) { continue; }
 
-            var open_top = HALF_HEIGHT - fixed_to_int(
-            fixed_div(fixed_mul((open_ceil << 16) - eye_h, PROJ_DIST), depth));
-            var open_bot = HALF_HEIGHT - fixed_to_int(
-            fixed_div(fixed_mul((open_floor << 16) - eye_h, PROJ_DIST), depth));
+        # frac linear in screen-x (texture-U). Depth is perspective-correct.
+        var frac = 0;
+        if (sx2 != sx1) {
+            frac = fixed_div((col - sx1) << 16, (sx2 - sx1) << 16);
+        }
+        var col_scale = fixed_lerp(mscale1, mscale2, frac);
+        if (col_scale <= 0) { col_scale = 1; }
+        var depth = fixed_div(PROJ_DIST, col_scale);
+        if (depth <= 0) { depth = 256; }
 
-            if (open_top >= open_bot) { continue; }
-            var wh = open_bot - open_top;
-            if (wh <= 0) { continue; }
+        var eye_h = (mfloor << 16) + VIEW_HEIGHT;
 
-            var col_lv = render_wall_light(mlight, col_scale);
+        var open_top = HALF_HEIGHT - fixed_to_int(
+        fixed_div(fixed_mul((open_ceil << 16) - eye_h, PROJ_DIST), depth));
+        var open_bot = HALF_HEIGHT - fixed_to_int(
+        fixed_div(fixed_mul((open_floor << 16) - eye_h, PROJ_DIST), depth));
 
-            # Texture U coordinate (perspective-correct, F22)
-            var tex_u = fixed_lerp(muow1, muow2, frac) / col_scale;
+        if (open_top >= open_bot) { continue; }
+        var wh = open_bot - open_top;
+        if (wh <= 0) { continue; }
 
-            # Get texture column
-            var th = texture_get_column(mtex, tex_u, tex_col_buf);
-            if (th <= 0) { continue; }
+        var col_lv = render_wall_light(mlight, col_scale);
 
-            var ty_step = fixed_div(th << 16, wh << 16);
-            var ty_pos = myoff << 16;
+        # Texture U coordinate (perspective-correct, F22)
+        var tex_u = fixed_lerp(muow1, muow2, frac) / col_scale;
 
-            for (var row = open_top; row < open_bot; row += 1) {
-                if (row < 0) { ty_pos += ty_step; continue; }
-                if (row >= SCREEN_HEIGHT) { break; }
-                var src_y = fixed_to_int(ty_pos);
-                if (src_y >= 0) {
-                    if (src_y < th) {
-                        var pal = load8(tex_col_buf + src_y);
-                        if (pal != 0) {
-                            framebuf_pixel(col, row, render_shade(pal, col_lv));
-                        }
+        # Get texture column
+        var th = texture_get_column(mtex, tex_u, tex_col_buf);
+        if (th <= 0) { continue; }
+
+        var ty_step = fixed_div(th << 16, wh << 16);
+        var ty_pos = myoff << 16;
+
+        for (var row = open_top; row < open_bot; row += 1) {
+            if (row < 0) { ty_pos += ty_step; continue; }
+            if (row >= SCREEN_HEIGHT) { break; }
+            if (row < band_t) { ty_pos += ty_step; continue; }
+            if (row > band_b) { break; }
+            var src_y = fixed_to_int(ty_pos);
+            if (src_y >= 0) {
+                if (src_y < th) {
+                    var pal = load8(tex_col_buf + src_y);
+                    if (pal != 0) {
+                        framebuf_pixel(col, row, render_shade(pal, col_lv));
                     }
                 }
-                ty_pos += ty_step;
             }
+            ty_pos += ty_step;
         }
     }
     return 0;
@@ -1327,17 +1484,31 @@ fn render_frame(): i64 {
     render_init_clip();
     render_init_visplanes();
     masked_count = 0;
+    ds_count = 0;
 
-    # BSP pass: walls + collect floor/ceiling spans + store masked segs
+    # BSP pass: walls + collect floor/ceiling spans + store masked segs +
+    # record drawseg occluders
     if (map_num_nodes > 0) {
         render_bsp_node(map_num_nodes - 1);
+    }
+
+    # No-silent-caps: if a scene ever exceeds DS_MAX, distant occlusion can
+    # leak — say so once instead of silently degrading.
+    if (ds_dropped > 0) {
+        if (ds_warned == 0) {
+            sakshi_warn("drawseg cap DS_MAX exceeded; sprite occlusion may leak", 54);
+            ds_warned = 1;
+        }
+        ds_dropped = 0;
     }
 
     # Flat pass: draw all floor/ceiling spans
     render_flat_spans();
 
-    # Masked midtexture pass: deferred transparent middle textures
-    render_masked_segs();
+    # Masked midtextures now draw inside sprite_render_all's merged
+    # depth-sorted walk (render_masked_one) so grates and sprites layer
+    # correctly — every frame-presentation path pairs render_frame() with
+    # sprite_render_all().
 
     return 0;
 }

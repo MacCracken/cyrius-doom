@@ -116,6 +116,12 @@ var spr_patch_buf = 0;
 # the patch decoders. 256 bytes caps the source height (DOOM sprites max 128).
 var spr_col_buf = 0;
 
+# Masked-seg draw-order scratch for the merged masked+sprite painter's walk
+# (Bite B / 0.28.6, RC-S9): entry indices sorted far -> near by midpoint
+# depth, drained between sprite draws so grates and sprites layer by depth.
+var masked_morder = 0;
+var masked_mdepth = 0;
+
 fn sprite_find_lump(thing_type): i64 {
     if (_spr_prefix == 0) { _spr_prefix = alloc(16); }
     var prefix = _spr_prefix;
@@ -298,9 +304,48 @@ fn sprite_render_all(): i64 {
     if (spr_patch_buf == 0) { spr_patch_buf = alloc(16384); }
     if (spr_col_buf == 0) { spr_col_buf = alloc(256); }
 
+    # Sort masked-seg indices far -> near by midpoint depth (Bite B RC-S9).
+    # The masked entries store perspective scales at their endpoints; the
+    # midpoint scale gives one representative depth per grate for the merge.
+    if (masked_morder == 0) {
+        masked_morder = alloc(MASKED_MAX * 8);
+        masked_mdepth = alloc(MASKED_MAX * 8);
+    }
+    for (var mi = 0; mi < masked_count; mi += 1) {
+        var mbase = masked_segs + mi * MASKED_ENTRY_SIZE;
+        var mid_scale = asr(load64(mbase + 32) + load64(mbase + 40), 1);
+        if (mid_scale <= 0) { mid_scale = 1; }
+        store64(masked_morder + mi * 8, mi);
+        store64(masked_mdepth + mi * 8, fixed_div(PROJ_DIST, mid_scale));
+    }
+    for (var i = 1; i < masked_count; i += 1) {
+        var key_o = load64(masked_morder + i * 8);
+        var key_d = load64(masked_mdepth + i * 8);
+        var j = i - 1;
+        while (j >= 0) {
+            if (load64(masked_mdepth + j * 8) >= key_d) { break; }
+            store64(masked_morder + (j + 1) * 8, load64(masked_morder + j * 8));
+            store64(masked_mdepth + (j + 1) * 8, load64(masked_mdepth + j * 8));
+            j -= 1;
+        }
+        store64(masked_morder + (j + 1) * 8, key_o);
+        store64(masked_mdepth + (j + 1) * 8, key_d);
+    }
+    var masked_next = 0;
+
     for (var si = 0; si < sprite_visible; si += 1) {
         var thing_idx = load64(sprite_order + si * 8);
         var dist = load64(sprite_dist + si * 8);
+
+        # Merged painter's walk: draw every masked seg FARTHER than this
+        # sprite before the sprite itself — a monster behind a grate is
+        # overdrawn by it; one in front overdraws it (RC-S9).
+        while (masked_next < masked_count) {
+            if (load64(masked_mdepth + masked_next * 8) <= dist) { break; }
+            render_masked_one(load64(masked_morder + masked_next * 8));
+            masked_next += 1;
+        }
+
         var ttype = thing_type(thing_idx);
 
         # Get thing position from runtime thing
@@ -402,12 +447,24 @@ fn sprite_render_all(): i64 {
         if (sx1 < 0) { c_lo = 0 - sx1; }
         var c_hi = sprite_w;
         if (sx1 + sprite_w > SCREEN_WIDTH) { c_hi = SCREEN_WIDTH - sx1; }
+        if (c_lo >= c_hi) { continue; }
+
+        # Per-column occlusion bands vs every drawseg NEARER than this sprite
+        # (Bite B / 0.28.6, RC-S1/RC-S2). Replaces the frame-final collapsed
+        # clip_top/clip_bottom, which held the NARROWEST opening on each
+        # column regardless of depth — a window assembly far BEHIND a sprite
+        # deleted it, and solid walls (which never narrowed the collapsed
+        # clip) let far sprites x-ray through. A sprite is one depth, so both
+        # subject-scale endpoints are its scale.
+        render_clip_band_build(sx1 + c_lo, sx1 + c_hi - 1, scale, scale);
+
         for (var c = c_lo; c < c_hi; c += 1) {
             var scr_x = sx1 + c;
 
-            # Clip to walls: only draw if within the open clip region
-            var clip_t = load64(clip_top + scr_x * 8);
-            var clip_b = load64(clip_bottom + scr_x * 8);
+            # Clip to walls at THIS sprite's depth
+            var clip_t = load64(rc_band_top + scr_x * 8);
+            var clip_b = load64(rc_band_bot + scr_x * 8);
+            if (clip_t > clip_b) { continue; }
 
             # Source column in patch (mirrored when this rotation came from the
             # flipped half of a combined lump).
@@ -468,6 +525,14 @@ fn sprite_render_all(): i64 {
                 }
             }
         }
+    }
+
+    # Drain the masked segs NEARER than every sprite (or all of them when no
+    # sprite is visible) — the merge above only draws a masked entry when a
+    # farther sprite forces it out.
+    while (masked_next < masked_count) {
+        render_masked_one(load64(masked_morder + masked_next * 8));
+        masked_next += 1;
     }
 
     return 0;

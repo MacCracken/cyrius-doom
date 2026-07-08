@@ -56,14 +56,67 @@ in the same run — codegen drift, not this change; the 6.4.2 pin is unchanged).
 PPM differs from 0.31.4 only in sprite rows 94–121 (394 px: resampling + newly visible
 items); walls/flats byte-identical. All 9 shareware maps render clean (192,015 B PPMs).
 
+**Bite B of the same audit — depth-aware sprite + masked clipping (the 0.28.6 keystone)**
+(2026-07-08). New drawseg infrastructure: the wall pass records one occlusion record per
+rendered seg (screen range, endpoint scales, solid flag, eye-relative opening heights;
+`DS_MAX = 512` with a one-shot `sakshi_warn` on overflow), and `render_clip_band_build`
+reconstructs per-column visibility for a subject at ANY depth — only drawsegs *nearer*
+than the subject occlude it. This replaces the frame-final collapsed `clip_top`/
+`clip_bottom` the sprite pass used, which held the narrowest opening per column
+regardless of depth:
+
+- **RC-S1 — near sprites were deleted by farther portals.** The audit's staged barrel
+  (136 units dead ahead, provably clear sight line) now renders; the E1M5 spectre that
+  survived as 5 cropped rows renders whole (along with a sergeant that was also being
+  swallowed). Regression assert added (render → snapshot barrel region → sprite pass →
+  region must change).
+- **RC-S2 — sprites x-rayed over nearer one-sided walls.** Solid drawsegs fully occlude
+  anything behind them; the far-room monster specks pasted on near walls (E1M1 staging,
+  E1M7 spawn) are gone.
+- **RC-S9 — sprites always drew over masked midtextures.** Masked segs moved out of
+  `render_frame` into a merged painter's walk inside `sprite_render_all`: masked entries
+  sort far→near by midpoint depth and drain between sprite draws, so a monster behind a
+  grate is overdrawn by it and one in front overdraws it. (The death-flash path in
+  `main.cyr` now pairs `render_frame` with `sprite_render_all` — grates persist and your
+  killer is visible.) Supersedes Bite A's reverse-iteration stopgap (RC-W5).
+- **RC-W6 — masked midtextures ignored occlusion entirely.** Each masked entry now clips
+  per column against the drawseg bands (its own scale lerps across the span, so
+  obliquely-crossing segs resolve per-column) — a grate behind a wall or step edge no
+  longer paints over it.
+- **RC-W9 — NEW, found and fixed during the drawseg work: seg interpolation endpoints
+  were not re-anchored after screen-edge clamping.** The column loop lerps scale and
+  texture-U/z over the *clamped* `[sx1, sx2]`, but the endpoint values belonged to the
+  unclamped projection — every seg crossing a screen edge had its depth, lighting, and
+  texture-U compressed into the visible span (texture swim at the edges while turning,
+  and the **E1M7 spawn right-edge stripe band**, previously misattributed to visplane
+  bleed — now gone). Masked entries store the re-anchored endpoint scales/U-over-z
+  directly (entry fields 32–56 repurposed), so the deferred pass lerps the exact lines
+  the wall pass drew.
+
+Perf: `render_frame` 3.075 ms / `+sprites` 3.050 ms (cycc **6.4.30**) vs 3.049/3.045 ms
+(Bite A, cycc 6.4.29) — variance-level; the masked pass moved from `render_frame` into
+the sprite phase, and the drawseg band building costs less than run-to-run noise.
+Binary 379,664 → **383,896 B** (+4,232 B: drawseg machinery). All 9 maps PPM-clean;
+staged re-verification of every Bite A view passed (sky courtyard, door seam,
+close-range sprites, item/corpse visibility).
+
 ### Added
 
-- **+21 regression asserts** — `fixed_atan2` full-range octants (10, WAD-free: axis
-  anchors, four diagonals at 128/384/640/896, monotone + continuous seam) and sprite
-  lookup coverage for all 12 RC-S3 types (11, WAD-gated). Tests **105 → 115** WAD-free,
-  **143 → 164** full.
+- **+21 regression asserts (Bite A)** — `fixed_atan2` full-range octants (10, WAD-free:
+  axis anchors, four diagonals at 128/384/640/896, monotone + continuous seam) and sprite
+  lookup coverage for all 12 RC-S3 types (11, WAD-gated). **+3 (Bite B)** — drawsegs
+  recorded/under-cap + the RC-S1 barrel-visibility assert (which also exposed that the
+  test flow never spawned real map things — it does now). Tests **105 → 115** WAD-free,
+  **143 → 167** full.
 
 ### Changed
+
+- **Toolchain pin `cyrius = "6.4.2"` → `"6.4.30"`** (user-directed; 6.4.30 released).
+  `cyrius.lock` regenerated on a clean resolve per process (`rm -rf lib && cyrius deps`):
+  still 34 entries, 4 stdlib hashes moved, verifies 34/0. Builds this cut ran the
+  versioned `~/.cyrius/versions/6.4.30/bin/cyrius` (reports 6.4.30, no drift) — the
+  6.4.x compilers do real default dead-code elimination, so binary sizes are not
+  comparable to the ≤6.4.3 rows (567 KB → ~380 KB for the same tree).
 
 - **`vani-core` 0.9.5 → 0.9.9, and converted from a git `[deps.vani]` dep to a
   committed `vendor/vani-core.cyr`** (mirroring cyrius-polyomino / cyrius-bb).
