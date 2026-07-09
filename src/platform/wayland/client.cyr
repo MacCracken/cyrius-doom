@@ -1,0 +1,356 @@
+# client.cyr -- Wayland AF_UNIX connection + registry + xdg-shell window (sovereign).
+#
+# Lifted ~95% from puka (src/platform/wayland/client.cyr). Connects to
+# $XDG_RUNTIME_DIR/$WAYLAND_DISPLAY, runs the wl_display handshake, binds the
+# globals doom needs (wl_compositor / wl_shm / xdg_wm_base / wl_seat), and drives
+# the xdg-shell window lifecycle. No libwayland; everything is the wire protocol
+# over the socket. Co-compiled after wire.cyr; includes nothing.
+#
+# doom adaptations vs puka: (1) the large recv/send/key buffers are alloc()'d
+# pointers (doom's big-buffer convention) rather than module-global `var x[N]`;
+# (2) the fatal wl_display.error routes through sakshi_error (doom logging rule);
+# (3) a wl_keyboard.enter/leave focus flag (wl_focus) so held keys clear on focus
+# loss (bite 3 reads it — puka had no leave handler).
+#
+# The wire parser is an UNTRUSTED-input boundary — every message is size/bounds-
+# checked before any field is read.
+#ifndef CYRIUS_TARGET_AGNOS
+
+enum WlAbi {
+    WL_AF_UNIX        = 1;
+    WL_SOCK_STREAM    = 1;
+    WL_SYS_SENDMSG    = 46;
+    WL_DISPLAY_ID     = 1;       # wl_display always has object id 1 (implicit)
+    # ---- request opcodes ----
+    OP_DISPLAY_SYNC   = 0;   OP_DISPLAY_GETREG = 1;
+    OP_REGISTRY_BIND  = 0;
+    OP_COMPOSITOR_CREATE_SURFACE = 0;
+    OP_XDG_GET_SURFACE = 2;  OP_XDG_PONG = 3;
+    OP_XDGSURF_GET_TOPLEVEL = 1; OP_XDGSURF_ACK = 4;
+    OP_TOPLEVEL_SET_TITLE = 2;   OP_TOPLEVEL_SET_APPID = 3;
+    OP_SURFACE_ATTACH = 1;   OP_SURFACE_FRAME = 3;  OP_SURFACE_COMMIT = 6;  OP_SURFACE_DAMAGE_BUFFER = 9;
+    # ---- event opcodes ----
+    EV_DISPLAY_ERROR  = 0;   EV_DISPLAY_DELETE = 1;
+    EV_REGISTRY_GLOBAL = 0;
+    EV_CALLBACK_DONE  = 0;
+    EV_XDG_PING       = 0;
+    EV_XDGSURF_CONFIGURE = 0;
+    EV_TOPLEVEL_CONFIGURE = 0; EV_TOPLEVEL_CLOSE = 1;
+    EV_BUFFER_RELEASE = 0;
+    OP_SEAT_GET_KEYBOARD = 1;
+    EV_SEAT_CAPS = 0;           # wl_seat.capabilities; KEYBOARD bit = 2
+    EV_KBD_ENTER = 1;          # wl_keyboard.enter
+    EV_KBD_LEAVE = 2;          # wl_keyboard.leave
+    EV_KBD_KEY = 3;            # wl_keyboard.key (serial,time,key,state)
+    EV_KBD_MODS = 4;          # wl_keyboard.modifiers (serial,depressed,...)
+    WL_RBUF_CAP = 8192;       # recv accumulation ceiling
+}
+
+var wl_fd      = 0 - 1;
+var wl_rbuf    = 0;         # recv accumulation (alloc WL_RBUF_CAP)
+var wl_rlen    = 0;
+var wl_sbuf    = 0;         # send scratch (alloc 512)
+var wl_next_id = 2;
+var wl_verbose = 0;        # 1 = print globals (the --wayland-probe path); 0 = quiet
+
+# bound-global registry names + the bound object ids
+var wl_reg_id = 0;
+var wl_gn_comp = 0; var wl_gn_shm = 0; var wl_gn_xdg = 0; var wl_gn_seat = 0;
+var wl_gv_seat = 0;
+var wl_comp_oid = 0; var wl_shm_oid = 0; var wl_xdg_oid = 0; var wl_seat_oid = 0;
+var wl_surf_oid = 0; var wl_xsurf_oid = 0; var wl_top_oid = 0;
+var wl_buf_oid = 0; var wl_kbd_oid = 0; var wl_frame_oid = 0;
+
+# dispatch flags
+var wl_cur_sync = 0; var wl_sync_done = 0;
+var wl_configured = 0; var wl_cfg_w = 0; var wl_cfg_h = 0;
+var wl_closed = 0; var wl_buf_busy = 0; var wl_frame_done = 1; var wl_nglobals = 0;
+var wl_focus = 1;          # keyboard focus (0 after wl_keyboard.leave — bite 3 clears latches)
+
+# keyboard: a ring of (evdev_keycode, value, mods) records + the live mod mask.
+var wl_mods = 0;
+var wl_kq   = 0;           # 32 records * 3 i64 = 768 bytes (alloc)
+var wl_kq_head = 0; var wl_kq_tail = 0;
+
+# xkb 'depressed' bitmask -> a small MOD_* mask (kept independent of input.cyr).
+fn wl__derive_mods(dep): i64 {
+    var m = 0;
+    if ((dep & 1) != 0)  { m = m | 1; }    # XKB Shift   -> 1
+    if ((dep & 4) != 0)  { m = m | 4; }    # XKB Control -> 4
+    if ((dep & 8) != 0)  { m = m | 2; }    # XKB Mod1/Alt-> 2
+    if ((dep & 64) != 0) { m = m | 8; }    # XKB Mod4/Super -> 8
+    return m;
+}
+fn wl__push_key(code, val, mods): i64 {
+    var nt = (wl_kq_tail + 1) % 32;
+    if (nt == wl_kq_head) { return 0; }    # full: drop
+    var b = wl_kq_tail * 3;
+    store64(wl_kq + b * 8, code);
+    store64(wl_kq + (b + 1) * 8, val);
+    store64(wl_kq + (b + 2) * 8, mods);
+    wl_kq_tail = nt;
+    return 0;
+}
+fn wl_pop_key(out24): i64 {                # writes code,val,mods; 1 if popped else 0
+    if (wl_kq_head == wl_kq_tail) { return 0; }
+    var b = wl_kq_head * 3;
+    store64(out24, load64(wl_kq + b * 8));
+    store64(out24 + 8, load64(wl_kq + (b + 1) * 8));
+    store64(out24 + 16, load64(wl_kq + (b + 2) * 8));
+    wl_kq_head = (wl_kq_head + 1) % 32;
+    return 1;
+}
+fn wl_key_pending(): i64 { if (wl_kq_head != wl_kq_tail) { return 1; } return 0; }
+
+fn wl_alloc_id(): i64 { var id = wl_next_id; wl_next_id = wl_next_id + 1; return id; }
+
+# ---- stdout helpers (--wayland-probe visibility only; NOT an error path) ----
+fn wl__emit(s, n): i64 { syscall(1, 1, s, n); return 0; }
+fn wl__emit_str(s): i64 { return wl__emit(s, strlen(s)); }
+fn wl__emit_uint(n): i64 {
+    if (n == 0) { return wl__emit("0", 1); }
+    var d[24];
+    var k = 0;
+    while (n > 0) { store8(&d + k, 0x30 + n % 10); n = n / 10; k = k + 1; }
+    var o[24];
+    var j = 0;
+    while (j < k) { store8(&o + j, load8(&d + k - 1 - j)); j = j + 1; }
+    return wl__emit(&o, k);
+}
+
+fn wl__streq(ptr, len, lit): i64 {
+    if (strlen(lit) != len) { return 0; }
+    var i = 0;
+    while (i < len) { if (load8(ptr + i) != load8(lit + i)) { return 0; } i = i + 1; }
+    return 1;
+}
+
+# ---- connection ----
+fn wl__copy_cstr(dst, off, src): i64 {
+    var i = 0;
+    while (load8(src + i) != 0) { store8(dst + off + i, load8(src + i)); i = i + 1; }
+    return off + i;
+}
+fn wl__sock_path(buf): i64 {
+    var wd = getenv("WAYLAND_DISPLAY");
+    if (wd != 0) { if (load8(wd) == 0x2F) {
+        var n = wl__copy_cstr(buf, 0, wd); store8(buf + n, 0); return n;
+    } }
+    var rt = getenv("XDG_RUNTIME_DIR");
+    if (rt == 0) { return 0 - 1; }
+    var n = wl__copy_cstr(buf, 0, rt);
+    store8(buf + n, 0x2F); n = n + 1;
+    if (wd != 0) { n = wl__copy_cstr(buf, n, wd); }
+    else { n = wl__copy_cstr(buf, n, "wayland-0"); }
+    store8(buf + n, 0);
+    return n;
+}
+fn wl_connect(): i64 {
+    # Lazy-alloc the persistent buffers once (doom big-buffer convention).
+    if (wl_rbuf == 0) { wl_rbuf = alloc(WL_RBUF_CAP); }
+    if (wl_sbuf == 0) { wl_sbuf = alloc(512); }
+    if (wl_kq == 0)   { wl_kq = alloc(768); }
+    var path[128];             # `var x[N]` = N BYTES in Cyrius; a wl socket path is < 120 chars
+    var plen = wl__sock_path(&path);
+    if (plen < 0) { return 0 - 1; }
+    var fd = sys_socket(WL_AF_UNIX, WL_SOCK_STREAM, 0);
+    if (fd < 0) { return 0 - 1; }
+    var addr[120];             # sockaddr_un: family(2) + sun_path(<=108) + NUL
+    store8(&addr, WL_AF_UNIX); store8(&addr + 1, 0);
+    var i = 0;
+    while (i < plen) { store8(&addr + 2 + i, load8(&path + i)); i = i + 1; }
+    store8(&addr + 2 + plen, 0);
+    if (sys_connect(fd, &addr, 2 + plen + 1) < 0) { sys_close(fd); return 0 - 1; }
+    wl_fd = fd; wl_rlen = 0; wl_next_id = 2;
+    return fd;
+}
+
+# ---- request senders ----
+fn wl__send(size): i64 { return file_write(wl_fd, wl_sbuf, size); }
+
+# send wl_sbuf[0..size) with one fd attached via SCM_RIGHTS ancillary data.
+# cmsg is fully zeroed first (no uninitialized slack into the syscall — F2).
+fn wl__send_fd(size, fd): i64 {
+    var iov[16];               # `var x[N]` = N BYTES: iov_base(8) + iov_len(8)
+    store64(&iov, wl_sbuf);
+    store64(&iov + 8, size);
+    var cmsg[24];              # cmsghdr(16) + fd(4) + pad(4), zeroed
+    store64(&cmsg, 0); store64(&cmsg + 8, 0); store64(&cmsg + 16, 0);
+    store64(&cmsg, 20);                 # cmsg_len = CMSG_LEN(4)
+    store32(&cmsg + 8, 1);              # SOL_SOCKET
+    store32(&cmsg + 12, 1);             # SCM_RIGHTS
+    store32(&cmsg + 16, fd);
+    var mh[56];                # struct msghdr (56 bytes on x86-64), zeroed
+    store64(&mh, 0); store64(&mh + 8, 0); store64(&mh + 16, 0);
+    store64(&mh + 24, 0); store64(&mh + 32, 0); store64(&mh + 40, 0); store64(&mh + 48, 0);
+    store64(&mh, 0);                    # msg_name = 0
+    store32(&mh + 8, 0); store32(&mh + 12, 0);   # namelen + pad
+    store64(&mh + 16, &iov);
+    store64(&mh + 24, 1);
+    store64(&mh + 32, &cmsg);
+    store64(&mh + 40, 24);              # controllen = CMSG_SPACE(4)
+    store32(&mh + 48, 0);
+    return syscall(WL_SYS_SENDMSG, wl_fd, &mh, 0);
+}
+
+fn wl_get_registry(): i64 {
+    wl_reg_id = wl_alloc_id();
+    wire_hdr_put(wl_sbuf, WL_DISPLAY_ID, OP_DISPLAY_GETREG, 12);
+    store32(wl_sbuf + 8, wl_reg_id);
+    wl__send(12);
+    return wl_reg_id;
+}
+fn wl_sync(): i64 {
+    wl_cur_sync = wl_alloc_id();
+    wl_sync_done = 0;
+    wire_hdr_put(wl_sbuf, WL_DISPLAY_ID, OP_DISPLAY_SYNC, 12);
+    store32(wl_sbuf + 8, wl_cur_sync);
+    wl__send(12);
+    return wl_cur_sync;
+}
+fn wl_bind(name, iface, ver): i64 {
+    var oid = wl_alloc_id();
+    var off = wire_put_u32(wl_sbuf, 8, name);
+    off = wire_put_str(wl_sbuf, off, iface, strlen(iface));
+    off = wire_put_u32(wl_sbuf, off, ver);
+    off = wire_put_u32(wl_sbuf, off, oid);
+    wire_hdr_put(wl_sbuf, wl_reg_id, OP_REGISTRY_BIND, off);
+    wl__send(off);
+    return oid;
+}
+# one-arg request (new_id or object) to `target`
+fn wl__req1(target, op, arg): i64 {
+    wire_hdr_put(wl_sbuf, target, op, 12);
+    store32(wl_sbuf + 8, arg);
+    return wl__send(12);
+}
+fn wl__req0(target, op): i64 { wire_hdr_put(wl_sbuf, target, op, 8); return wl__send(8); }
+fn wl__set_string(target, op, s): i64 {
+    var off = wire_put_str(wl_sbuf, 8, s, strlen(s));
+    wire_hdr_put(wl_sbuf, target, op, off);
+    return wl__send(off);
+}
+fn wl__pong(serial): i64 { return wl__req1(wl_xdg_oid, OP_XDG_PONG, serial); }
+
+# wl_keyboard events. modifiers updates the live mask; key queues an
+# (evdev_keycode, value, mods) record the app drains via win_next_key.
+# enter sets focus, leave clears it (bite 3 zeroes latches when unfocused).
+# wl_keyboard.key delivers the RAW evdev keycode (NOT evdev+8 — that offset is
+# only for feeding libxkbcommon, which a sovereign client doesn't use).
+fn wl__kbd(o, op): i64 {
+    if (op == EV_KBD_ENTER) { wl_focus = 1; return 0; }
+    if (op == EV_KBD_LEAVE) { wl_focus = 0; return 0; }
+    if (op == EV_KBD_MODS) { wl_mods = wl__derive_mods(load32(wl_rbuf + o + 12)); return 0; }
+    if (op == EV_KBD_KEY) {
+        var key = load32(wl_rbuf + o + 16);
+        var state = load32(wl_rbuf + o + 20);
+        wl__push_key(key, state, wl_mods);
+    }
+    return 0;
+}
+
+# ---- event dispatch ----
+fn wl__handle(o): i64 {
+    var id = load32(wl_rbuf + o);
+    var op = load32(wl_rbuf + o + 4) & 0xFFFF;
+    if (id == WL_DISPLAY_ID) {
+        if (op == EV_DISPLAY_ERROR) { sakshi_error("wayland: wl_display.error (fatal)", 33); wl_closed = 1; }
+        return 0;
+    }
+    if (id == wl_cur_sync) { if (op == EV_CALLBACK_DONE) { wl_sync_done = 1; } return 0; }
+    if (id == wl_frame_oid) { if (op == EV_CALLBACK_DONE) { wl_frame_done = 1; } return 0; }
+    if (id == wl_reg_id) {
+        if (op == EV_REGISTRY_GLOBAL) {
+            var nm = load32(wl_rbuf + o + 8);
+            var L = wire_str_len(wl_rbuf, o + 12);
+            var sp = wire_str_ptr(wl_rbuf, o + 12);
+            var ver = load32(wl_rbuf + wire_str_next(o + 12, L));
+            wl_nglobals = wl_nglobals + 1;
+            if (wl__streq(sp, L - 1, "wl_compositor")) { wl_gn_comp = nm; }
+            if (wl__streq(sp, L - 1, "wl_shm")) { wl_gn_shm = nm; }
+            if (wl__streq(sp, L - 1, "xdg_wm_base")) { wl_gn_xdg = nm; }
+            if (wl__streq(sp, L - 1, "wl_seat")) { wl_gn_seat = nm; wl_gv_seat = ver; }
+            if (wl_verbose == 1) {
+                wl__emit_str("  "); wl__emit(sp, L - 1);
+                wl__emit_str(" v"); wl__emit_uint(ver); wl__emit_str("\n");
+            }
+        }
+        return 0;
+    }
+    if (id == wl_xdg_oid) { if (op == EV_XDG_PING) { wl__pong(load32(wl_rbuf + o + 8)); } return 0; }
+    if (id == wl_xsurf_oid) {
+        if (op == EV_XDGSURF_CONFIGURE) {
+            var serial = load32(wl_rbuf + o + 8);
+            wl__req1(wl_xsurf_oid, OP_XDGSURF_ACK, serial);   # ack immediately
+            wl_configured = 1;
+        }
+        return 0;
+    }
+    if (id == wl_top_oid) {
+        if (op == EV_TOPLEVEL_CONFIGURE) {
+            var w = load32(wl_rbuf + o + 8);
+            var h = load32(wl_rbuf + o + 12);
+            if (w > 0) { wl_cfg_w = w; }
+            if (h > 0) { wl_cfg_h = h; }
+        }
+        if (op == EV_TOPLEVEL_CLOSE) { wl_closed = 1; }
+        return 0;
+    }
+    if (id == wl_buf_oid) { if (op == EV_BUFFER_RELEASE) { wl_buf_busy = 0; } return 0; }
+    if (id == wl_seat_oid) {
+        if (op == EV_SEAT_CAPS) {
+            if ((load32(wl_rbuf + o + 8) & 2) != 0) {     # KEYBOARD capability
+                if (wl_kbd_oid == 0) {
+                    wl_kbd_oid = wl_alloc_id();
+                    wl__req1(wl_seat_oid, OP_SEAT_GET_KEYBOARD, wl_kbd_oid);
+                }
+            }
+        }
+        return 0;
+    }
+    if (id == wl_kbd_oid) { return wl__kbd(o, op); }
+    return 0;
+}
+
+# Parse all complete messages currently in wl_rbuf; compact the tail. Returns 0.
+fn wl__parse(): i64 {
+    var o = 0;
+    var go = 1;
+    while (go == 1) {
+        if (o + 8 > wl_rlen) { go = 0; }
+        else {
+            var size = (load32(wl_rbuf + o + 4) >> 16) & 0xFFFF;
+            if (size < 8) { wl_closed = 1; return 0 - 1; }
+            if (o + size > wl_rlen) { go = 0; }
+            else { wl__handle(o); o = o + size; }
+        }
+    }
+    var rem = wl_rlen - o;
+    var k = 0;
+    while (k < rem) { store8(wl_rbuf + k, load8(wl_rbuf + o + k)); k = k + 1; }
+    wl_rlen = rem;
+    return 0;
+}
+
+# One blocking read + parse pass. Returns 0, or -1 on EOF/error.
+# Callers gate on poll(fd) readability (input_poll_wayland) so this never blocks
+# the 35 Hz tick between compositor events.
+fn wl_pump(): i64 {
+    var n = file_read(wl_fd, wl_rbuf + wl_rlen, WL_RBUF_CAP - wl_rlen);
+    if (n <= 0) { wl_closed = 1; return 0 - 1; }
+    wl_rlen = wl_rlen + n;
+    return wl__parse();
+}
+
+# Pump until our latest sync callback fires (a roundtrip barrier).
+fn wl_dispatch(): i64 {
+    while (wl_sync_done == 0) { if (wl_pump() < 0) { return 0 - 1; } }
+    return 0;
+}
+
+fn wl_close(): i64 {
+    if (wl_fd >= 0) { sys_close(wl_fd); wl_fd = 0 - 1; }
+    return 0;
+}
+
+#endif

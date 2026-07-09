@@ -1,0 +1,109 @@
+# shm.cyr -- Wayland wl_shm software-present buffer.
+#
+# Lifted from puka (src/platform/wayland/shm.cyr). A memfd-backed, mmap'd pixel
+# buffer the compositor reads directly. doom blits its palette-expanded frame
+# into shm_ptr as XRGB8888 (the same byte order framebuf_blit already produces).
+# Co-compiled after client.cyr (uses wl_alloc_id / wl__send / wl__send_fd /
+# wl_sbuf / wl_shm_oid / wl_buf_oid). Linux-desktop only.
+#ifndef CYRIUS_TARGET_AGNOS
+
+enum ShmAbi {
+    SYS_MEMFD_CREATE = 319;
+    SYS_FTRUNCATE    = 77;
+    SYS_MMAP9        = 9;
+    SYS_MUNMAP11     = 11;
+    MFD_CLOEXEC      = 1;
+    SHM_PROT_RW      = 3;        # PROT_READ|PROT_WRITE
+    SHM_MAP_SHARED   = 1;
+    WL_SHM_XRGB8888  = 1;        # opaque -> compositor can skip occluders
+    OP_SHM_CREATE_POOL    = 0;
+    OP_POOL_CREATE_BUFFER = 0;
+    OP_POOL_DESTROY       = 1;   # wl_shm_pool.destroy
+    OP_BUFFER_DESTROY     = 0;   # wl_buffer.destroy
+}
+
+var shm_fd     = 0 - 1;
+var shm_ptr    = 0;
+var shm_size   = 0;
+var shm_cap    = 0;          # mapped/pool capacity (high-water; resize grows, never shrinks)
+var shm_pool   = 0;
+var shm_w = 0; var shm_h = 0; var shm_stride = 0;
+
+# Allocate a memfd of W*H*4, map it, and create the wl_shm pool + wl_buffer.
+# Returns the mapped XRGB8888 pixel pointer, or 0 on failure. Sets wl_buf_oid.
+fn shm_create(w, h): i64 {
+    var stride = w * 4;
+    var size = stride * h;
+    if (size <= 0) { return 0; }
+    var fd = syscall(SYS_MEMFD_CREATE, "doom-wl", MFD_CLOEXEC);
+    if (fd < 0) { return 0; }
+    if (syscall(SYS_FTRUNCATE, fd, size) < 0) { sys_close(fd); return 0; }
+    var ptr = syscall(SYS_MMAP9, 0, size, SHM_PROT_RW, SHM_MAP_SHARED, fd, 0);
+    if (ptr == (0 - 1)) { sys_close(fd); return 0; }
+    if (ptr < 0) { if (ptr > (0 - 4096)) { sys_close(fd); return 0; } }
+    shm_fd = fd; shm_ptr = ptr; shm_size = size; shm_cap = size;
+    shm_w = w; shm_h = h; shm_stride = stride;
+
+    # wl_shm.create_pool(new_id, fd[SCM_RIGHTS], size)
+    shm_pool = wl_alloc_id();
+    store32(wl_sbuf + 8, shm_pool);
+    store32(wl_sbuf + 12, size);
+    wire_hdr_put(wl_sbuf, wl_shm_oid, OP_SHM_CREATE_POOL, 16);
+    wl__send_fd(16, fd);
+
+    # wl_shm_pool.create_buffer(new_id, offset, w, h, stride, format)
+    wl_buf_oid = wl_alloc_id();
+    store32(wl_sbuf + 8, wl_buf_oid);
+    store32(wl_sbuf + 12, 0);
+    store32(wl_sbuf + 16, w);
+    store32(wl_sbuf + 20, h);
+    store32(wl_sbuf + 24, stride);
+    store32(wl_sbuf + 28, WL_SHM_XRGB8888);
+    wire_hdr_put(wl_sbuf, shm_pool, OP_POOL_CREATE_BUFFER, 32);
+    wl__send(32);
+    return ptr;
+}
+
+# Refit the present buffer to a new window size. A wl_buffer's geometry is fixed
+# at creation, so a new buffer is always made; the backing memfd/pool are reused
+# when the new size fits the high-water capacity (the common drag case — no fd
+# churn) and grown (old mapping/fd/pool explicitly torn down — no leak) only when
+# the window exceeds every prior size. Returns the (possibly remapped) pixel
+# pointer, or 0 on failure. The caller repaints fully before presenting.
+fn shm_resize(w, h): i64 {
+    var stride = w * 4;
+    var size = stride * h;
+    if (size <= 0) { return 0; }
+    if (size > shm_cap) {
+        # grow: release the old buffer/pool/mapping/fd, then build fresh at `size`.
+        if (wl_buf_oid != 0) { wl__req0(wl_buf_oid, OP_BUFFER_DESTROY); }
+        if (shm_pool != 0)   { wl__req0(shm_pool, OP_POOL_DESTROY); }
+        if (shm_ptr != 0)    { syscall(SYS_MUNMAP11, shm_ptr, shm_size); shm_ptr = 0; }
+        if (shm_fd >= 0)     { sys_close(shm_fd); shm_fd = 0 - 1; }
+        return shm_create(w, h);
+    }
+    # within capacity: keep the mapping + pool, rebuild only the wl_buffer.
+    wl__req0(wl_buf_oid, OP_BUFFER_DESTROY);
+    wl_buf_oid = wl_alloc_id();
+    store32(wl_sbuf + 8, wl_buf_oid);
+    store32(wl_sbuf + 12, 0);
+    store32(wl_sbuf + 16, w);
+    store32(wl_sbuf + 20, h);
+    store32(wl_sbuf + 24, stride);
+    store32(wl_sbuf + 28, WL_SHM_XRGB8888);
+    wire_hdr_put(wl_sbuf, shm_pool, OP_POOL_CREATE_BUFFER, 32);
+    wl__send(32);
+    shm_w = w; shm_h = h; shm_stride = stride;
+    return shm_ptr;
+}
+
+# Fill the whole buffer with one XRGB colour (store32 -> bytes B,G,R,0 on LE).
+fn shm_fill(rgb): i64 {
+    var px = rgb & 0xFFFFFF;
+    var n = shm_w * shm_h;
+    var i = 0;
+    while (i < n) { store32(shm_ptr + i * 4, px); i = i + 1; }
+    return 0;
+}
+
+#endif

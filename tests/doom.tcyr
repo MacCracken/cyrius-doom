@@ -15,6 +15,12 @@ include "lib/bsp.cyr"
 include "src/fixed.cyr"
 include "src/tables.cyr"
 include "src/wad.cyr"
+# Wayland backend (v0.33.0) — framebuf.cyr/input.cyr reference win_*/present_mode
+# in their #ifndef-AGNOS branches, so the (Linux) test build needs these too.
+include "src/platform/wayland/wire.cyr"
+include "src/platform/wayland/client.cyr"
+include "src/platform/wayland/shm.cyr"
+include "src/platform/window.cyr"
 include "src/framebuf.cyr"
 include "src/map.cyr"
 include "src/texture.cyr"
@@ -556,6 +562,31 @@ fn main() {
         if (music_render_sample() != 0) { iso_post += 1; }
     }
     assert_eq(iso_post, 0, "stopped music renders pure silence (audio-test SFX-only)");
+
+    # ============================================================
+    test_group("wayland: wire codec byte layout (v0.33.0, headless)");
+    # ============================================================
+    # The pure wire.cyr codec is the one Wayland piece CI can exercise without a
+    # compositor. Assert the wire-format math the whole client depends on.
+    var wbuf = alloc(64);
+    # header: word0 = object id; word1 = (size<<16)|(opcode&0xFFFF)
+    wire_hdr_put(wbuf, 5, 3, 12);
+    assert_eq(wire_msg_id(wbuf), 5, "wire header object id");
+    assert_eq(wire_msg_op(wbuf), 3, "wire header opcode");
+    assert_eq(wire_msg_size(wbuf), 12, "wire header size");
+    assert_eq(load32(wbuf + 4), (12 << 16) | 3, "wire word1 = (size<<16)|opcode");
+    # string arg: u32 len(=strlen+1 incl NUL), bytes+NUL, padded to 4.
+    var woff = wire_put_str(wbuf, 8, "wl_shm", 6);   # "wl_shm" = 6 chars -> L=7 -> pad to 8
+    assert_eq(load32(wbuf + 8), 7, "wire string length = strlen+1 (incl NUL)");
+    assert_eq(load8(wbuf + 12 + 6), 0, "wire string NUL-terminated");
+    assert_eq(woff, 8 + 4 + 8, "wire string advances 4 + pad4(L)");
+    assert_eq(wire_str_next(8, 7), 8 + 4 + 8, "wire_str_next matches (pad 7->8)");
+    # exact-multiple-of-4 string: "wxyz" -> L=5 -> pad to 8
+    wire_put_str(wbuf, 8, "wxyz", 4);
+    assert_eq(wire_str_next(8, wire_str_len(wbuf, 8)), 8 + 4 + 8, "wire_str_next pad (L=5 -> 8)");
+    # u32 writer advances 4.
+    assert_eq(wire_put_u32(wbuf, 8, 0xABCD), 12, "wire_put_u32 advances 4");
+    assert_eq(load32(wbuf + 8), 0xABCD, "wire_put_u32 stores value");
 
     # ============================================================
     # WAD tests require DOOM1.WAD — skip if not available

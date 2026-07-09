@@ -37,6 +37,16 @@ var palette = 0;
 var fb_fd = -1;
 var pipe_fd = -1;
 
+# Runtime present backend (Linux only; AGNOS is compile-time via #ifdef and
+# always uses the blit#39 path, ignoring this). Resolved in doom_main BEFORE
+# framebuf_init (F1) so a Wayland window never opens during --ppm screenshot
+# runs. PM_FB0 = /dev/fb0 (or PPM fallback if it won't open); PM_WAYLAND =
+# native Wayland window; PM_PPM = screenshot mode (--ppm/--ppm-menu).
+enum PresentMode { PM_FB0 = 0; PM_WAYLAND = 1; PM_PPM = 2; }
+var present_mode = 0;
+# Wayland letterbox placement into the shm buffer (recomputed on resize).
+var wl_scale = 1; var wl_xoff = 0; var wl_yoff = 0;
+
 # Real panel geometry (filled by framebuf_init via ioctl).
 var fb_xres   = 0;
 var fb_yres   = 0;
@@ -89,6 +99,22 @@ fn framebuf_init(): i64 {
     # heap overflow that stomped colormap/zlight/flat_cache.
     fb_buf = alloc(SCREEN_WIDTH * SCREEN_HEIGHT * 4);
     return 0;
+    #endif
+
+    #ifndef CYRIUS_TARGET_AGNOS
+    # Wayland backend (v0.33.0): open a native window instead of /dev/fb0. On
+    # failure, fall back to fb0 so a mis-detected session still runs.
+    if (present_mode == PM_WAYLAND) {
+        if (win_open("cyrius-doom", 640, 400) == 0) {
+            sakshi_error("wayland: win_open failed, falling back to fb0", 44);
+            present_mode = PM_FB0;
+        } else {
+            framebuf_wl_recompute();     # scale/letterbox for the configured size
+            shm_fill(0);                 # black letterbox bars
+            fb_fd = -1;                  # no /dev/fb0 in this mode
+            return 0;
+        }
+    }
     #endif
 
     fb_fd = file_open("/dev/fb0", 2, 0);
@@ -269,6 +295,55 @@ fn framebuf_blit_agnos(): i64 {
 }
 #endif
 
+# Wayland (v0.33.0): integer-scale + center the 320x200 palette-indexed frame
+# into the compositor-configured window. Same math as framebuf_blit, against
+# win_w/win_h instead of the panel; recomputed on resize.
+#ifndef CYRIUS_TARGET_AGNOS
+fn framebuf_wl_recompute(): i64 {
+    var sx = win_w / SCREEN_WIDTH;
+    var sy = win_h / SCREEN_HEIGHT;
+    wl_scale = sx;
+    if (sy < wl_scale) { wl_scale = sy; }
+    if (wl_scale < 1) { wl_scale = 1; }
+    wl_xoff = (win_w - SCREEN_WIDTH * wl_scale) / 2;
+    wl_yoff = (win_h - SCREEN_HEIGHT * wl_scale) / 2;
+    if (wl_xoff < 0) { wl_xoff = 0; }
+    if (wl_yoff < 0) { wl_yoff = 0; }
+    return 0;
+}
+
+fn framebuf_present_wayland(): i64 {
+    var dst = win_present_begin(1);
+    if (dst == 0) { return 0; }
+    var pitch = win_w * 4;
+    var row_bytes = SCREEN_WIDTH * wl_scale * 4;
+    for (var sy = 0; sy < SCREEN_HEIGHT; sy += 1) {
+        var src_row = screen_buf + sy * SCREEN_WIDTH;
+        var dy0 = wl_yoff + sy * wl_scale;
+        var first = dst + dy0 * pitch + wl_xoff * 4;
+        var dx = first;
+        for (var sxi = 0; sxi < SCREEN_WIDTH; sxi += 1) {
+            var po = load8(src_row + sxi) * 3;
+            var r = load8(palette + po);
+            var g = load8(palette + po + 1);
+            var b = load8(palette + po + 2);
+            # XRGB8888, byte order B,G,R,X on LE — identical to framebuf_blit;
+            # r/g/b are 0..255 so the shifts are logical-correct (no asr needed).
+            var p32 = 0xFF000000 | (r << 16) | (g << 8) | b;
+            for (var rx = 0; rx < wl_scale; rx += 1) {
+                store32(dx, p32);
+                dx += 4;
+            }
+        }
+        for (var ry = 1; ry < wl_scale; ry += 1) {
+            memcpy(dst + (dy0 + ry) * pitch + wl_xoff * 4, first, row_bytes);
+        }
+    }
+    win_present_commit(1, wl_xoff, wl_yoff, SCREEN_WIDTH * wl_scale, SCREEN_HEIGHT * wl_scale);
+    return 0;
+}
+#endif
+
 fn framebuf_flip(): i64 {
     #ifdef CYRIUS_TARGET_AGNOS
     if (fb_fd >= 0) {
@@ -281,6 +356,9 @@ fn framebuf_flip(): i64 {
                 (fb_scale << 32) | (fb_yoff << 16) | fb_xoff);
     }
     return 0;
+    #endif
+    #ifndef CYRIUS_TARGET_AGNOS
+    if (present_mode == PM_WAYLAND) { return framebuf_present_wayland(); }
     #endif
     if (fb_fd >= 0) {
         framebuf_blit();

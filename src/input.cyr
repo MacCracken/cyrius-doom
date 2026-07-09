@@ -173,6 +173,11 @@ fn input_init(): i64 {
         store64(key_state + i * 8, 0);
     }
 
+    #ifndef CYRIUS_TARGET_AGNOS
+    # Wayland has real key up/down via the compositor — no tty raw-mode.
+    if (present_mode == PM_WAYLAND) { return 0; }
+    #endif
+
     # Enable raw terminal input
     input_enable_raw_mode();
 
@@ -225,8 +230,103 @@ fn doom_agnos_sc_to_key(sc, ext): i64 {
 }
 #endif
 
+#ifndef CYRIUS_TARGET_AGNOS
+# evdev keycode -> doom key_state index (Wayland desktop backend, v0.33.0).
+# Distinct from the AGNOS Set-1 table: evdev arrows are 103/108/105/106 (no E0
+# prefix) and right-Ctrl is 97. Full movement + weapons + quit are wired.
+fn doom_evdev_to_key(ev): i64 {
+    if (ev == 17)  { return 119; }   # W -> forward
+    if (ev == 30)  { return 97;  }   # A -> strafe left
+    if (ev == 31)  { return 115; }   # S -> backward
+    if (ev == 32)  { return 100; }   # D -> strafe right
+    if (ev == 18)  { return 101; }   # E -> use
+    if (ev == 33)  { return 102; }   # F -> fire (Linux scheme)
+    if (ev == 19)  { return 114; }   # R -> run
+    if (ev == 16)  { return 113; }   # Q -> quit
+    if (ev == 103) { return 128; }   # Up
+    if (ev == 108) { return 129; }   # Down
+    if (ev == 105) { return 130; }   # Left
+    if (ev == 106) { return 131; }   # Right
+    if (ev == 57)  { return 32;  }   # Space -> use
+    if (ev == 28)  { return 10;  }   # Enter
+    if (ev == 15)  { return 9;   }   # Tab -> automap
+    if (ev == 1)   { return 27;  }   # Esc -> quit
+    if (ev == 29)  { return 132; }   # Left Ctrl -> fire
+    if (ev == 97)  { return 132; }   # Right Ctrl -> fire
+    if (ev == 42)  { return 133; }   # Left Shift -> run/turn modifier
+    if (ev == 54)  { return 133; }   # Right Shift
+    if (ev >= 2 && ev <= 8) { return ev + 47; }   # 1..7 -> ASCII '1'..'7' (weapons)
+    return 0 - 1;
+}
+
+# Non-blocking Wayland input drain. poll(7)-gates wl_fd so wl_pump's blocking
+# read never stalls the 35 Hz tick between compositor events (the class of the
+# 0.29.1 stdin O_NONBLOCK fix). Latches key_state on real up/down; clears all
+# latches on focus loss (F6 — held keys would otherwise stick after alt-tab).
+# pollfd = {i32 fd@0; i16 events@4; i16 revents@6}; events+revents packed as one
+# u32 at +4 (events=POLLIN=1 low half, revents high half) to avoid store16.
+var wl_kr[24];   # key record scratch: 3 i64 (code, val, mods) = 24 BYTES
+fn input_poll_wayland(): i64 {
+    input_flags = 0;
+    var pfd[8];               # struct pollfd = fd(4) + events(2) + revents(2)
+    store32(&pfd, wl_fd);
+    var guard = 0;
+    while (guard < 64) {
+        store32(&pfd + 4, 1);                    # events=POLLIN(1), revents=0
+        var pr = syscall(7, &pfd, 1, 0);         # SYS_poll, 0 ms timeout (non-blocking)
+        if (pr <= 0) { guard = 64; }
+        else {
+            var revents = (load32(&pfd + 4) >> 16) & 0xFFFF;
+            if ((revents & 1) == 0) { guard = 64; }
+            else {
+                var ev = win_poll_events(1);         # one read + dispatch
+                if ((ev & WIN_EV_CLOSE) != 0) { input_quit = 1; }
+                while (win_next_key(1, &wl_kr) == 1) {
+                    var idx = doom_evdev_to_key(load64(&wl_kr));
+                    if (idx >= 0) { store64(key_state + idx * 8, load64(&wl_kr + 8)); }
+                }
+                guard += 1;
+            }
+        }
+    }
+    # Focus loss clears every latch (else a held key walks you forever).
+    if (wl_focus == 0) {
+        for (var ci = 0; ci < 256; ci += 1) { store64(key_state + ci * 8, 0); }
+    }
+    # Build input_flags from the latched key_state — the Linux desktop scheme
+    # (arrows TURN, A/D strafe, F/Ctrl fire), matching the fb0/tty build (F5).
+    # Required so the menu (which edge-detects input_flags) is navigable and the
+    # game is playable, not just quit-only.
+    if (load64(key_state + KEY_W * 8) == 1) { input_flags |= INP_FORWARD; }
+    if (load64(key_state + KEY_UP * 8) == 1) { input_flags |= INP_FORWARD; }
+    if (load64(key_state + KEY_S * 8) == 1) { input_flags |= INP_BACKWARD; }
+    if (load64(key_state + KEY_DOWN * 8) == 1) { input_flags |= INP_BACKWARD; }
+    if (load64(key_state + KEY_LEFT * 8) == 1) { input_flags |= INP_TURN_LEFT; }
+    if (load64(key_state + KEY_RIGHT * 8) == 1) { input_flags |= INP_TURN_RIGHT; }
+    if (load64(key_state + KEY_A * 8) == 1) { input_flags |= INP_STRAFE_LEFT; }
+    if (load64(key_state + KEY_D * 8) == 1) { input_flags |= INP_STRAFE_RIGHT; }
+    if (load64(key_state + KEY_SPACE * 8) == 1) { input_flags |= INP_USE; }
+    if (load64(key_state + KEY_E * 8) == 1) { input_flags |= INP_USE; }
+    if (load64(key_state + KEY_CTRL * 8) == 1) { input_flags |= INP_FIRE; }
+    if (load64(key_state + 102 * 8) == 1) { input_flags |= INP_FIRE; }   # F
+    if (load64(key_state + KEY_R * 8) == 1) { input_flags |= INP_RUN; }
+    if (load64(key_state + KEY_TAB * 8) == 1) { input_flags |= INP_TAB; }
+    input_weapon = 0;
+    for (var wwi = 1; wwi <= 7; wwi += 1) {
+        if (load64(key_state + (48 + wwi) * 8) == 1) { input_weapon = wwi; }
+    }
+    if (load64(key_state + KEY_Q * 8) == 1) { input_quit = 1; }
+    if (load64(key_state + KEY_ESC * 8) == 1) { input_quit = 1; }
+    return 0;
+}
+#endif
+
 fn input_poll(): i64 {
     input_flags = 0;
+
+    #ifndef CYRIUS_TARGET_AGNOS
+    if (present_mode == PM_WAYLAND) { return input_poll_wayland(); }
+    #endif
 
     #ifdef CYRIUS_TARGET_AGNOS
     # Raw key up/down via kbscan(#42): a non-blocking drain of the kernel's

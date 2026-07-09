@@ -1,6 +1,18 @@
 # Proposal — v0.33.0 native Wayland window backend (desktop rendering)
 
-> **Status**: design accepted, phased implementation in progress (bite 1 landing).
+> **Status**: **bite 1 landed** (2026-07-08, uncommitted) — the four platform files + seam are wired behind
+> `present_mode`; `--wayland` opens a window presenting the real integer-scaled frame with full keyboard
+> (movement/weapons/quit) and clean close. Regressions verified: `--ppm`/`--ppm-menu` byte-identical, tests
+> **129/189**, AGNOS QEMU PASS, fuzz + 9-map sweep clean. The window itself is **user-verified on Hyprland**
+> (no live compositor in the dev shell). A 4-lens adversarial review caught + fixed a `var x[N]`-is-BYTES
+> sizing bug (I had divided puka's stack-buffer sizes by 8 → overflow; see [[cyrius-var-array-is-bytes]]) and
+> the `input_flags`-hardcoded-0 menu lock (now fully wired). Bites 2–4 (double-buffer, resize, polish) remain.
+>
+> **Security follow-up (closeout)**: `wl__parse` only checks `size >= 8` before `wl__handle` reads
+> attacker-controlled string lengths (`wire_str_len`/`wire_str_next` on a `wl_registry.global`) — a malformed
+> length could compute a read address past the 8192-byte `wl_rbuf`. Puka-inherited, untrusted-input boundary;
+> bounds-check `o + off + 4 + L <= o + size` before each field read, and document in
+> `docs/audit/{date}-wayland-backend.md` per the P(-1) step.
 > **Reference**: [puka](https://github.com/MacCracken/puka) — a sovereign Cyrius Wayland terminal;
 > doom lifts its `src/platform/wayland/{wire,shm,client}.cyr` + `window.cyr` seam near-verbatim.
 > **Derived from**: the 2026-07-08 study+design+critique workflow (6 agents; 11 critique findings folded in below).

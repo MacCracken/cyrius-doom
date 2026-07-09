@@ -1,0 +1,51 @@
+# wire.cyr -- Wayland wire-protocol codec (PURE: no syscalls; headless-testable).
+#
+# Lifted verbatim from puka (src/platform/wayland/wire.cyr) — sovereign, no
+# libwayland. A message is 32-bit-aligned, little-endian (host order on x86-64):
+#   word0 @+0 = target object id (u32)
+#   word1 @+4 = (size << 16) | (opcode & 0xFFFF)   # size = TOTAL bytes incl. header
+# then the arguments in signature order, each padded to 4 bytes:
+#   int/uint/object/new_id : 4 bytes
+#   string                 : u32 len(=strlen+1, incl NUL), bytes+NUL, pad to 4
+#   array                  : u32 byte-len, bytes, pad to 4
+#   fd                     : ZERO body bytes (rides out-of-band via SCM_RIGHTS)
+#
+# Linux-desktop only: the whole Wayland backend is #ifndef'd out on AGNOS (the
+# microkernel has no AF_UNIX/sendmsg; sys_socket is Linux-common-only). Included
+# by the Wayland client (client.cyr); includes nothing.
+#ifndef CYRIUS_TARGET_AGNOS
+
+# ---- header ----
+fn wire_hdr_put(p, oid, opcode, size): i64 {
+    store32(p, oid);
+    store32(p + 4, (size << 16) | (opcode & 0xFFFF));
+    return 0;
+}
+fn wire_msg_id(p): i64   { return load32(p); }
+fn wire_msg_op(p): i64   { return load32(p + 4) & 0xFFFF; }
+# size/opcode fields are zero-extended (load32), so `>>` is logically correct
+# (never negative) — the one place a bare >> is safe by construction.
+fn wire_msg_size(p): i64 { return (load32(p + 4) >> 16) & 0xFFFF; }
+
+# ---- argument writers (return the next byte offset) ----
+fn wire_put_u32(p, off, v): i64 { store32(p + off, v); return off + 4; }
+
+fn wire_put_str(p, off, sptr, slen): i64 {   # slen = strlen (no NUL)
+    var L = slen + 1;
+    store32(p + off, L);
+    var o = off + 4;
+    var i = 0;
+    while (i < slen) { store8(p + o + i, load8(sptr + i)); i = i + 1; }
+    store8(p + o + slen, 0);                  # NUL
+    var padded = (L + 3) & (0 - 4);           # round up to 4 (~3)
+    return off + 4 + padded;
+}
+
+# ---- argument readers ----
+# A string arg at `off`: its byte length L (incl NUL) is the u32 at +off; the
+# content starts at +off+4. wire_str_next advances past it (4 + padded(L)).
+fn wire_str_len(p, off): i64  { return load32(p + off); }
+fn wire_str_ptr(p, off): i64  { return p + off + 4; }
+fn wire_str_next(off, L): i64 { return off + 4 + ((L + 3) & (0 - 4)); }
+
+#endif

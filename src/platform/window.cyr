@@ -1,0 +1,125 @@
+# window.cyr -- the window-backend seam (platform-neutral `win_*`).
+#
+# Lifted from puka (src/platform/window.cyr). doom's present/input paths call
+# win_present_begin/win_present_commit and win_poll_events/win_next_key; the
+# names are platform-neutral so an X11/other backend later fills the same
+# contract. One backend today forwards straight to the Wayland implementation.
+# Co-compiled after wire/client/shm; includes nothing. Linux-desktop only.
+#
+# doom adaptation vs puka: win_open takes explicit (w_hint, h_hint) pixel dims
+# instead of puka's terminal (cols, rows, cell_w, cell_h) — doom is not a
+# terminal, and cols*cell_w = 0 on a 0x0 configure would fail (F4).
+#ifndef CYRIUS_TARGET_AGNOS
+
+enum WinAbi {
+    WIN_EV_NONE   = 0;
+    WIN_EV_RESIZE = 1;
+    WIN_EV_KEY    = 2;
+    WIN_EV_CLOSE  = 4;
+    WIN_EV_FRAME  = 8;
+    WIN_CAP_SHM   = 0;     # win_present_begin returns a CPU pixel buffer
+}
+
+var win_w = 0;
+var win_h = 0;
+
+# Connect, bind globals, create the xdg-shell window, wait the first configure,
+# allocate the present buffer. (w_hint, h_hint) = fallback size if the compositor
+# defers geometry (0x0 configure). Returns an opaque handle (1) or 0 on failure.
+fn win_open(title, w_hint, h_hint): i64 {
+    if (wl_connect() < 0) { return 0; }
+    wl_get_registry();
+    wl_sync();
+    if (wl_dispatch() < 0) { return 0; }              # enumerate + record globals
+    if (wl_gn_comp == 0) { return 0; }
+    if (wl_gn_shm == 0)  { return 0; }
+    if (wl_gn_xdg == 0)  { return 0; }
+    wl_comp_oid = wl_bind(wl_gn_comp, "wl_compositor", 4);
+    wl_shm_oid  = wl_bind(wl_gn_shm, "wl_shm", 1);
+    wl_xdg_oid  = wl_bind(wl_gn_xdg, "xdg_wm_base", 1);
+    if (wl_gn_seat != 0) { wl_seat_oid = wl_bind(wl_gn_seat, "wl_seat", 5); }   # -> capabilities -> keyboard
+
+    wl_surf_oid = wl_alloc_id();
+    wl__req1(wl_comp_oid, OP_COMPOSITOR_CREATE_SURFACE, wl_surf_oid);
+    wl_xsurf_oid = wl_alloc_id();
+    store32(wl_sbuf + 8, wl_xsurf_oid);
+    store32(wl_sbuf + 12, wl_surf_oid);
+    wire_hdr_put(wl_sbuf, wl_xdg_oid, OP_XDG_GET_SURFACE, 16);
+    wl__send(16);
+    wl_top_oid = wl_alloc_id();
+    wl__req1(wl_xsurf_oid, OP_XDGSURF_GET_TOPLEVEL, wl_top_oid);
+    wl__set_string(wl_top_oid, OP_TOPLEVEL_SET_TITLE, title);
+    wl__set_string(wl_top_oid, OP_TOPLEVEL_SET_APPID, "cyrius-doom");
+    wl__req0(wl_surf_oid, OP_SURFACE_COMMIT);          # map (no buffer) -> ask configure
+
+    while (wl_configured == 0) {
+        if (wl_pump() < 0) { return 0; }
+        if (wl_closed == 1) { return 0; }
+    }
+    win_w = wl_cfg_w; win_h = wl_cfg_h;
+    if (win_w <= 0) { win_w = w_hint; }
+    if (win_h <= 0) { win_h = h_hint; }
+    if (shm_create(win_w, win_h) == 0) { return 0; }
+    return 1;
+}
+
+fn win_caps(win): i64 { return WIN_CAP_SHM; }
+fn win_fd(win): i64 { return wl_fd; }
+fn win_size_px(win, out16): i64 { store64(out16, win_w); store64(out16 + 8, win_h); return 0; }
+
+# CPU path: the writable XRGB8888 buffer the renderer blits into.
+fn win_present_begin(win): i64 { return shm_ptr; }
+
+# attach + damage + frame (throttle) + commit. x,y,w,h = damage rect (buffer px).
+fn win_present_commit(win, x, y, w, h): i64 {
+    store32(wl_sbuf + 8, wl_buf_oid);
+    store32(wl_sbuf + 12, 0);
+    store32(wl_sbuf + 16, 0);
+    wire_hdr_put(wl_sbuf, wl_surf_oid, OP_SURFACE_ATTACH, 20);
+    wl__send(20);
+    store32(wl_sbuf + 8, x);
+    store32(wl_sbuf + 12, y);
+    store32(wl_sbuf + 16, w);
+    store32(wl_sbuf + 20, h);
+    wire_hdr_put(wl_sbuf, wl_surf_oid, OP_SURFACE_DAMAGE_BUFFER, 24);
+    wl__send(24);
+    wl_frame_oid = wl_alloc_id();
+    wl_frame_done = 0;
+    wl__req1(wl_surf_oid, OP_SURFACE_FRAME, wl_frame_oid);
+    wl__req0(wl_surf_oid, OP_SURFACE_COMMIT);
+    wl_buf_busy = 1;
+    return 0;
+}
+
+# Read + dispatch pending wayland events; return an OR-mask of WIN_EV_*.
+# Call only when win_fd is poll-readable (it does one read).
+fn win_poll_events(win): i64 {
+    if (wl_pump() < 0) { return WIN_EV_CLOSE; }
+    var m = WIN_EV_NONE;
+    if (wl_closed == 1) { m = m | WIN_EV_CLOSE; }
+    if (wl_frame_done == 1) { m = m | WIN_EV_FRAME; }
+    if (wl_key_pending() == 1) { m = m | WIN_EV_KEY; }
+    if (wl_cfg_w > 0) { if (wl_cfg_h > 0) {
+        if (wl_cfg_w != win_w) { m = m | WIN_EV_RESIZE; }
+        if (wl_cfg_h != win_h) { m = m | WIN_EV_RESIZE; }
+    } }
+    return m;
+}
+
+# Adopt the latest configured size: update win_w/win_h and refit the present
+# buffer. After this the caller recomputes scale/letterbox and repaints fully.
+# Returns 0, or -1 if the buffer refit failed.
+fn win_resize_apply(win): i64 {
+    win_w = wl_cfg_w;
+    win_h = wl_cfg_h;
+    if (shm_resize(win_w, win_h) == 0) { return 0 - 1; }
+    return 0;
+}
+
+# Drain one key record: out24[+0]=evdev keycode, [+8]=value(1=press), [+16]=mods.
+# Returns 1 if a record was produced, 0 if the queue is empty.
+fn win_next_key(win, out24): i64 { return wl_pop_key(out24); }
+
+fn win_close(win): i64 { wl_close(); return 0; }
+
+#endif

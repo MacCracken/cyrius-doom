@@ -20,6 +20,15 @@ include "vendor/vani-core.cyr"
 include "src/fixed.cyr"
 include "src/tables.cyr"
 include "src/wad.cyr"
+# Wayland desktop backend (v0.33.0) — sovereign wl protocol, no libwayland, no
+# new deps. All four files are #ifndef CYRIUS_TARGET_AGNOS (the microkernel has
+# no AF_UNIX/sendmsg). Dependency order: wire (pure codec) -> client (uses
+# wire_*) -> shm (uses client) -> window (seam, uses all). Before framebuf.cyr:
+# framebuf_flip's Wayland branch calls win_present_*.
+include "src/platform/wayland/wire.cyr"
+include "src/platform/wayland/client.cyr"
+include "src/platform/wayland/shm.cyr"
+include "src/platform/window.cyr"
 include "src/framebuf.cyr"
 include "src/map.cyr"
 include "src/texture.cyr"
@@ -159,6 +168,36 @@ fn doom_main(): i64 {
         doom_exit(1);
     }
     sakshi_info("wad loaded", 10);
+
+    # Resolve the display backend BEFORE framebuf_init (F1): the mode must be
+    # known so init opens the right surface — a Wayland window must NOT pop up
+    # during --ppm/--ppm-menu screenshot runs. --wayland-probe is a diagnostic
+    # that lists the compositor's globals and exits. Linux-only; AGNOS uses the
+    # compile-time blit#39 path and leaves present_mode at PM_FB0.
+    #ifndef CYRIUS_TARGET_AGNOS
+    var wl_probe_mode = 0; var force_fb0 = 0; var force_wl = 0; var want_ppm = 0;
+    for (var di = 2; di < argc(); di += 1) {
+        var da = argv(di);
+        if (streq(da, "--fb0") == 1) { force_fb0 = 1; }
+        if (streq(da, "--wayland") == 1) { force_wl = 1; }
+        if (streq(da, "--wayland-probe") == 1) { wl_probe_mode = 1; }
+        if (streq(da, "--ppm") == 1) { want_ppm = 1; }
+        if (streq(da, "--ppm-menu") == 1) { want_ppm = 1; }
+    }
+    if (wl_probe_mode == 1) {
+        wl_verbose = 1;
+        sakshi_info("wayland: probing globals", 24);
+        if (wl_connect() < 0) { sakshi_error("wayland: connect failed", 24); doom_exit(1); }
+        wl_get_registry(); wl_sync(); wl_dispatch();
+        wl_close();
+        doom_exit(0);
+    }
+    if (want_ppm == 1) { present_mode = PM_PPM; }
+    else { if (force_fb0 == 1) { present_mode = PM_FB0; }
+    else { if (force_wl == 1) { present_mode = PM_WAYLAND; }
+    else { if (getenv("WAYLAND_DISPLAY") != 0) { present_mode = PM_WAYLAND; }
+    else { present_mode = PM_FB0; } } } }
+    #endif
 
     framebuf_init();
     render_load_colormap();
