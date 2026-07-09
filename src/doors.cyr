@@ -37,7 +37,9 @@ var door_thinkers = 0;
 var door_count = 0;
 
 fn doors_init(): i64 {
-    door_thinkers = alloc(DOOR_MAX * DOOR_ENTRY_SIZE);
+    # Lazy-init guard (RC-G7): re-alloc'd on every map load, leaking the
+    # previous thinker array on the never-free bump allocator.
+    if (door_thinkers == 0) { door_thinkers = alloc(DOOR_MAX * DOOR_ENTRY_SIZE); }
     door_count = 0;
     return 0;
 }
@@ -223,15 +225,32 @@ fn doors_tick(): i64 {
             if (w <= 0) { door_set_state(i, DS_CLOSING); }
         }
         if (state == DS_CLOSING) {
-            h -= DOOR_SPEED;
-            if (h <= orig) {
-                h = orig;
-                door_set_height(i, h);
-                store64(map_sectors + sec * MAP_SECTOR_SIZE + 8, h);
-                door_free(i);                  # fully closed, release the slot
+            # Obstruction check (RC-G1, vanilla T_VerticalDoor): if the player
+            # stands in the doorway and the next step would squeeze below
+            # player height, REVERSE to opening instead of sealing them in.
+            # Remotely-triggered tag doors have no special on their own lines,
+            # so without this a door closing on the player was a quit-only
+            # softlock (no inside "use", no crush damage to die from).
+            # (Monsters in doorways still get pinned — thing-side obstruction
+            # rides the F15 thing-sector cache; roadmap.)
+            var pblocked = 0;
+            if (player_find_sector() == sec) {
+                var dfloor = load64(map_sectors + sec * MAP_SECTOR_SIZE);
+                if ((h - DOOR_SPEED) - dfloor < PLAYER_HEIGHT) { pblocked = 1; }
+            }
+            if (pblocked == 1) {
+                door_set_state(i, DS_OPENING);
             } else {
-                door_set_height(i, h);
-                store64(map_sectors + sec * MAP_SECTOR_SIZE + 8, h);
+                h -= DOOR_SPEED;
+                if (h <= orig) {
+                    h = orig;
+                    door_set_height(i, h);
+                    store64(map_sectors + sec * MAP_SECTOR_SIZE + 8, h);
+                    door_free(i);              # fully closed, release the slot
+                } else {
+                    door_set_height(i, h);
+                    store64(map_sectors + sec * MAP_SECTOR_SIZE + 8, h);
+                }
             }
         }
         if (state == DS_LIFT_DOWN) {
@@ -272,40 +291,81 @@ fn doors_tick(): i64 {
 # check its special type, and trigger the appropriate action.
 
 fn doors_use(): i64 {
-    # Ray from player position in facing direction, length 64 map units
+    # Use ray: 64 map units along the player's facing (vanilla P_UseLines).
+    # RC-G3: the previous selection ignored this ray entirely — it took the
+    # nearest special line whose MIDPOINT was within 64 units in ANY
+    # direction, so E opened doors behind the player and through thin walls,
+    # and any special line longer than ~128 units was unusable from its ends.
+    # Now: proper ray/segment intersection, nearest crossing wins, and a
+    # nearer blocking line (one-sided wall or closed portal) vetoes a special
+    # behind it — you can't use a switch through a wall.
     var use_dist = 64 << 16;
-    var rx = player_x + fixed_mul(fixed_cos(player_angle), use_dist);
-    var ry = player_y + fixed_mul(fixed_sin(player_angle), use_dist);
+    var udx = fixed_mul(fixed_cos(player_angle), use_dist);
+    var udy = fixed_mul(fixed_sin(player_angle), use_dist);
 
-    # Find nearest linedef that the use ray crosses
     var best_line = -1;
-    var best_dist = use_dist;
+    var best_t = FIXED_ONE + 1;
+    var block_t = FIXED_ONE + 1;
 
     for (var i = 0; i < map_num_linedefs; i += 1) {
         var v1 = map_linedef_v1(i);
         var v2 = map_linedef_v2(i);
         var lx1 = map_vertex_x(v1);
         var ly1 = map_vertex_y(v1);
-        var lx2 = map_vertex_x(v2);
-        var ly2 = map_vertex_y(v2);
+        var ldx = map_vertex_x(v2) - lx1;
+        var ldy = map_vertex_y(v2) - ly1;
 
-        # Quick distance check
-        var midx = asr(lx1 + lx2, 1);
-        var midy = asr(ly1 + ly2, 1);
-        var d = fixed_approx_dist(midx - player_x, midy - player_y);
-        if (d > use_dist * 2) { continue; }
+        # Ray/segment intersection, reduced-precision form as
+        # thing_check_sight: t1 = param along the use ray, t2 along the line.
+        var denom = fixed_mul(asr(udx, 8), asr(ldy, 8)) - fixed_mul(asr(udy, 8), asr(ldx, 8));
+        if (denom == 0) { continue; }
+        var t1_num = fixed_mul(asr(lx1 - player_x, 8), asr(ldy, 8)) - fixed_mul(asr(ly1 - player_y, 8), asr(ldx, 8));
+        var t2_num = fixed_mul(asr(lx1 - player_x, 8), asr(udy, 8)) - fixed_mul(asr(ly1 - player_y, 8), asr(udx, 8));
+        var t1 = fixed_div(t1_num, denom);
+        var t2 = fixed_div(t2_num, denom);
+        if (t1 <= 0) { continue; }
+        if (t1 > FIXED_ONE) { continue; }
+        if (t2 < 0) { continue; }
+        if (t2 > FIXED_ONE) { continue; }
 
-        # Check linedef special
-        var special = load64(map_linedefs + i * MAP_LINEDEF_SIZE + 24);
-        if (special == 0) { continue; }
+        var lspecial = load64(map_linedefs + i * MAP_LINEDEF_SIZE + 24);
+        if (lspecial != 0) {
+            if (t1 < best_t) {
+                best_t = t1;
+                best_line = i;
+            }
+            continue;
+        }
 
-        if (d < best_dist) {
-            best_dist = d;
-            best_line = i;
+        # Non-special line: does it block the ray? One-sided walls and closed
+        # portals do; an open two-sided line passes the use through.
+        var blocks = 0;
+        if ((map_linedef_flags(i) & ML_TWOSIDED) == 0) {
+            blocks = 1;
+        } else {
+            var rs = map_linedef_side_right(i);
+            var ls = map_linedef_side_left(i);
+            if (rs < 0) { blocks = 1; }
+            if (ls < 0) { blocks = 1; }
+            if (blocks == 0) {
+                var fs = map_sidedef_sector(rs);
+                var bs = map_sidedef_sector(ls);
+                var open_low = map_sector_floorh(fs);
+                var bfh = map_sector_floorh(bs);
+                if (bfh > open_low) { open_low = bfh; }
+                var open_high = map_sector_ceilh(fs);
+                var bch = map_sector_ceilh(bs);
+                if (bch < open_high) { open_high = bch; }
+                if (open_high <= open_low) { blocks = 1; }
+            }
+        }
+        if (blocks == 1) {
+            if (t1 < block_t) { block_t = t1; }
         }
     }
 
     if (best_line < 0) { return 0; }
+    if (block_t < best_t) { return 0; }
 
     var special = load64(map_linedefs + best_line * MAP_LINEDEF_SIZE + 24);
 
@@ -316,49 +376,47 @@ fn doors_use(): i64 {
     var door_sec = -1;
     if (ls >= 0) { door_sec = map_sidedef_sector(ls); }
 
-    # Direct use-activated specials (back-side sector)
+    # Direct use-activated specials (back-side sector). if/else ladder, NOT
+    # switch: cycc's switch codegen can smash the enclosing fn's return with
+    # sparse/out-of-order labels (the thing_animate combat coredump, 0.30.2)
+    # — this fn crashed the same way once the RC-G3 rewrite changed its
+    # local-variable layout.
     if (door_sec >= 0) {
-        switch (special) {
-            # Doors (open wait close)
-            case 1: { door_open(door_sec); }
-            case 26: { if ((player_keys & KEY_CARD_BLUE) != 0) { door_open(door_sec); } }
-            case 27: { if ((player_keys & KEY_CARD_YELLOW) != 0) { door_open(door_sec); } }
-            case 28: { if ((player_keys & KEY_CARD_RED) != 0) { door_open(door_sec); } }
-            case 29: { door_open(door_sec); }
-            case 31: { door_open_stay(door_sec); }   # D1 open & stay
-            case 63: { door_open(door_sec); }
-            case 90: { door_open(door_sec); }
-            case 117: { door_open(door_sec); }
-            # Lifts
-            case 10: { lift_activate(door_sec); }
-            case 21: { lift_activate(door_sec); }
-            case 62: { lift_activate(door_sec); }
-            case 88: { lift_activate(door_sec); }
-            case 121: { lift_activate(door_sec); }
-            case 122: { lift_activate(door_sec); }
-        }
+        # Doors (open wait close)
+        if (special == 1) { door_open(door_sec); }
+        else { if (special == 26) { if ((player_keys & KEY_CARD_BLUE) != 0) { door_open(door_sec); } }
+        else { if (special == 27) { if ((player_keys & KEY_CARD_YELLOW) != 0) { door_open(door_sec); } }
+        else { if (special == 28) { if ((player_keys & KEY_CARD_RED) != 0) { door_open(door_sec); } }
+        else { if (special == 29) { door_open(door_sec); }
+        else { if (special == 31) { door_open_stay(door_sec); }   # D1 open & stay
+        else { if (special == 63) { door_open(door_sec); }
+        else { if (special == 90) { door_open(door_sec); }
+        else { if (special == 117) { door_open(door_sec); }
+        # Lifts
+        else { if (special == 10) { lift_activate(door_sec); }
+        else { if (special == 21) { lift_activate(door_sec); }
+        else { if (special == 62) { lift_activate(door_sec); }
+        else { if (special == 88) { lift_activate(door_sec); }
+        else { if (special == 121) { lift_activate(door_sec); }
+        else { if (special == 122) { lift_activate(door_sec); } } } } } } } } } } } } } } }
     }
 
-    # Exit switches
-    switch (special) {
-        case 11: { level_exit_normal(); return 0; }
-        case 51: { level_exit_secret(); return 0; }
-    }
+    # Exit switches (if/else — see above)
+    if (special == 11) { level_exit_normal(); return 0; }
+    if (special == 51) { level_exit_secret(); return 0; }
 
-    # Tag-based specials: activate matching tagged sectors
+    # Tag-based specials: activate matching tagged sectors (if/else — see above)
     var tag = load64(map_linedefs + best_line * MAP_LINEDEF_SIZE + 32);
     if (tag > 0) {
         for (var si = 0; si < map_num_sectors; si += 1) {
             var stag = load64(map_sectors + si * MAP_SECTOR_SIZE + 48);
             if (stag == tag) {
-                switch (special) {
-                    case 23: { lift_activate(si); }
-                    case 38: { lift_activate(si); }
-                    case 70: { lift_activate(si); }
-                    case 71: { lift_activate(si); }
-                    case 102: { lift_activate(si); }
-                    case 103: { door_open_stay(si); }   # S1 open & stay
-                }
+                if (special == 23) { lift_activate(si); }
+                else { if (special == 38) { lift_activate(si); }
+                else { if (special == 70) { lift_activate(si); }
+                else { if (special == 71) { lift_activate(si); }
+                else { if (special == 102) { lift_activate(si); }
+                else { if (special == 103) { door_open_stay(si); } } } } } }   # S1 open & stay
             }
         }
     }
@@ -405,6 +463,25 @@ fn doors_walk_trigger(old_x, old_y, new_x, new_y): i64 {
         if (os >= 0 && ns < 0) { crossed = 1; }
         if (os < 0 && ns >= 0) { crossed = 1; }
         if (crossed == 0) { continue; }
+
+        # Segment-span check (RC-G2): the sign flip above is on the INFINITE
+        # line — walking past a short trigger line's endpoint used to fire it
+        # (up to ~(128 − len/2) units beyond the end; specials 52/124 made
+        # that a spurious instant level exit). Project the crossing point
+        # onto the line and require it inside [v1, v2].
+        var t_den = os - ns;
+        if (t_den == 0) { continue; }
+        var wt = fixed_div(os, t_den);
+        var cxp = old_x + fixed_mul(wt, new_x - old_x);
+        var cyp = old_y + fixed_mul(wt, new_y - old_y);
+        var pdx = asr(cxp - lx1, 8);
+        var pdy = asr(cyp - ly1, 8);
+        var ldx8 = asr(ldx, 8);
+        var ldy8 = asr(ldy, 8);
+        var wdot = pdx * ldx8 + pdy * ldy8;
+        if (wdot < 0) { continue; }
+        var wlen2 = ldx8 * ldx8 + ldy8 * ldy8;
+        if (wdot > wlen2) { continue; }
 
         # Exit lines
         switch (special) {

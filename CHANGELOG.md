@@ -133,6 +133,54 @@ code). Tests 115/115 + 167/167 (the RC-S1 barrel assert re-verified against the 
 elevation-true projection); fuzz clean; all 9 maps PPM-clean; staged re-verification
 of every Bite A/B view passed.
 
+**Bite C — gameplay sweep (same audit)** (2026-07-08). The module-sweep findings that
+break play:
+
+- **RC-G1 — a closing door could permanently entomb the player.** `DS_CLOSING` now
+  obstruction-checks (vanilla T_VerticalDoor): if the player stands in the doorway
+  and the next step would squeeze below player height, the door REVERSES to opening.
+  Remotely-triggered tag doors have no special on their own lines, so being caught
+  was a quit-only softlock (no inside "use", no crush damage to die from). Regression
+  test rides the full open-wait-close cycle with the player in the doorway (clearance
+  floor = exactly 56) and confirms the door completes its close once they step out.
+  (Monsters in doorways can still be pinned — thing-side obstruction rides the F15
+  thing-sector cache; roadmap.)
+- **RC-G2 — walk-over triggers fired on the INFINITE line.** The crossing test was a
+  sign flip gated only by a 128-unit midpoint radius, so walking past a short trigger
+  line's endpoint fired it — specials 52/124 made that a spurious instant level exit.
+  The crossing point is now projected onto the line and must lie within the segment.
+- **RC-G3 — E (use) ignored facing entirely.** Selection was "nearest special line
+  whose MIDPOINT is within 64 units in any direction": doors opened from behind,
+  through thin walls, and long special lines were unusable from their ends. Now a
+  real use ray (64 units along the facing, vanilla P_UseLines): nearest ray/segment
+  crossing wins, and a nearer blocking line (one-sided wall or closed portal) vetoes
+  a special behind it. The dispatch switches were rewritten as if/else ladders while
+  in there — the sparse-label `switch` return-smash class that hit `thing_animate`
+  (0.30.2).
+- **RC-G4 — sight and hitscan passed through CLOSED doors.** `thing_check_sight`
+  (also `player_fire_ray`'s only wall test) skipped every two-sided line; it now
+  blocks when the portal is closed (lower ceiling ≤ higher floor) — no more shooting
+  monsters through shut doors, and no more monsters waking through them.
+- **RC-G5 — point-blank rockets teleported through thin walls.** The missile
+  materialized 32 units ahead with no spawn-point check; a blocked muzzle point now
+  spawns at the shooter (first tick detonates it against the wall, splashing the
+  shooter — vanilla point-blank behavior). Splash damage (barrels + rockets) is now
+  line-of-sight gated (vanilla P_RadiusAttack) — no more blast damage through walls
+  and closed doors.
+- **RC-G7 — allocation leaks on the never-free bump allocator.** `map_alloc`
+  re-alloc'd ~600 KB of fixed-size arrays on every map (re)load — now lazy-init;
+  BLOCKMAP gets a single fixed 64 KB buffer (+ a hard size bound — the vanilla
+  format cannot exceed it); `doors_init` guards its thinker array; the HUD face/ARMS/
+  grey-number and intermission name buffers (8 B per draw, per frame, ~2 KB/s) now
+  use shared lazily-allocated scratches.
+
+Deferred from the sweep: RC-G6 (AGNOS menu edge-latch — QEMU-gated) and the RC-G8
+LOW bundle stay on the roadmap. Tests 115/115 + **175/175** (+8: sight blocked/clear
+pairs, missile-through-door, use-ray facing both ways, door-reversal cycle + completed
+close; `doors.cyr` now included in the test harness with sound/level stubs); fuzz
+2000/1000 clean on the changed paths; all 9 maps PPM-clean; `render_frame` 2.382 ms
+(variance-level — gameplay is off the render path). Binary 383,968 → **388,056 B**.
+
 ### Added
 
 - **+21 regression asserts (Bite A)** — `fixed_atan2` full-range octants (10, WAD-free:

@@ -23,6 +23,9 @@ include "src/input.cyr"
 include "src/player.cyr"
 include "src/things.cyr"
 include "src/sprite.cyr"
+# doors.cyr included since the RC-G1/G3 regression tests exercise the real
+# door thinkers + use-ray (its sound/level calls are stubbed below).
+include "src/doors.cyr"
 # music.cyr needs only SND_DMX_RATE from audio.cyr (not otherwise included here).
 enum MusRateStub { SND_DMX_RATE = 11025; }
 include "src/music.cyr"
@@ -46,7 +49,9 @@ fn audio_play_at(lump_name, sx, sy): i64 { return 0; }
 fn level_add_kill(): i64 { return 0; }
 fn level_add_item(): i64 { return 0; }
 fn tick_get_count(): i64 { return 0; }
-fn doors_walk_trigger(ox, oy, nx, ny): i64 { return 0; }
+fn sound_door_open(): i64 { return 0; }
+fn level_exit_normal(): i64 { return 0; }
+fn level_exit_secret(): i64 { return 0; }
 
 fn main() {
     alloc_init();
@@ -733,6 +738,71 @@ fn main() {
             }
         }
         assert(spr_changed > 50, "barrel dead ahead renders (was deleted by far-portal clip)");
+
+        # ============================================================
+        test_group("gameplay: closed doors block sight/use/missiles (RC-G3/G4/G5)");
+        # ============================================================
+        # E1M1's spawn-room door (lines 151/152, back sector 4) is CLOSED at
+        # map load (ceil == floor == 0). Points straddle it at y = -2496.
+
+        # RC-G4: sight through the closed door must be blocked (it used to
+        # skip every two-sided line — bullets/wake straight through doors).
+        assert_eq(thing_check_sight(1420 << 16, (0 - 2496) << 16, 1600 << 16, (0 - 2496) << 16), 0,
+        "sight blocked through the closed door");
+        assert_eq(thing_check_sight(1420 << 16, (0 - 2496) << 16, 1470 << 16, (0 - 2496) << 16), 1,
+        "sight clear between two open points");
+
+        # RC-G5: a rocket fired point-blank at the closed door must NOT
+        # materialize on the far side (spawn offset is 32 units, the door
+        # sector is 16 thick). The spawned missile must be in the shooter's
+        # line of sight.
+        player_x = 1520 << 16;
+        player_y = (0 - 2496) << 16;
+        var mi_idx = thing_spawn_missile(player_x, player_y, 0);
+        assert(mi_idx >= 0, "missile spawned");
+        assert_eq(thing_check_sight(player_x, player_y, thing_x(mi_idx), thing_y(mi_idx)), 1,
+        "missile spawn point is on the shooter's side of the door");
+        thing_set_flags(mi_idx, 0);
+
+        # RC-G3: E only activates a special the use RAY crosses — facing away
+        # from the door must not open it (the old midpoint heuristic opened
+        # any special within 64 units in ANY direction).
+        # (The game calls doors_init from load_map; the harness must too, or
+        # door_start writes through a NULL thinker array.)
+        doors_init();
+        player_x = 1490 << 16;
+        player_y = (0 - 2496) << 16;
+        player_angle = 512;
+        doors_use();
+        assert_eq(door_count, 0, "facing AWAY from the door: E does nothing");
+        player_angle = 0;
+        doors_use();
+        assert_eq(door_count, 1, "facing the door: E opens it");
+
+        # ============================================================
+        test_group("gameplay: closing door reverses on the player (RC-G1)");
+        # ============================================================
+        # Stand IN the doorway (sector 4) while it runs its open-wait-close
+        # cycle: the ceiling must never squeeze below player height (it used
+        # to close to 0 and entomb — a quit-only softlock on tag doors).
+        player_x = 1544 << 16;
+        player_y = (0 - 2496) << 16;
+        # Track clearance only while the door is CLOSING — the door starts
+        # shut, so its initial opening sweep passes through small clearances
+        # by design.
+        var min_clear = 100000;
+        for (var dt = 0; dt < 500; dt += 1) {
+            doors_tick();
+            if (door_state(0) == DS_CLOSING) {
+                var dc = load64(map_sectors + 4 * MAP_SECTOR_SIZE + 8) - load64(map_sectors + 4 * MAP_SECTOR_SIZE);
+                if (dc < min_clear) { min_clear = dc; }
+            }
+        }
+        assert(min_clear >= PLAYER_HEIGHT, "door never squeezes below player height while occupied");
+        # Step out: the door must now complete its close.
+        player_x = 1420 << 16;
+        for (var dt = 0; dt < 600; dt += 1) { doors_tick(); }
+        assert_eq(load64(map_sectors + 4 * MAP_SECTOR_SIZE + 8), 0, "door fully closes once the doorway is clear");
 
         wad_close();
     } else {

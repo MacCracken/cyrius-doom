@@ -20,6 +20,16 @@ var st_ynums = 0;
 var st_percent = 0;
 var st_minus = 0;
 var st_patch_buf = 0;
+# Shared 8-byte lump-name scratch (RC-G7): the face/ARMS/grey-number draws
+# each alloc'd a fresh name buffer PER FRAME on the never-free bump allocator
+# (~2 KB/s at 35 Hz). Each use fully consumes the buffer before returning,
+# so one lazily-allocated scratch serves them all.
+var st_name_scratch = 0;
+
+fn st_name_buf(): i64 {
+    if (st_name_scratch == 0) { st_name_scratch = alloc(8); }
+    return st_name_scratch;
+}
 
 fn status_init_font(): i64 {
     st_patch_buf = alloc(16384);
@@ -154,7 +164,7 @@ fn st_draw_small_num(digit, px, py): i64 {
 fn st_draw_grey_num(digit, px, py): i64 {
     if (digit < 0) { return 0; }
     if (digit > 9) { return 0; }
-    var gname = alloc(8);
+    var gname = st_name_buf();
     memcpy(gname, "STGNUM", 6);
     store8(gname + 6, 48 + digit);
     store8(gname + 7, 0);
@@ -208,7 +218,7 @@ fn status_face_color(): i64 {
 
 fn status_draw_face(px, py): i64 {
     if (face_patch_buf == 0) { face_patch_buf = alloc(4096); }
-    var face_name = alloc(8);
+    var face_name = st_name_buf();
     var hl = status_face_color();
     if (player_health <= 0) {
         memcpy(face_name, "STFDEAD0", 8);
@@ -257,7 +267,7 @@ fn status_render(): i64 {
         if (has == 1) {
             st_draw_small_num(w, ax, ay);
         } else {
-            var gname = alloc(8);
+            var gname = st_name_buf();
             memcpy(gname, "STGNUM", 6);
             store8(gname + 6, 48 + w);
             store8(gname + 7, 0);

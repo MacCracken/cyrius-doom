@@ -6,6 +6,15 @@
 # Current episode and map (1-based)
 var cur_episode = 1;
 var cur_map = 1;
+# Shared 8-byte lump-name scratch (RC-G7): the intermission number/name
+# draws alloc'd fresh buffers per call, per frame, on the never-free bump
+# allocator. Each use fully consumes the buffer before returning.
+var lv_name_scratch = 0;
+
+fn lv_name_buf(): i64 {
+    if (lv_name_scratch == 0) { lv_name_scratch = alloc(8); }
+    return lv_name_scratch;
+}
 var next_level_flag = 0;
 var secret_exit_flag = 0;
 
@@ -140,7 +149,7 @@ fn wi_draw_number(num, px, py): i64 {
     if (num < 0) { num = 0; }
     if (num > 999) { num = 999; }
 
-    var name = alloc(8);
+    var name = lv_name_buf();
 
     # Draw digits right-to-left
     var x = px;
@@ -208,7 +217,7 @@ fn wi_draw_time(ticks, px, py): i64 {
     var sx = px + 36;
     if (mins > 0) {
         if (secs < 10) {
-            var name = alloc(8);
+            var name = lv_name_buf();
             memcpy(name, "WINUM0", 6);
             store8(name + 6, 0);
             menu_draw_lump(name, sx, py);
@@ -231,7 +240,7 @@ fn level_intermission(): i64 {
     menu_draw_lump("WIF", 64, 10);
 
     # Level name: WILVxx (episode*10 + map - 1)
-    var lv_name = alloc(8);
+    var lv_name = lv_name_buf();
     memcpy(lv_name, "WILV0", 5);
     store8(lv_name + 5, 48 + cur_map - 1);
     store8(lv_name + 6, 0);

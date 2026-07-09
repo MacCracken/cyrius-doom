@@ -73,6 +73,11 @@ enum MapMisc {
 }
 
 fn map_alloc(): i64 {
+    # Lazy-init guard (RC-G7): the arrays are fixed-size (MAP_MAX_* caps), so
+    # a map reload can reuse them — the unconditional re-alloc leaked ~600 KB
+    # on the never-free bump allocator at EVERY level change / death respawn
+    # (physical memory on AGNOS).
+    if (map_vertexes != 0) { return 0; }
     map_vertexes = alloc(MAP_MAX_VERTEXES * MAP_VERTEX_SIZE);
     map_linedefs = alloc(MAP_MAX_LINEDEFS * MAP_LINEDEF_SIZE);
     map_sidedefs = alloc(MAP_MAX_SIDEDEFS * MAP_SIDEDEF_SIZE);
@@ -298,11 +303,15 @@ fn map_load(map_name): i64 {
         store64(base + 32, read_le16(src + 8));
     }
 
-    # BLOCKMAP (marker + 10) — grid for fast collision
+    # BLOCKMAP (marker + 10) — grid for fast collision. Fixed 64 KB buffer,
+    # lazily allocated once (RC-G7 — a per-map alloc(lump_size) leaked the
+    # old buffer every reload) and a hard size bound (the vanilla BLOCKMAP
+    # format cannot exceed 64 KB anyway: 16-bit offsets).
     lump_idx = marker + 10;
     lump_size = wad_lump_size(lump_idx);
+    if (lump_size > 65536) { lump_size = 65536; }
     if (lump_size > 0) {
-        map_blockmap = alloc(lump_size);
+        if (map_blockmap == 0) { map_blockmap = alloc(65536); }
         wad_read_lump_into(lump_idx, map_blockmap, lump_size);
         # Header: originx(2) originy(2) columns(2) rows(2)
         map_bm_originx = sign_extend_16(read_le16(map_blockmap)) << 16;

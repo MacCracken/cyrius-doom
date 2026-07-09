@@ -10,7 +10,9 @@ displaying correctly, plus any issues discovered in passing.
 > not re-anchored after screen-edge clamping, which was the true cause of the E1M7 right-edge
 > stripe band this audit had provisionally attributed to visplane bleed). The **0.28.5 visplane
 > pool + global viewz also shipped in 0.32.0** (RC-F1/F4, RC-W8 — elevation renders, flat bleed
-> gone, −24% render_frame). Remaining from this audit: Bite C gameplay sweep (RC-G1–G8), Bite D
+> gone, −24% render_frame), and **Bite C shipped in 0.32.0 too** (RC-G1–G5, G7 — door entombment
+> reversal, trigger spans, real use-ray, closed-portal sight/hitscan, missile spawn + splash LOS,
+> alloc guards). Remaining from this audit: RC-G6 (QEMU-gated), the RC-G8 LOW bundle, and Bite D
 > polish (RC-W3/W4, RC-F2/F3, RC-S6/S7/S8). See `roadmap.md` + CHANGELOG `[0.32.0]`.
 
 **Verdict**: no memory-safety regressions found in the render path (the 0.28.0/0.31.2 patch-decoder

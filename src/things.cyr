@@ -358,8 +358,27 @@ fn thing_check_sight(mx, my, tx, ty): i64 {
 
     for (var i = 0; i < map_num_linedefs; i += 1) {
         var flags = map_linedef_flags(i);
-        # Only one-sided lines block sight
-        if ((flags & ML_TWOSIDED) != 0) { continue; }
+        # One-sided lines always block. Two-sided lines block only when the
+        # portal is CLOSED — a shut door/lift (RC-G4): sight AND hitscan
+        # (thing_check_sight is player_fire_ray's only wall test) used to
+        # skip every two-sided line, so bullets passed through closed doors
+        # and idle monsters woke through them.
+        if ((flags & ML_TWOSIDED) != 0) {
+            var rs = map_linedef_side_right(i);
+            var ls = map_linedef_side_left(i);
+            if (rs < 0) { continue; }
+            if (ls < 0) { continue; }
+            var fs = map_sidedef_sector(rs);
+            var bs = map_sidedef_sector(ls);
+            var open_low = map_sector_floorh(fs);
+            var bfh = map_sector_floorh(bs);
+            if (bfh > open_low) { open_low = bfh; }
+            var open_high = map_sector_ceilh(fs);
+            var bch = map_sector_ceilh(bs);
+            if (bch < open_high) { open_high = bch; }
+            # Open portal: sight passes; skip the intersection test.
+            if (open_high > open_low) { continue; }
+        }
 
         var v1 = map_linedef_v1(i);
         var v2 = map_linedef_v2(i);
@@ -808,18 +827,24 @@ fn thing_explode(src_idx, radius, maxdmg): i64 {
         if ((flags & TF_SHOOTABLE) == 0) { continue; }
         var dist = fixed_approx_dist(thing_x(i) - cx, thing_y(i) - cy);
         if (dist >= radius) { continue; }
+        # Splash is line-of-sight gated (RC-G5, vanilla P_RadiusAttack):
+        # distance alone let barrel/rocket blasts damage through solid walls
+        # and closed doors.
+        if (thing_check_sight(cx, cy, thing_x(i), thing_y(i)) == 0) { continue; }
         # Linear falloff: maxdmg at the center, 0 at the radius edge.
         var falloff = fixed_div(dist, radius);
         var dmg = maxdmg - fixed_to_int(falloff * maxdmg);
         if (dmg > 0) { thing_damage(i, dmg); }
     }
 
-    # Splash the player too.
+    # Splash the player too (same LOS gate).
     var pdist = fixed_approx_dist(player_x - cx, player_y - cy);
     if (pdist < radius) {
-        var pf = fixed_div(pdist, radius);
-        var pdmg = maxdmg - fixed_to_int(pf * maxdmg);
-        if (pdmg > 0) { player_take_damage(pdmg); }
+        if (thing_check_sight(cx, cy, player_x, player_y) == 1) {
+            var pf = fixed_div(pdist, radius);
+            var pdmg = maxdmg - fixed_to_int(pf * maxdmg);
+            if (pdmg > 0) { player_take_damage(pdmg); }
+        }
     }
     return 0;
 }
@@ -862,9 +887,20 @@ fn thing_spawn_missile(px, py, ang): i64 {
 
     var ca = fixed_cos(ang);
     var sa = fixed_sin(ang);
+    # Spawn-point collision check (RC-G5): materializing 32 units ahead
+    # UNCHECKED let a point-blank shot teleport the rocket through a thin
+    # wall into the far room. If the muzzle point is blocked, spawn at the
+    # shooter instead — the first tick's wall check then detonates it in
+    # front of the wall (splashing the shooter, as vanilla does point-blank).
+    var spx = px + fixed_mul(ca, MISSILE_SPAWN_OFFSET);
+    var spy = py + fixed_mul(sa, MISSILE_SPAWN_OFFSET);
+    if (player_check_position(spx, spy) == 0) {
+        spx = px;
+        spy = py;
+    }
     var base = things + idx * THING_SIZE;
-    store64(base,       px + fixed_mul(ca, MISSILE_SPAWN_OFFSET));
-    store64(base + 8,   py + fixed_mul(sa, MISSILE_SPAWN_OFFSET));
+    store64(base,       spx);
+    store64(base + 8,   spy);
     store64(base + 16,  0);
     store64(base + 24,  ang);
     store64(base + 32,  TTYPE_ROCKET_MISSILE);
