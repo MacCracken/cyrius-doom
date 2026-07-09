@@ -22,7 +22,7 @@
 | ~~(unslotted)~~ | ~~**Render-consistency audit Bite A — quick wins**~~ **SHIPPED 0.32.0** (2026-07-08, all six: RC-S3 sprite-lookup gaps + corpse frames, RC-S4 `fixed_atan2` octants, RC-S5 screen-driven V scaler, RC-W5 masked reverse order, RC-W1 sky-vs-sky suppression, RC-W2 closed-portal solid promotion — each staged-PPM-verified, +21 regression asserts) | — |
 | ~~(unslotted)~~ | ~~**Render-consistency audit Bite C — gameplay sweep**~~ **SHIPPED 0.32.0** (2026-07-08: RC-G1 door-entombment reversal, RC-G2 trigger segment-span, RC-G3 real use-ray + blocking veto, RC-G4 closed-portal sight/hitscan, RC-G5 missile spawn check + splash LOS, RC-G7 alloc guards — +8 regression asserts, doors.cyr added to the test harness. **Release leftovers, same cut**: RC-G6 AGNOS menu edge-latch, F-R6 texture fill-mask, L8-lite monster thing-solidity). **Residuals**: monsters aren't obstruction-checked by closing doors + monster z/step parity (ride the F15 thing-sector cache); G8's L2 (speculative) / L5 BFG (unreachable in shareware) / L6b WILV (registered-only) | — |
 | ~~**v0.33.0**~~ | ~~Desktop rendering — native Wayland window backend~~ **SHIPPED 0.33.0** (2026-07-09): sovereign wl protocol (no libwayland/deps), puka-pattern seam, four `src/platform/` files behind `present_mode`; double-buffered present, full keyboard, xdg lifecycle + drag-resize + close, wire-parser hardening; fb0/AGNOS/`--ppm` byte-identical; 4 adversarially-reviewed bites; AGNOS QEMU PASS; window user-verified on Hyprland. See [`completed-phases.md`](completed-phases.md) + [proposal](../proposals/wayland-backend.md) + [audit](../audit/2026-07-09-wayland-backend.md). **Follow-ups** → below. | — |
-| **(unslotted)** | **Wayland follow-ups** (post-0.33.0, deferred): X11 backend (v1.0.0 still); per-event size table for the remaining fixed-offset wire handlers (local-compositor threat model makes it low-priority); death-screen doesn't rescale mid-resize (cosmetic, freezes until respawn); a full per-event untrusted-input pass if an "untrusted compositor" scenario ever matters. | new — 2026-07-09 |
+| **(follow-ups)** | **Wayland/desktop backend — post-0.33.0 follow-ups** — the seam is in; these extend it. Detailed in [§ Wayland backend follow-ups](#wayland-backend--follow-ups-post-0330) below (mouse/pointer input, GPU present via mabda, HiDPI/fractional scale, X11 backend, deeper wire hardening, aspect/fill scaling, resize-during-death). | queued — 2026-07-09 |
 | ~~**v0.28.6**~~ | ~~Sprite + masked-seg depth-aware clipping (F07 / F05b / F05)~~ **SHIPPED 0.32.0** (2026-07-08, Bite B — drawseg occlusion records + `render_clip_band_build`: RC-S1/RC-S2/RC-S9/RC-W6 fixed, plus RC-W9 screen-edge endpoint re-anchor found during implementation; staged-PPM verified incl. the audit barrel + E1M5 spectre) | — |
 | **v0.28.7** | Sky + wall-mapping parity (F09) | queued |
 | **v0.28.8** | Structural perf — sidedef/sector index + thing-sector caches (F12 / F15) | queued, bench-gated |
@@ -32,6 +32,25 @@
 | **v1.0.0** | Ship: full E1 + multiple display backends + AGNOS integration | future |
 
 > **v0.28.0 shipped 2026-06-07** (graphics review/hardening/audit/performance) — moved to [`completed-phases.md`](completed-phases.md). At the user's direction this graphics pass *became* 0.28.0, and the previously-roadmapped Black Book audit + lingering 0.27.x housekeeping were pushed **behind** it (re-slotted below).
+
+### Wayland backend — follow-ups (post-0.33.0)
+
+v0.33.0 shipped the native Wayland window (sovereign wl protocol, `src/platform/{wayland/*,window.cyr}` behind
+the `win_*` seam + runtime `present_mode`; double-buffered CPU present, full keyboard, xdg lifecycle + drag-resize
++ close; wire-parser security hardening). The seam is designed to grow — these extend it. None block anything;
+ordered roughly by user-facing value. References: [proposal](../proposals/wayland-backend.md),
+[security audit](../audit/2026-07-09-wayland-backend.md), `completed-phases.md` v0.33.x.
+
+| # | Item | Detail | Gated on / notes |
+|---|------|--------|------------------|
+| WF-1 | **Mouse / pointer input** (`wl_pointer`) | Bind `wl_pointer` off the seat, feed relative motion → turn (mouse-look) and buttons → fire/use. The only major input mode DOOM expects on a desktop that the keyboard-only backend lacks. Fits `input_poll_wayland` + a `win_next_pointer`-style seam addition. | New protocol surface (pointer enter/leave/motion/button/axis); relative-motion needs `zwp_relative_pointer` + `zwp_pointer_constraints` for proper mouse-look (pointer-lock). |
+| WF-2 | **GPU present via mabda** (`WIN_CAP_GPU`) | Today `win_present_begin` returns a CPU `wl_shm` buffer (`WIN_CAP_SHM`) and doom blits on the CPU. A `WIN_CAP_GPU` path (mabda, as puka plans) would upload the palette-expanded frame to a texture and let the GPU scale/present — the same seam, `win_caps` already distinguishes them. | Needs mabda as a dep (doom currently has none for display) + a dmabuf/EGL path; large. The CPU shm path stays the permanent no-GPU fallback. Mirrors puka's cut #2/#3. |
+| WF-3 | **HiDPI / fractional scale** | The buffer is 1× device pixels, so on a scale-2 (HiDPI) output the window renders physically small. Honor `wl_surface.set_buffer_scale` (integer) and/or `wp_fractional_scale_v1` + `wp_viewporter`, and read the output scale from `wl_output`. | `wl_output` + the fractional-scale/viewporter protocols; interacts with the integer-scale/letterbox math in `framebuf_wl_recompute`. |
+| WF-4 | **Aspect-correct / fill scaling option** | Present is integer-scale + black letterbox. DOOM's 320×200 is displayed 4:3 (non-square pixels) on real hardware; and users may prefer fill-to-window over letterbox. Offer aspect-correct (1.2× vertical) and/or fit-to-window (non-integer) modes. | A scaling-mode flag + the `framebuf_present_wayland` blit loop (non-integer needs per-row interpolation or accept nearest-neighbor). Cosmetic/fidelity. |
+| WF-5 | **X11 display backend** (native) | Fill the same `win_*` contract with a direct X11 protocol client (no Python bridge), so `present_mode` gains `PM_X11`. Currently the v1.0.0 "X11 display backend" item. | Direct X11 wire protocol (a second sovereign client, ~puka-sized). Keeps the v1.0.0 "multiple display backends" goal. |
+| WF-6 | **Deeper wire-parser hardening** | The remaining fixed-offset event handlers (`xdg_surface.configure` @+8, `xdg_wm_base.ping` @+8, `wl_seat.capabilities` @+8, `toplevel.configure` @+8/+12) read at most `o+12`, bounded by the `size>=8` gate + the 64-byte `wl_rbuf` read-slack — a hostile short message yields a wrong value, not an OOB fault. Add a per-event size table for strictness. | Low priority under the local-compositor threat model (a malicious compositor already owns the session — see [audit](../audit/2026-07-09-wayland-backend.md) W-6). Do it if an untrusted-compositor scenario ever matters. |
+| WF-7 | **Death-screen rescales on resize** (cosmetic) | The death-wait loop (`main.cyr`) pumps input (so a resize rebuilds buffers + re-blacks them) but has no `framebuf_flip`, so the red death frame freezes at the old size until respawn. Add a re-present in the death loop. | Cosmetic; both buffers are blacked on resize so no garbage shows. One-line-ish (`framebuf_flip()` in the death loop). |
+| WF-8 | **AGNOS desktop backend** (long-horizon) | Once AGNOS grows a compositor, the same `win_*` seam could back the microkernel's native window path — the contract is already platform-neutral (the puka `aethersafha`-crate framing). | Post-v1.0.0; gated on AGNOS having a display server at all. |
 
 ### July Fable audit — deferred items (2026-07-04)
 
@@ -199,7 +218,7 @@ sine+envelope synth. Follow-ups toward fidelity:
 | # | Item | Status | Detail |
 |---|------|--------|--------|
 | 1 | Plays E1M1–E1M9 (shareware) | Renders all 9 maps; full gameplay loop wired | Reframe as "playable start-to-finish under skill_normal" |
-| 2 | X11 display backend (native) | Not started | Direct X11 protocol, no Python bridge |
+| 2 | X11 display backend (native) | Not started | Direct X11 protocol, no Python bridge — fills the same `win_*` seam as Wayland (WF-5 in the Wayland follow-ups) |
 | 3 | Wayland display backend | ✅ **SHIPPED 0.33.0** (2026-07-09) | puka-pattern sovereign Wayland client; see completed-phases |
 | 4 | Runs on AGNOS kernel | Not started | Kernel framebuffer + PS/2 |
 | 5 | Runs on Linux /dev/fb0 | Not started | Userspace fallback |
