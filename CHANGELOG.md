@@ -174,8 +174,43 @@ break play:
   grey-number and intermission name buffers (8 B per draw, per frame, ~2 KB/s) now
   use shared lazily-allocated scratches.
 
-Deferred from the sweep: RC-G6 (AGNOS menu edge-latch — QEMU-gated) and the RC-G8
-LOW bundle stay on the roadmap. Tests 115/115 + **175/175** (+8: sight blocked/clear
+**Bite D — polish + the LOW leftovers (same audit)** (2026-07-08):
+
+- **The see-through gun fixed.** DOOM patch transparency is only the gaps BETWEEN
+  posts — every in-post pixel is opaque, including palette index 0, a real near-black
+  color the weapon art uses heavily. The psprite blitter skipped index 0, so the gun's
+  dark parts showed the scene through them; sprites had the same hole via their dense
+  column buffer (index 0 doubled as the "unfilled row" sentinel — now a separate fill
+  mask). Walls/masked keep the index-0 key for now (the proper fill-mask through
+  `texture_get_column` is the F-R6 remainder, roadmapped with the masked rewrite).
+- **RC-W4 (F09 core) — sky V anchored to absolute screen row 0**: the sky is glued to
+  the screen and walls slide over it. Anchoring at each column's clip top sheared the
+  sky wherever wall tops varied — the "white strips" along the E1M1 courtyard wall
+  tops were the sky's bright top rows re-anchoring at every wall top; the mountain
+  skyline is now continuous. (Remaining F09 nuance: the per-column horizontal term is
+  linear, not tan-distributed.)
+- **RC-F3 — flat V uses negated world-Y** (vanilla `ds_yfrac`): every floor/ceiling
+  flat was vertically mirrored against the reference renderer.
+- **RC-S6/S8 (cheap honest slice)** — in-flight rockets render at ~32 units and
+  fullbright (vanilla MISL frames) instead of dragging along the floor dimly lit; real
+  thing-z (render + physics together) stays roadmapped.
+- **RC-S7** — sprite collection sized to `THING_MAX` (the 128-entry cap kept the first
+  128 by index, silently popping arbitrary sprites in crowded views).
+- **RC-W7** — `MASKED_MAX` overflow now counts + warns once (no-silent-caps), matching
+  the drawseg/plane caps.
+- **RC-G8 LOW bundle**: blockmap blocklist cap 256 → 1024 (silent drop = walk-through
+  -wall on dense/hostile cells); right-sidedef `0xFFFF` now degrades to a skipped line
+  instead of rejecting the whole map (all consumers already guard `< 0`); intermission
+  stats re-derived after the menu skill re-spawn; doors with no higher neighbor no
+  longer dip their ceiling −4 for the wait period; the automap plots LIVE things
+  (collected items and corpses no longer haunt their spawn spots); `fixed_div(a, 0)`
+  saturates sign-aware; thing/player-start angles normalized against hostile-WAD
+  degrees.
+
+Deferred from the sweep: RC-G6 (AGNOS menu edge-latch — QEMU-gated), plus the
+not-LOW residuals: monster thing-solidity/z (L8), BFG mechanics (L5 — unreachable in
+shareware), the speculative blocklist-header variant (L2), and registered-WAD WILV
+names (L6b). RC-W3 native-scale V remains the 0.29.x deep-fidelity item. Tests 115/115 + **175/175** (+8: sight blocked/clear
 pairs, missile-through-door, use-ray facing both ways, door-reversal cycle + completed
 close; `doors.cyr` now included in the test harness with sound/level stubs); fuzz
 2000/1000 clean on the changed paths; all 9 maps PPM-clean; `render_frame` 2.382 ms

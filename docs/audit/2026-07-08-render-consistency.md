@@ -12,8 +12,11 @@ displaying correctly, plus any issues discovered in passing.
 > pool + global viewz also shipped in 0.32.0** (RC-F1/F4, RC-W8 — elevation renders, flat bleed
 > gone, −24% render_frame), and **Bite C shipped in 0.32.0 too** (RC-G1–G5, G7 — door entombment
 > reversal, trigger spans, real use-ray, closed-portal sight/hitscan, missile spawn + splash LOS,
-> alloc guards). Remaining from this audit: RC-G6 (QEMU-gated), the RC-G8 LOW bundle, and Bite D
-> polish (RC-W3/W4, RC-F2/F3, RC-S6/S7/S8). See `roadmap.md` + CHANGELOG `[0.32.0]`.
+> alloc guards). **Bite D also shipped in 0.32.0** (RC-W4 sky V anchor, RC-F3 flat V parity,
+> RC-S6/S7/S8 slices, RC-W7, 7 of the RC-G8 LOWs — plus the see-through-gun fix: palette index 0
+> is a real color, not the patch transparency key, in the psprite/sprite blitters). Remaining:
+> RC-G6 (QEMU-gated), RC-W3 native-scale V (0.29.x), RC-F2 bsp asr (upstream), the F-R6
+> texture-path fill-mask, real thing-z, and G8's L2/L5/L8. See `roadmap.md` + CHANGELOG `[0.32.0]`.
 
 **Verdict**: no memory-safety regressions found in the render path (the 0.28.0/0.31.2 patch-decoder
 hardening holds; `framebuf_pixel` bounds every write). The findings are **visual-correctness and

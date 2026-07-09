@@ -4,6 +4,18 @@
 
 Each entry: one row, headline only. For the full changelog see [`CHANGELOG.md`](../../CHANGELOG.md).
 
+## v0.32.0 — The July render-consistency mega-cut
+
+| Version | Shipped | Milestone |
+|---------|---------|-----------|
+| v0.32.0 | 2026-07-08 | **Render-consistency audit (Bites A–D) + both render keystones + vani vendoring + toolchain 6.4.30.** One-day arc off the [2026-07-08 audit](../audit/2026-07-08-render-consistency.md) (21 findings, staged-viewpoint PPM evidence). **A**: 12 invisible thing types (63 spectres!), `fixed_atan2` octant compression, shredded magnified sprites, sky-to-sky walls, closed-door see-through seam, masked order. **B (0.28.6)**: drawseg depth clipping — near sprites no longer deleted by far portals, sprite x-ray gone, grate/sprite depth merge; +RC-W9 screen-edge endpoint re-anchor (the E1M7 stripe band). **0.28.5**: global `view_z` + real visplane pool — **world elevation renders**, flat bleed gone, `render_frame` **−24%** (2.35 ms). **C**: door-entombment reversal, trigger segment-spans, real use-ray, closed-portal sight/hitscan, missile spawn check + splash LOS, alloc-leak guards. **D**: the see-through gun (palette-0 ≠ transparent in post pixels), sky V screen-anchoring, flat V parity, projectile height/fullbright, 7 LOW leftovers. vani-core vendored (`vendor/vani-core.cyr` 0.9.9, lock 100→34); pin 6.4.2→**6.4.30**. Tests **115/175** (+35 regression asserts this cut); binary 388,144 B (agnos 383,368 B). |
+
+## v0.31.x — Playability, fidelity, sound-on-AGNOS, music
+
+| Version | Shipped | Milestone |
+|---------|---------|-----------|
+| v0.31.0–v0.31.4 | 2026-07-04 | **Sound on AGNOS (`sys_snd_*`, 0.31.0) → audio iron-validation (0.31.1) → July Fable audit playability pass (0.31.2: 13 fixes — melee clobber, door thinker lifecycle, wall-phasing, skill filter, texture-height clamp) → vanilla-fidelity gameplay + sky-pan (0.31.3) → MUS music wired in (0.31.4: parser + 140 Hz sequencer + 16-voice synth into the shared mixer).** Toolchain 6.3.5→6.4.2 across the band (lock 37→100). See CHANGELOG for the per-version detail. |
+
 ## v0.30.x — Shooting overhaul + player-feedback + toolchain rollups
 
 | Version | Shipped | Milestone |

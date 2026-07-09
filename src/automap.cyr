@@ -154,12 +154,16 @@ fn automap_render(): i64 {
         am_draw_line(x1, y1, x2, y2, color);
     }
 
-    # Draw things as dots
-    for (var i = 0; i < map_num_things; i += 1) {
-        var ttype = map_thing_type(i);
-        if (ttype >= 1 && ttype <= 4) { continue; }
-        var tx = am_screen_x(map_thing_x(i));
-        var ty = am_screen_y(map_thing_y(i));
+    # Draw LIVE things as dots (RC-G8/L9): plotting the static spawn list
+    # showed collected items and moved/dead monsters at their spawn spots
+    # forever. Runtime things track pickup/death/movement; corpses are
+    # skipped like collected items.
+    for (var i = 0; i < thing_count; i += 1) {
+        var tf = thing_flags(i);
+        if ((tf & TF_ACTIVE) == 0) { continue; }
+        if ((tf & TF_CORPSE) != 0) { continue; }
+        var tx = am_screen_x(thing_x(i));
+        var ty = am_screen_y(thing_y(i));
         framebuf_pixel(tx, ty, 200);
         framebuf_pixel(tx + 1, ty, 200);
         framebuf_pixel(tx, ty + 1, 200);

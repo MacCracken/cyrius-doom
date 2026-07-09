@@ -177,9 +177,13 @@ fn player_check_position(nx, ny): i64 {
                 # Skip the 0x0000 header
                 if (read_le16(ptr) == 0) { ptr += 2; }
 
-                # Read linedef indices until 0xFFFF terminator
+                # Read linedef indices until 0xFFFF terminator. Cap raised
+                # 256 → 1024 (RC-G8/L1): a dense (or hostile) blockmap cell
+                # with more linedefs silently dropped the remainder —
+                # walk-through-wall on whatever got dropped. 1024 entries is
+                # 2 KB of cell data, beyond any legitimate vanilla cell.
                 var safety = 0;
-                while (safety < 256) {
+                while (safety < 1024) {
                     if (ptr + 2 > bm_end) { break; }
                     var li = read_le16(ptr);
                     if (li == 0xFFFF) { break; }

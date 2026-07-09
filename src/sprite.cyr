@@ -13,7 +13,7 @@
 var sprite_s_start = 0;
 var sprite_s_end = 0;
 
-# Sorted draw list: thing index + distance, max 128 visible sprites
+# Sorted draw list: thing index + distance, sized to THING_MAX (RC-S7)
 var sprite_order = 0;
 var sprite_dist = 0;
 var sprite_visible = 0;
@@ -23,8 +23,11 @@ var sprite_visible = 0;
 fn sprite_init(): i64 {
     sprite_s_start = wad_find_lump("S_START");
     sprite_s_end = wad_find_lump("S_END");
-    sprite_order = alloc(128 * 8);
-    sprite_dist = alloc(128 * 8);
+    # Sized to THING_MAX (RC-S7): the old 128-entry cap kept the FIRST 128
+    # things by index — not the nearest — silently popping arbitrary sprites
+    # in crowded views. Every active thing can now be collected.
+    sprite_order = alloc(THING_MAX * 8);
+    sprite_dist = alloc(THING_MAX * 8);
     sprite_build_lookup();
     return 0;
 }
@@ -112,9 +115,13 @@ var spr_patch_buf = 0;
 
 # Dense column scratch for the screen-driven vertical scaler (RC-S5): each
 # sprite column's posts decode into this before drawing, so the draw loop can
-# iterate SCREEN rows and sample the source. Index 0 = transparent, matching
-# the patch decoders. 256 bytes caps the source height (DOOM sprites max 128).
+# iterate SCREEN rows and sample the source. A parallel FILL MASK marks which
+# rows a post actually covered — patch transparency is only the gaps between
+# posts, and palette index 0 is a real (near-black) color, so using 0 as the
+# transparency sentinel made monsters' dark pixels see-through.
+# 256 bytes each caps the source height (DOOM sprites max 128).
 var spr_col_buf = 0;
+var spr_col_mask = 0;
 
 # Masked-seg draw-order scratch for the merged masked+sprite painter's walk
 # (Bite B / 0.28.6, RC-S9): entry indices sorted far -> near by midpoint
@@ -259,7 +266,7 @@ fn sprite_render_all(): i64 {
 
     # Collect visible things with distance (from runtime things array)
     for (var i = 0; i < thing_count; i += 1) {
-        if (sprite_visible >= 128) { break; }
+        if (sprite_visible >= THING_MAX) { break; }
 
         var tflags = thing_flags(i);
         if ((tflags & TF_ACTIVE) == 0) { continue; }
@@ -303,6 +310,7 @@ fn sprite_render_all(): i64 {
     # Lazy-init once; see the file-scope declaration (audit F-S2).
     if (spr_patch_buf == 0) { spr_patch_buf = alloc(16384); }
     if (spr_col_buf == 0) { spr_col_buf = alloc(256); }
+    if (spr_col_mask == 0) { spr_col_mask = alloc(256); }
 
     # Sort masked-seg indices far -> near by midpoint depth (Bite B RC-S9).
     # The masked entries store perspective scales at their endpoints; the
@@ -417,6 +425,15 @@ fn sprite_render_all(): i64 {
             }
         }
 
+        # Projectiles fly at ~32 units and draw fullbright (the cheap honest
+        # slice of RC-S6/RC-S8): the engine is 2.5D with no thing-z, so give
+        # in-flight rockets a fixed render height instead of dragging them
+        # along the floor, and light them like vanilla's fullbright MISL
+        # frames. Real thing-z (render + physics together) stays roadmapped.
+        var is_missile = 0;
+        if (thing_category(thing_idx) == CAT_PROJECTILE) { is_missile = 1; }
+        if (is_missile == 1) { thing_floor += 32; }
+
         # Project sprite bottom at the thing's floor height vs the frame
         # eye (view_z, 0.28.5): things on higher/lower floors now project
         # higher/lower — the old per-thing eye (own floor + 41) flattened
@@ -435,6 +452,7 @@ fn sprite_render_all(): i64 {
         if (dist_dim > 16) { dist_dim = 16; }
         spr_light += dist_dim;
         if (spr_light > 31) { spr_light = 31; }
+        if (is_missile == 1) { spr_light = 0; }   # fullbright (RC-S8 slice)
 
         # Draw sprite columns. Range-clamp c so scr_x is provably in
         # [0, SCREEN_WIDTH) BY CONSTRUCTION — this replaces the old per-column
@@ -490,7 +508,10 @@ fn sprite_render_all(): i64 {
             # source rows and drew as shredded horizontal stripes (RC-S5).
             var ph_c = ph;
             if (ph_c > 256) { ph_c = 256; }
-            for (var zy = 0; zy < ph_c; zy += 1) { store8(spr_col_buf + zy, 0); }
+            for (var zy = 0; zy < ph_c; zy += 1) {
+                store8(spr_col_buf + zy, 0);
+                store8(spr_col_mask + zy, 0);
+            }
 
             var safety = 0;
             while (safety < 128) {
@@ -503,7 +524,10 @@ fn sprite_render_all(): i64 {
 
                 for (var py = 0; py < length; py += 1) {
                     var dy = topdelta + py;
-                    if (dy < ph_c) { store8(spr_col_buf + dy, load8(pixels + py)); }
+                    if (dy < ph_c) {
+                        store8(spr_col_buf + dy, load8(pixels + py));
+                        store8(spr_col_mask + dy, 1);
+                    }
                 }
 
                 post_ptr += 4 + length;
@@ -522,9 +546,10 @@ fn sprite_render_all(): i64 {
             for (var scr_y = y_lo; scr_y <= y_hi; scr_y += 1) {
                 var src_y = (scr_y - sy1) * ph / sprite_h;
                 if (src_y >= ph_c) { src_y = ph_c - 1; }
-                var pal = load8(spr_col_buf + src_y);
-                if (pal != 0) {
-                    framebuf_pixel(scr_x, scr_y, render_shade(pal, spr_light));
+                # Draw rows a post covered — regardless of palette value
+                # (index 0 is a real color, not the transparency key).
+                if (load8(spr_col_mask + src_y) != 0) {
+                    framebuf_pixel(scr_x, scr_y, render_shade(load8(spr_col_buf + src_y), spr_light));
                 }
             }
         }

@@ -289,9 +289,12 @@ fn things_spawn_from_map(): i64 {
         store64(base, map_thing_x(i));
         store64(base + 8, map_thing_y(i));
         store64(base + 16, 0);
-        # Angle: WAD degrees (0-359) -> angle units (0-1023)
+        # Angle: WAD degrees (0-359) -> angle units (0-1023). Normalized —
+        # a hostile WAD degree up to 65535 otherwise stores a raw ~186k
+        # angle that anything comparing BAM values directly sees as garbage
+        # (RC-G8/L4).
         var deg = map_thing_angle(i);
-        store64(base + 24, deg * 1024 / 360);
+        store64(base + 24, (deg * 1024 / 360) & ANG_MASK);
         store64(base + 32, ttype);
 
         # State and health

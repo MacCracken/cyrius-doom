@@ -380,6 +380,10 @@ fn doom_main(): i64 {
         # map geometry / doors / level stats are skill-independent and stay as
         # loaded; only the skill-filtered thing set is rebuilt.
         things_spawn_from_map();
+        # Re-derive max-kill/item counts from the skill-filtered set — without
+        # this the first level's intermission percentages reflected the
+        # default-skill spawn set (RC-G8/L6).
+        level_reset_stats();
         things_print_stats();
     }
 

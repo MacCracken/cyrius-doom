@@ -32,7 +32,12 @@ fn fixed_mul(a, b): i64 {
 }
 
 fn fixed_div(a, b): i64 {
-    if (b == 0) { return FIXED_MAX; }
+    # Sign-aware saturation on divide-by-zero (RC-G8/L10): +MAX regardless of
+    # a's sign flipped the result's direction for negative numerators.
+    if (b == 0) {
+        if (a < 0) { return 0 - FIXED_MAX; }
+        return FIXED_MAX;
+    }
     return (a << 16) / b;
 }
 

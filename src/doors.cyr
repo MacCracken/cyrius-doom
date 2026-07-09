@@ -143,6 +143,9 @@ fn door_start(sector_idx, open_state): i64 {
     var base = door_thinkers + idx * DOOR_ENTRY_SIZE;
     var ceil_h = map_sector_ceilh(sector_idx);
     var target = find_highest_neighbor_ceil(sector_idx) - 4;
+    # A sector with no higher neighbor would "open" to its own ceiling − 4,
+    # DIPPING the ceiling for the wait period (RC-G8/L7). Never open downward.
+    if (target < ceil_h) { target = ceil_h; }
 
     store64(base, sector_idx);
     store64(base + 8, open_state);

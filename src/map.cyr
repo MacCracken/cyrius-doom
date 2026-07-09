@@ -180,7 +180,13 @@ fn map_load(map_name): i64 {
         store64(base + 16, read_le16(src + 4));
         store64(base + 24, read_le16(src + 6));
         store64(base + 32, read_le16(src + 8));
-        store64(base + 40, read_le16(src + 10));
+        # 0xFFFF = "no sidedef" for BOTH sides (RC-G8/L3): the right side was
+        # stored raw, so a technically-legal front-sideless line made
+        # map_validate reject the whole map instead of degrading to a skipped
+        # line (render_seg / doors_use already handle side < 0).
+        var right = read_le16(src + 10);
+        if (right == 65535) { right = -1; }
+        store64(base + 40, right);
         var left = read_le16(src + 12);
         if (left == 65535) { left = -1; }
         store64(base + 48, left);
@@ -403,7 +409,9 @@ fn map_find_player_start(): i64 {
         if (map_thing_type(i) == THING_PLAYER1) {
             store64(player_start, map_thing_x(i));
             store64(player_start + 8, map_thing_y(i));
-            store64(player_start + 16, map_thing_angle(i) * 1024 / 360);
+            # Normalized: hostile-WAD degrees up to 65535 otherwise store a
+            # raw out-of-range BAM angle (RC-G8/L4).
+            store64(player_start + 16, (map_thing_angle(i) * 1024 / 360) & ANG_MASK);
             return 0;
         }
     }
