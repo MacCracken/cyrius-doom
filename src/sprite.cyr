@@ -417,8 +417,11 @@ fn sprite_render_all(): i64 {
             }
         }
 
-        # Project sprite bottom at floor level
-        var eye_h = (thing_floor << 16) + VIEW_HEIGHT;
+        # Project sprite bottom at the thing's floor height vs the frame
+        # eye (view_z, 0.28.5): things on higher/lower floors now project
+        # higher/lower — the old per-thing eye (own floor + 41) flattened
+        # sprite elevation exactly like the per-seg wall eye did.
+        var eye_h = view_z;
         var floor_proj = HALF_HEIGHT - fixed_to_int(
         fixed_div(fixed_mul((thing_floor << 16) - eye_h, PROJ_DIST), vy));
 

@@ -14,14 +14,14 @@
 
 | Slot | Theme | Status |
 |---|---|---|
-| **v0.28.5** | Visplane pool rewrite (Black Book ch.9 / F08, subsumes F13); rides the `lib/test.cyr` `test_each` refactor | next |
+| ~~**v0.28.5**~~ | ~~Visplane pool rewrite (Black Book ch.9 / F08, subsumes F13)~~ **SHIPPED 0.32.0** (2026-07-08 — global `view_z` + real plane pool, −24% render_frame; the `test_each` refactor did NOT ride along, dropped from scope) | — |
 | **(unslotted)** | Wall-path correctness: closed-door black holes (E1M3/4/7), near-parallel one-sided wall drop (E1M9), SLADRIP anim no-op, FLAT_MAX full-IWAD truncation, vendored-bsp `asr()` trunc-vs-floor | new — 2026-06-12 floor-render review |
 | **(unslotted)** | Shooting cosmetics deferred from **0.30.0**: BEXP rocket-explosion frames (detonation is instant), ~~separate muzzle-flash overlay sprite~~ (**shipped 0.30.1**), full xdeath giblet animation on overkill (currently a faster death); precise missile-vs-wall trace (reuses `player_check_position`, so a rocket can clip on tall steps in 2.5D) | new — 2026-06-13 shooting overhaul |
 | **(unslotted)** | **Animated multi-frame muzzle flash** for chaingun (CHGFB0) + rocket (MISFB0–D0): the 0.30.1 flash overlay shows only frame A because those guns have a 2-frame animation (`weapon_fire_frame` only ever reaches 1). Needs an independent flash-frame counter in `weapon_tick` decoupled from `weapon_fire_max`. | new — 2026-06-13 0.30.1 review (confirmed cosmetic finding) |
 | **(unslotted)** | **Audio output hardening** (remaining; HW_PARAMS-fallback thresholds + ESTRPIPE recovery shipped 0.30.6; **distance/positional attenuation + stereo pan + Sound-menu live-preview/polish shipped 0.30.7**): (3) **Per-sound peak normalization** or a finer **master-gain curve** — soft lumps like `DSITEMUP` (±19) play ~6× quieter than gunfire; kept faithful for now (the `sfx_volume` gain + per-voice `lvol/rvol` are the hooks). (4) **48000 Hz fallback** — jack also accepts it; needs fractional 11025→48000 resample vs the clean 4× for 44100; **untestable on the dev box (does 44100), so deferred until a card that needs it appears** (reproduce-first). (5) **Device-pick virtual-card heuristic** — the capture-sibling test can pick snd-aloop/dummy over the real codec; **needs an upstream vani CARD_INFO API** (out of this repo's scope; `lib/vani-core.cyr` is a gitignored resolved artifact). (6) **ALSA-vs-PC-speaker double-fire gating** — `sound_*` (PC speaker) and ALSA both fire per event; gate the beep when `audio_dev!=0`. Deferred: `sound.cyr` is included before `audio.cyr` so it can't cleanly read `audio_dev` without a reorder/shared flag; low value (PC speaker usually silent). (7) **0.30.7 review cosmetic nits** (all INFO/LOW, no functional impact): `menu_handle_input` dec/inc tie-break at `sfx_volume==0` (gate `inc` on `dec==0`); drop the unreachable `sep`/`lvol`/`rvol` clamps in `audio_play_at`; far-channel `rsep=256-sep` vs original DOOM `254-sep` (1–2 unit pan offset); 1-LSB attenuation boundary step at `dist==160<<16`. | updated — 2026-06-29 0.30.7 (positional + menu polish shipped; remaining items need upstream/other-hardware, contradict faithful-loudness, or are cosmetic) |
-| ~~(unslotted)~~ | ~~**Render-consistency audit Bite A — quick wins**~~ **SHIPPED 0.31.5** (2026-07-08, all six: RC-S3 sprite-lookup gaps + corpse frames, RC-S4 `fixed_atan2` octants, RC-S5 screen-driven V scaler, RC-W5 masked reverse order, RC-W1 sky-vs-sky suppression, RC-W2 closed-portal solid promotion — each staged-PPM-verified, +21 regression asserts) | — |
+| ~~(unslotted)~~ | ~~**Render-consistency audit Bite A — quick wins**~~ **SHIPPED 0.32.0** (2026-07-08, all six: RC-S3 sprite-lookup gaps + corpse frames, RC-S4 `fixed_atan2` octants, RC-S5 screen-driven V scaler, RC-W5 masked reverse order, RC-W1 sky-vs-sky suppression, RC-W2 closed-portal solid promotion — each staged-PPM-verified, +21 regression asserts) | — |
 | **(unslotted)** | **Render-consistency audit Bite C — gameplay sweep**: RC-G1 closing-door entombment (obstruction reverse), RC-G2 walk-trigger infinite-line firing (spurious exits), RC-G3 `doors_use` facing/LOS, RC-G4 sight gap test (shoot/wake through closed doors), RC-G5 missile spawn check + splash LOS, RC-G7 alloc-guard leaks (map_alloc ~600 KB/load, HUD 8 B/frame). RC-G6 AGNOS menu edge-latch rides the next QEMU-gated cut. RC-G8 LOW bundle held with 0.28.9–.11 | new — 2026-07-08 render audit |
-| ~~**v0.28.6**~~ | ~~Sprite + masked-seg depth-aware clipping (F07 / F05b / F05)~~ **SHIPPED 0.31.5** (2026-07-08, Bite B — drawseg occlusion records + `render_clip_band_build`: RC-S1/RC-S2/RC-S9/RC-W6 fixed, plus RC-W9 screen-edge endpoint re-anchor found during implementation; staged-PPM verified incl. the audit barrel + E1M5 spectre) | — |
+| ~~**v0.28.6**~~ | ~~Sprite + masked-seg depth-aware clipping (F07 / F05b / F05)~~ **SHIPPED 0.32.0** (2026-07-08, Bite B — drawseg occlusion records + `render_clip_band_build`: RC-S1/RC-S2/RC-S9/RC-W6 fixed, plus RC-W9 screen-edge endpoint re-anchor found during implementation; staged-PPM verified incl. the audit barrel + E1M5 spectre) | — |
 | **v0.28.7** | Sky + wall-mapping parity (F09) | queued |
 | **v0.28.8** | Structural perf — sidedef/sector index + thing-sector caches (F12 / F15) | queued, bench-gated |
 | **v0.28.9–.11** | Original Black Book sub-audits: BSP+collision (.9), game-state (.10), security-refresh (.11) | queued |
@@ -51,9 +51,9 @@ Full findings + staged-viewpoint evidence + repro coordinates: [`docs/audit/2026
 
 | Bite | Contents | Where it lands |
 |---|---|---|
-| **A — quick wins** | ~~RC-S3, RC-S4, RC-S5, RC-W5, RC-W1, RC-W2~~ | **SHIPPED 0.31.5** (2026-07-08) — all six staged-PPM-verified, +21 regression asserts |
-| **B — depth clipping keystone** | ~~RC-S1, RC-S2, RC-S9, RC-W6~~ | **SHIPPED 0.31.5** (2026-07-08) — drawseg records + per-column depth bands; masked segs merged into the sprite phase's painter's walk. Bonus: **RC-W9** (seg scale/U endpoints not re-anchored after screen-edge clamping — texture swim at edges + the E1M7 right-edge stripe band) found during implementation and fixed in the same cut. |
-| **— visplane keystone** | RC-F1 row-union bleed, RC-F4 sub-41 ceilings, RC-W8 viewz + portal clip bounds | v0.28.5 (unchanged scope, follows B) |
+| **A — quick wins** | ~~RC-S3, RC-S4, RC-S5, RC-W5, RC-W1, RC-W2~~ | **SHIPPED 0.32.0** (2026-07-08) — all six staged-PPM-verified, +21 regression asserts |
+| **B — depth clipping keystone** | ~~RC-S1, RC-S2, RC-S9, RC-W6~~ | **SHIPPED 0.32.0** (2026-07-08) — drawseg records + per-column depth bands; masked segs merged into the sprite phase's painter's walk. Bonus: **RC-W9** (seg scale/U endpoints not re-anchored after screen-edge clamping — texture swim at edges + the E1M7 right-edge stripe band) found during implementation and fixed in the same cut. |
+| **— visplane keystone** | ~~RC-F1, RC-F4, RC-W8~~ | **SHIPPED 0.32.0** (2026-07-08) — global `view_z` (elevation renders across walls/flats/sprites) + R_FindPlane/R_CheckPlane/R_MakeSpans pool + both-sector portal clip; `render_frame` −24% |
 | **C — gameplay sweep** | RC-G1–G5, G7 (doors / sight gap / missile spawn / leaks); RC-G6 QEMU-gated | unslotted row above |
 | **D — parity polish** | RC-W3 native-scale V (0.29.x), RC-W4+RC-F3 sky anchor + flat V mirror (0.28.7), RC-S6/S7/S8, RC-G8 bundle | existing slots |
 
@@ -65,20 +65,18 @@ The current arc is **v0.28.x — graphics** (review / hardening / parity / perfo
 
 The graphics review/hardening/audit/performance pass **became v0.28.0** (shipped — see `completed-phases.md`). The previously-roadmapped DOOM Black Book audit (originally v0.25.0, re-anchored to v0.28.x) and the lingering language-arc housekeeping were pushed **behind** it, re-slotted below. Scope across the arc: close the render-path parity gaps the 0.28.0 audit surfaced, chapter-by-chapter against Fabien Sanglard's *Game Engine Black Book: DOOM* + the Unofficial DOOM Specs, with PPM diffs as ground truth. Finding IDs (Fnn) reference [`docs/audit/2026-06-07-v0.28-graphics-hardening.md`](../audit/2026-06-07-v0.28-graphics-hardening.md).
 
-### v0.28.5 — Visplane pool rewrite (keystone parity)
+### ~~v0.28.5 — Visplane pool rewrite (keystone parity)~~ SHIPPED 0.32.0 (2026-07-08)
 
-The per-row single-`(x1,x2,flat,light)` visplane model can't represent two flats on one screen row, and the farthest seg to touch a row wins (BSP is front-to-back) — so a farther sector's flat can overwrite a nearer one. Replace with a real visplane pool.
+Implemented as DOOM's structure: `plane_get` (R_FindPlane + R_CheckPlane column-overlap split), per-column top/bottom spans, `render_plane_spans` (R_MakeSpans via `plane_spanstart`), `PLANE_MAX=128` + one-shot warn. **~24% faster** than the per-row pass it replaced (2.351 vs 3.075 ms `render_frame`, same compiler).
 
-> **2026-06-12 floor-render review** (the flat-distance fix cut, CHANGELOG `[Unreleased]`) re-confirmed this slot as the keystone and added concrete evidence: the `x1..x2` row union paints the last seg's flat across interposed walls **and across sky columns** (sky rows no longer self-register, but a non-sky ceiling sharing the row still bridges); E1M5 shows back-floor flat bleed over the front floor strip at a step-down edge; flats/lights bleed across sectors sharing rows. Items 5–6 added from the same review.
-
-| # | Item | Reference | Detail |
-|---|------|-----------|--------|
-| 1 | Visplane pool keyed by (flat, lightnum, height) | Black Book ch. 9 (R_FindPlane/R_DrawPlanes) | per-column `top[]`/`bottom[]`; F08 |
-| 2 | Drop redundant per-cell flat/light re-stores | — | folds into the pool; F13 |
-| 3 | `lib/test.cyr` `test_each` refactor (rides along) | v5.7.43 stdlib | ~32 asserts collapsed; the rewrite needs a healthy PPM-diff harness |
-| 4 | Span shape + count vs reference | E1M1 / E1M3 / E1M5 | flag-gated, PPM-diffed |
-| 5 | Global `viewz` (player sector floor + 41, lift/stair-aware) replacing the per-seg `eye_h = front_floor + 41` model | Black Book ch. 9 (viewz) | renderer currently has no view z at all — elevation is flattened (all floors at equal heights project identically); prerequisite for honest per-plane heights in item 1; supersedes the 0.29.x per-row `vp_ceil_h` stopgap |
-| 6 | Portal clip updates bounded by BOTH sectors (`max(ceil, back_ceil)` / `min(floor, back_floor)`) | Black Book ch. 9 (R_RenderSegLoop) | current `clip_top/bottom ← back_*` only; far geometry leaks past near plane edges |
+| # | Item | Disposition |
+|---|------|-------------|
+| 1 | Visplane pool keyed by (height, flat, lightnum) | ✅ per-column `top[]`/`bottom[]`, same-key planes split on overlap (F08) |
+| 2 | Drop redundant per-cell flat/light re-stores | ✅ the row-union model is deleted outright (F13) |
+| 3 | `lib/test.cyr` `test_each` refactor (rides along) | ✂ dropped from scope — the suite grew targeted regression groups instead (115/167) |
+| 4 | Span shape + count vs reference | ✅ via staged-viewpoint PPM verification (courtyard bleed band gone, E1M3/E1M5 elevation renders) rather than a flag-gated span dump |
+| 5 | Global `viewz` replacing the per-seg `eye_h = front_floor + 41` model | ✅ `view_z` BSP-resolved per frame from the view coords; walls, masked segs, drawseg deltas, AND sprites project against it — world elevation renders; supersedes the 0.29.x `vp_ceil_h` stopgap (deleted) |
+| 6 | Portal clip updates bounded by BOTH sectors | ✅ opening top = lower ceiling, bottom = higher floor, in the seg clip update |
 
 ### Wall-path correctness (surfaced by the 2026-06-12 floor-render review; re-diagnosed at the 0.29.4 cut)
 
@@ -88,13 +86,13 @@ The per-row single-`(x1,x2,flat,light)` visplane model can't represent two flats
 |---|------|----------|--------|
 | 1 | ~~Closed-door faces render as black holes~~ **RESOLVED 0.29.4** | E1M3/E1M7 — BIGDOOR2 = patch `DOOR2_4` (17544 B) | NOT a geometry/draw bug — the patch cache truncated `DOOR2_4` past byte 8192 (cols 58–127 lost → black). Fixed by `PCACHE_DATA_SIZE` 8192→40960. |
 | 2 | ~~Near-view-parallel one-sided walls dropped entirely~~ **RESOLVED 0.29.4** | E1M9 spawn corridor (BROWN1) | NOT a geometry drop — the BROWN1 texture's patches are 8-char PNAMES names that `wad_name_eq`→`strlen` over-read and rejected → `patch_lumps=-1` → walls composited to all-black (looked like void). Fixed by null-terminating the PNAMES field in `texture_init`. |
-| 6 | ~~closed-sector portals never promoted to solid~~ **RESOLVED 0.31.5** (RC-W2) | E1M1 line 151 (BIGDOOR2) staged at (1420,−2496) ang 0 | The `clip_top==clip_bottom` see-through seam across closed doors is fixed: vanilla promotion test (`back_ceil<=back_floor \|\| back_ceil<=front_floor \|\| back_floor>=front_ceil`) marks the column solid, collapses the clip (occludes sprites too), and the upper/lower sections meet across the old seam row. Staged-PPM verified. |
+| 6 | ~~closed-sector portals never promoted to solid~~ **RESOLVED 0.32.0** (RC-W2) | E1M1 line 151 (BIGDOOR2) staged at (1420,−2496) ang 0 | The `clip_top==clip_bottom` see-through seam across closed doors is fixed: vanilla promotion test (`back_ceil<=back_floor \|\| back_ceil<=front_floor \|\| back_floor>=front_ceil`) marks the column solid, collapses the clip (occludes sprites too), and the upper/lower sections meet across the old seam row. Staged-PPM verified. |
 | 7 | ~~wall texture-U swap mirror~~ **RESOLVED 0.30.1** | reported as "walls warp when turning"; multi-agent-verified correct | the `sx1>sx2` swap in `render_seg` reordered `sx`/`ty` but not the texture-U endpoints, mirroring segs that project right-to-left (and flipping the instant a turn crossed the threshold). Fixed via a `seg_u_swapped` flag that swaps `u_left`/`u_right` in both the wall pass and `render_masked_segs`. |
 | 3 | SLADRIP wall animation is a no-op | `anim_rotate_tex_3` (texture.cyr) | rotates the 32-byte entry **including the name hash**, and `render_seg` re-resolves textures by name every frame — lookup follows the rotation, content never visibly changes; rotate `width/height/def_ptr` only (or resolve indices at map load — F12 cache) |
 | 4 | `FLAT_MAX = 64` silently truncates full-IWAD flats (shareware's 54 fit) | texture.cyr flat scan | full/registered IWADs exceed 64 → `flat_find = -1` fallback paths activate (gray vlines, scalelight-not-zlight shading); raise cap + log truncation |
 | 5 | Vendored bsp `asr()` is round-toward-zero, not floor | lib (bsp dep) | `fixed_to_int` inherits trunc semantics → one-texel flat mis-wrap over negative world coords + doubled texel band straddling world axes; fix upstream in bsp, bump pin |
 
-### ~~v0.28.6 — Sprite + masked-seg depth-aware clipping~~ SHIPPED 0.31.5 (2026-07-08, Bite B)
+### ~~v0.28.6 — Sprite + masked-seg depth-aware clipping~~ SHIPPED 0.32.0 (2026-07-08, Bite B)
 
 Implemented as drawseg occlusion records (screen range, endpoint scales, solid flag, eye-relative opening deltas; `DS_MAX=512` + one-shot overflow warn) + `render_clip_band_build` (per-column visibility for a subject at any depth — only *nearer* drawsegs occlude). All four items landed:
 
@@ -111,7 +109,7 @@ Bonus fix (RC-W9, found during implementation): seg scale/U interpolation endpoi
 
 | # | Item | Reference | Detail |
 |---|------|-----------|--------|
-| 0 | ~~Sky-to-sky upper-wall suppression~~ **SHIPPED 0.31.5** (RC-W1) | r_segs (`worldhigh = worldtop` when both ceilings sky) | The E1M1 courtyard STARTAN3 band is gone — both-ceilings-sky portals draw the band as sky via the shared `render_draw_sky_column`, V-anchored with the ceiling sky above. Staged-PPM verified. |
+| 0 | ~~Sky-to-sky upper-wall suppression~~ **SHIPPED 0.32.0** (RC-W1) | r_segs (`worldhigh = worldtop` when both ceilings sky) | The E1M1 courtyard STARTAN3 band is gone — both-ceilings-sky portals draw the band as sky via the shared `render_draw_sky_column`, V-anchored with the ceiling sky above. Staged-PPM verified. |
 | 1 | Sky horizon anchoring + corrected angular scale | Black Book ch. 8 (R_DrawSkyColumn) | F09; sky-Y to the horizon (not per-column `ct`), per-column view-angle table; never lit |
 | 2 | Brightness / lighting A-B vs reference | Black Book ch. 8 (COLORMAP) | per-light-level PPM diff (carries the F25 verification forward) |
 | 3 | Flat V axis parity (vanilla uses `−worldY`; engine uses `+worldY` — all flats vertically mirrored) | Unofficial Specs / r_plane semantics | one-line per span loop; A-B PPM diff (2026-06-12 review) |

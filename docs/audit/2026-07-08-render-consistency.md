@@ -4,13 +4,14 @@
 displaying correctly, plus any issues discovered in passing.
 **Tree audited**: v0.31.4 (`main` @ 0f06753, working tree carries only the uncommitted 0.31.5 banner bump).
 **Toolchain**: built and rendered under **cycc 6.4.26** (wrapper drift; manifest pins 6.4.2 — recorded per process, committed `cyrius.lock` untouched).
-> **Status (2026-07-08, same day)**: **Bite A shipped in 0.31.5** (RC-S3/S4/S5, RC-W1/W2/W5) and
+> **Status (2026-07-08, same day)**: **Bite A shipped in 0.32.0** (RC-S3/S4/S5, RC-W1/W2/W5) and
 > **Bite B shipped in the same cut** (RC-S1/S2/S9, RC-W6 via drawseg depth clipping — the 0.28.6
 > keystone — plus **RC-W9**, a new finding fixed during implementation: seg scale/U endpoints were
 > not re-anchored after screen-edge clamping, which was the true cause of the E1M7 right-edge
-> stripe band this audit had provisionally attributed to visplane bleed). Remaining from this
-> audit: the 0.28.5 visplane pool (RC-F1/F4, RC-W8), Bite C gameplay sweep (RC-G1–G8), Bite D
-> polish (RC-W3/W4, RC-F2/F3, RC-S6/S7/S8). See `roadmap.md` + CHANGELOG `[0.31.5]`.
+> stripe band this audit had provisionally attributed to visplane bleed). The **0.28.5 visplane
+> pool + global viewz also shipped in 0.32.0** (RC-F1/F4, RC-W8 — elevation renders, flat bleed
+> gone, −24% render_frame). Remaining from this audit: Bite C gameplay sweep (RC-G1–G8), Bite D
+> polish (RC-W3/W4, RC-F2/F3, RC-S6/S7/S8). See `roadmap.md` + CHANGELOG `[0.32.0]`.
 
 **Verdict**: no memory-safety regressions found in the render path (the 0.28.0/0.31.2 patch-decoder
 hardening holds; `framebuf_pixel` bounds every write). The findings are **visual-correctness and

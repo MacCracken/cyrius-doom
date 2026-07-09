@@ -5,7 +5,7 @@ All notable changes to cyrius-doom will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.31.5] - 2026-07-04
+## [0.32.0] - 2026-07-08
 
 ### Fixed
 
@@ -99,6 +99,39 @@ the sprite phase, and the drawseg band building costs less than run-to-run noise
 Binary 379,664 → **383,896 B** (+4,232 B: drawseg machinery). All 9 maps PPM-clean;
 staged re-verification of every Bite A view passed (sky courtyard, door seam,
 close-range sprites, item/corpse visibility).
+
+**Visplane pool rewrite + global viewz (the 0.28.5 keystone — world elevation is now
+real)** (2026-07-08). The renderer had no view height at all: every seg projected
+against its own front floor + 41 ("per-seg eye"), so all floors landed on identical
+screen rows regardless of world height — stairs read as flat, ledges as paint. And
+floor/ceiling flats lived in a per-screen-row model (ONE flat/light/x-range per row,
+last seg wins) that bled a far sector's flat across interposed walls and sky (RC-F1,
+the courtyard's white alcove band).
+
+- **Global `view_z`** — BSP-resolved once per frame from the view coordinates (floor
+  of the sector under the viewpoint + 41, DOOM viewz). Walls, masked segs, drawseg
+  occlusion deltas, and **sprites** all project against it: looking into E1M1's
+  blue-carpet strip now shows a genuine step down, items/monsters stand at their true
+  floor heights, E1M3's recessed ceiling lights render as fixtures, and an E1M5 "black
+  rectangle" artifact resolved into the window it always was.
+- **Real visplane pool** (DOOM R_FindPlane/R_CheckPlane/R_MakeSpans): planes keyed by
+  (height, flat, lightnum), each with per-column top/bottom spans; same-key planes
+  split on column overlap; per-column spans convert to horizontal spans via the
+  spanstart walk. Kills the row-union bleed (RC-F1) and gives every plane its true
+  height for texel scale + zlight distance (RC-F4 — sub-41-unit ceilings were
+  projected as if 41 above the eye). `PLANE_MAX = 128` with a one-shot warn; planes
+  are only created on the visible side of the eye (vanilla markfloor/markceiling).
+- **Portal clip bounded by BOTH sectors** (0.28.5 item 6): the opening top/bottom now
+  take the lower ceiling / higher floor of the pair — far geometry no longer leaks
+  past near plane edges.
+
+Perf: `render_frame` **2.351 ms** / `+sprites` **2.346 ms** — **~24% faster** than the
+old per-row double pass (3.075/3.050 ms, same compiler): spans draw once per plane
+instead of re-scanning all 200 rows twice with per-row union re-stores. Binary
+383,896 → **383,968 B** (+72 B net — the pool roughly pays for the deleted row-union
+code). Tests 115/115 + 167/167 (the RC-S1 barrel assert re-verified against the new
+elevation-true projection); fuzz clean; all 9 maps PPM-clean; staged re-verification
+of every Bite A/B view passed.
 
 ### Added
 

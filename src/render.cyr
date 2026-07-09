@@ -20,6 +20,13 @@ var view_y = 0;
 var view_angle = 0;
 var view_cos = 0;
 var view_sin = 0;
+# Eye height for the frame (16.16): floor of the sector under the viewpoint
+# + 41 (DOOM viewz). Computed once per frame by render_update_view_z —
+# replaces the old PER-SEG eye model (each seg's own front floor + 41) that
+# flattened all elevation: every floor projected identically regardless of
+# height, stairs read as flat, and per-plane heights were meaningless
+# (0.28.5 item 5 / RC-W8).
+var view_z = 0;
 
 enum ViewConst {
     VIEW_HEIGHT = 2686976;
@@ -445,24 +452,84 @@ fn render_flat_light(lightnum, dist): i64 {
 # Column buffer for texture lookups (max 256 pixels tall)
 var tex_col_buf = 0;
 
-# Visplane tracking: for each screen row, store the floor/ceiling flat index + light
-# We draw floor/ceiling spans AFTER all walls, using the open regions
-# Floor span bounds: for each row y, track x_start and x_end
-var vp_floor_x1 = 0;
-var vp_floor_x2 = 0;
-var vp_ceil_x1 = 0;
-var vp_ceil_x2 = 0;
+# ================================================================
+# Visplane pool (0.28.5 keystone / RC-F1): real DOOM visplanes.
+# ================================================================
+# The old model kept ONE (flat, light, x-range) per screen ROW — a row union
+# where the last seg to touch a row won, so a far sector's flat painted
+# across interposed walls and sky, floors/lights bled between sectors
+# sharing rows, and per-plane heights were impossible (RC-F1/RC-F4).
+# Now: a pool of planes keyed by (height, flat, lightnum), each holding a
+# per-column vertical span (top/bottom bytes, 255 = column unused) — DOOM's
+# R_FindPlane/R_CheckPlane/R_MakeSpans structure.
+# Entry layout (PLANE_ENTRY_SIZE = 680):
+#   0: height (16.16 world)   8: flat idx   16: lightnum
+#  24: minx   32: maxx
+#  40..359:  top[320]  (byte per column; 255 = empty)
+# 360..679:  bottom[320]
+enum PlaneConst {
+    PLANE_MAX = 128;
+    PLANE_ENTRY_SIZE = 680;
+    PLANE_TOP_OFF = 40;
+    PLANE_BOT_OFF = 360;
+    PLANE_COL_EMPTY = 255;
+}
 
-# Per-row flat index and light (set during wall rendering, used by span pass)
-var vp_floor_flat = 0;
-var vp_ceil_flat = 0;
-var vp_floor_light = 0;
-var vp_ceil_light = 0;
-# Per-row ceiling height above the eye (16.16): the wall pass projects ceiling
-# rows with the true ceil-floor-41 delta, so the span pass must invert with the
-# same value. Floors are always exactly VIEW_HEIGHT below the eye (per-seg eye
-# model) and need no per-row height.
-var vp_ceil_h = 0;
+var plane_pool = 0;
+var plane_count = 0;
+var plane_dropped = 0;
+var plane_warned = 0;
+var plane_spanstart = 0;
+
+fn render_init_planes(): i64 {
+    if (plane_pool == 0) {
+        plane_pool = alloc(PLANE_MAX * PLANE_ENTRY_SIZE);
+        plane_spanstart = alloc(SCREEN_HEIGHT * 8);
+    }
+    plane_count = 0;
+    return 0;
+}
+
+fn plane_new(height, flat, lightnum): i64 {
+    if (plane_count >= PLANE_MAX) { plane_dropped += 1; return 0; }
+    var base = plane_pool + plane_count * PLANE_ENTRY_SIZE;
+    store64(base, height);
+    store64(base + 8, flat);
+    store64(base + 16, lightnum);
+    store64(base + 24, SCREEN_WIDTH);
+    store64(base + 32, -1);
+    for (var x = 0; x < SCREEN_WIDTH; x += 1) {
+        store8(base + PLANE_TOP_OFF + x, PLANE_COL_EMPTY);
+        store8(base + PLANE_BOT_OFF + x, 0);
+    }
+    plane_count += 1;
+    return base;
+}
+
+# R_FindPlane + R_CheckPlane: return a plane for (height, flat, lightnum)
+# whose columns are free across [x1, x2]. A same-key plane with any of those
+# columns already marked gets a FRESH plane instead — each plane column holds
+# exactly one contiguous span (two sectors sharing a key at different depths
+# on the same columns can't merge). Returns 0 when the pool is exhausted
+# (counted; warned once per session from render_frame).
+fn plane_get(height, flat, lightnum, x1, x2): i64 {
+    var found = 0;
+    for (var i = 0; i < plane_count; i += 1) {
+        var base = plane_pool + i * PLANE_ENTRY_SIZE;
+        if (load64(base) != height) { continue; }
+        if (load64(base + 8) != flat) { continue; }
+        if (load64(base + 16) != lightnum) { continue; }
+        found = base;
+        break;
+    }
+    if (found == 0) { return plane_new(height, flat, lightnum); }
+    var overlap = 0;
+    for (var x = x1; x <= x2; x += 1) {
+        if (load8(found + PLANE_TOP_OFF + x) != PLANE_COL_EMPTY) { overlap = 1; break; }
+    }
+    if (overlap == 0) { return found; }
+    return plane_new(height, flat, lightnum);
+}
 
 # ================================================================
 # Masked midtexture drawsegs: deferred two-sided middle textures
@@ -615,32 +682,6 @@ fn render_clip_band_build(x1, x2, subj_s1, subj_s2): i64 {
     return 0;
 }
 
-fn render_init_visplanes(): i64 {
-    if (vp_floor_x1 == 0) {
-        vp_floor_x1 = alloc(200 * 8);
-        vp_floor_x2 = alloc(200 * 8);
-        vp_ceil_x1 = alloc(200 * 8);
-        vp_ceil_x2 = alloc(200 * 8);
-        vp_floor_flat = alloc(200 * 8);
-        vp_ceil_flat = alloc(200 * 8);
-        vp_floor_light = alloc(200 * 8);
-        vp_ceil_light = alloc(200 * 8);
-        vp_ceil_h = alloc(200 * 8);
-    }
-    for (var y = 0; y < SCREEN_HEIGHT; y += 1) {
-        store64(vp_floor_x1 + y * 8, SCREEN_WIDTH);
-        store64(vp_floor_x2 + y * 8, 0);
-        store64(vp_ceil_x1 + y * 8, SCREEN_WIDTH);
-        store64(vp_ceil_x2 + y * 8, 0);
-        store64(vp_floor_flat + y * 8, -1);
-        store64(vp_ceil_flat + y * 8, -1);
-        store64(vp_floor_light + y * 8, 16);
-        store64(vp_ceil_light + y * 8, 16);
-        store64(vp_ceil_h + y * 8, VIEW_HEIGHT);
-    }
-    return 0;
-}
-
 # Draw a textured wall column
 # x = screen column, y1/y2 = screen top/bottom
 # tex_idx = texture index, tex_col = texture column (U coord)
@@ -692,6 +733,31 @@ fn render_init_clip(): i64 {
 # ================================================================
 # Transform a vertex from world space to view space
 # ================================================================
+
+# Resolve view_z for the frame: BSP-walk (view_x, view_y) to its subsector's
+# sector and take floor + 41. Uses the view coords (not player_*) so staged
+# --ppm viewpoints and the game loop resolve identically. Falls back to bare
+# VIEW_HEIGHT (floor 0) when no map is loaded.
+fn render_update_view_z(): i64 {
+    view_z = VIEW_HEIGHT;
+    if (map_num_nodes <= 0) { return 0; }
+    var nw = map_num_nodes - 1;
+    while (bsp_is_subsector(nw) == 0) {
+        if (bsp_point_on_side(map_nodes, nw, view_x, view_y) == 0) { nw = bsp_node_child_r(map_nodes, nw); }
+        else { nw = bsp_node_child_l(map_nodes, nw); }
+    }
+    var ssi = bsp_subsector_idx(nw);
+    if (ssi >= map_num_ssectors) { return 0; }
+    var s0 = map_ssector_first(ssi);
+    if (s0 >= map_num_segs) { return 0; }
+    var l0 = map_seg_linedef(s0);
+    var sd0 = map_linedef_side_right(l0);
+    if (map_seg_side(s0) == 1) { sd0 = map_linedef_side_left(l0); }
+    if (sd0 < 0) { return 0; }
+    var sc = map_sidedef_sector(sd0);
+    view_z = (map_sector_floorh(sc) << 16) + VIEW_HEIGHT;
+    return 0;
+}
 
 # Returns: (tx, ty) — view-space X (left/right) and Y (depth/distance)
 fn render_transform_vertex(wx, wy): i64 {
@@ -958,16 +1024,29 @@ fn render_seg(seg_idx): i64 {
         }
     }
 
-    # Ceiling plane height above the eye for this seg (eye = front floor + 41).
-    # Stored per marked row so the span pass can invert the same projection the
-    # wall pass used (pre-0.29.3 the span pass assumed every ceiling was
-    # exactly VIEW_HEIGHT from the eye — mis-scaling/mis-lighting any room not
-    # exactly 82 tall). Floors need no equivalent: their delta is always
-    # exactly -VIEW_HEIGHT under the per-seg eye model.
-    var ceil_delta = ((ceil_h - floor_h) << 16) - VIEW_HEIGHT;
+    # Eye height: the frame-global viewz (render_update_view_z). Replaces the
+    # per-seg eye (own front floor + 41) that flattened world elevation.
+    var eye_h = view_z;
 
-    # Eye height for this seg (front floor + 41) — loop-invariant.
-    var eye_h = (floor_h << 16) + VIEW_HEIGHT;
+    # Resolve this seg's floor/ceiling planes from the pool (0.28.5). A plane
+    # is visible from one side only: floors below the eye, ceilings above it
+    # (vanilla markfloor/markceiling); sky ceilings draw as columns, never
+    # planes. plane_get == 0 (pool full) simply skips marking — the flat < 0
+    # gray-vline fallback in the column loop is unaffected.
+    var floor_plane = 0;
+    if (floor_flat >= 0) {
+        if ((floor_h << 16) < view_z) {
+            floor_plane = plane_get(floor_h << 16, floor_flat, flat_lightnum, sx1, sx2);
+        }
+    }
+    var ceil_plane = 0;
+    if (is_sky == 0) {
+        if (ceil_flat >= 0) {
+            if ((ceil_h << 16) > view_z) {
+                ceil_plane = plane_get(ceil_h << 16, ceil_flat, flat_lightnum, sx1, sx2);
+            }
+        }
+    }
 
     # Record this seg as a drawseg occluder for the deferred masked+sprite
     # pass (Bite B / 0.28.6). Solid = one-sided or closed portal (full-column
@@ -1050,34 +1129,28 @@ fn render_seg(seg_idx): i64 {
                     framebuf_vline(col, ct, ceil_screen - 1, render_shade(ceil_base_pal, col_light));
                 }
             }
-            # Sky rows are NOT registered for the span pass: F_SKY1 is a real
-            # 4096-byte flat lump (so ceil_flat >= 0 here), and the span pass
-            # would overdraw the just-drawn sky with its noise texture.
-            if (is_sky == 0) {
-                for (var cy = ct; cy < ceil_screen; cy += 1) {
-                    var cx1 = load64(vp_ceil_x1 + cy * 8);
-                    if (col < cx1) { store64(vp_ceil_x1 + cy * 8, col); }
-                    var cx2 = load64(vp_ceil_x2 + cy * 8);
-                    if (col > cx2) { store64(vp_ceil_x2 + cy * 8, col); }
-                    store64(vp_ceil_flat + cy * 8, ceil_flat);
-                    store64(vp_ceil_light + cy * 8, flat_lightnum);
-                    store64(vp_ceil_h + cy * 8, ceil_delta);
-                }
+            # Mark this column's ceiling span into the plane (rows [ct,
+            # ceil_screen-1], one contiguous span per column). Sky ceilings
+            # drew as texture columns above and register nothing.
+            if (ceil_plane != 0) {
+                store8(ceil_plane + PLANE_TOP_OFF + col, ct);
+                store8(ceil_plane + PLANE_BOT_OFF + col, ceil_screen - 1);
+                if (col < load64(ceil_plane + 24)) { store64(ceil_plane + 24, col); }
+                if (col > load64(ceil_plane + 32)) { store64(ceil_plane + 32, col); }
             }
         }
 
-        # Draw floor — store bounds for deferred span rendering
+        # Floor — mark this column's span into the plane (rows
+        # [floor_screen+1, cb])
         if (floor_screen < cb) {
             if (floor_flat < 0) {
                 framebuf_vline(col, floor_screen + 1, cb, render_shade(floor_base_pal, col_light));
             }
-            for (var fy = floor_screen + 1; fy <= cb; fy += 1) {
-                var fx1 = load64(vp_floor_x1 + fy * 8);
-                if (col < fx1) { store64(vp_floor_x1 + fy * 8, col); }
-                var fx2 = load64(vp_floor_x2 + fy * 8);
-                if (col > fx2) { store64(vp_floor_x2 + fy * 8, col); }
-                store64(vp_floor_flat + fy * 8, floor_flat);
-                store64(vp_floor_light + fy * 8, flat_lightnum);
+            if (floor_plane != 0) {
+                store8(floor_plane + PLANE_TOP_OFF + col, floor_screen + 1);
+                store8(floor_plane + PLANE_BOT_OFF + col, cb);
+                if (col < load64(floor_plane + 24)) { store64(floor_plane + 24, col); }
+                if (col > load64(floor_plane + 32)) { store64(floor_plane + 32, col); }
             }
         }
 
@@ -1177,8 +1250,16 @@ fn render_seg(seg_idx): i64 {
                 store64(clip_solid + col * 8, 1);
                 clip_count += 1;
             } else {
-                if (back_ceil_screen > ct) { store64(clip_top + col * 8, back_ceil_screen); }
-                if (back_floor_screen < cb) { store64(clip_bottom + col * 8, back_floor_screen); }
+                # Clip bounded by BOTH sectors (0.28.5 item 6 / RC-W8): the
+                # opening top is the LOWER of the two ceilings and its bottom
+                # the HIGHER of the two floors. Clipping to the back sector
+                # alone let far geometry leak past the near plane edges.
+                var new_ct = back_ceil_screen;
+                if (ceil_screen > new_ct) { new_ct = ceil_screen; }
+                var new_cb = back_floor_screen;
+                if (floor_screen < new_cb) { new_cb = floor_screen; }
+                if (new_ct > ct) { store64(clip_top + col * 8, new_ct); }
+                if (new_cb < cb) { store64(clip_bottom + col * 8, new_cb); }
             }
         } else {
             # One-sided: mid texture
@@ -1261,111 +1342,108 @@ fn render_bsp_node(node_idx): i64 {
 # Render a full frame
 # ================================================================
 
-fn render_flat_spans(): i64 {
-    # Draw all floor/ceiling spans row by row
-    # For each row, we have x1..x2 bounds and the flat index + light
-    # Per-row: compute distance once, then step world coords horizontally
+# ================================================================
+# Plane span drawing (0.28.5): per-plane column spans -> horizontal spans
+# ================================================================
 
-    for (var y = 0; y < SCREEN_HEIGHT; y += 1) {
-        # Ceiling spans
-        var cx1 = load64(vp_ceil_x1 + y * 8);
-        var cx2 = load64(vp_ceil_x2 + y * 8);
-        var cf = load64(vp_ceil_flat + y * 8);
-        if (cx1 <= cx2) {
-            if (cf >= 0) {
-                var cdy = HALF_HEIGHT - y;
-                if (cdy > 0) {
-                    # Horizontal distance to the plane point at this row:
-                    # dist = plane_height * PROJ_DIST / dy  (DOOM r_plane.c:
-                    # distance = planeheight * yslope[y], yslope = 160<<16/dy).
-                    # Pre-0.29.3 this omitted the PROJ_DIST factor, leaving the
-                    # distance 160x too small: the per-pixel world step below
-                    # collapsed to ~0 (one texel smeared across the whole row,
-                    # so flats showed no texture) and zlight indexed at ~0
-                    # (flats stuck fullbright, no distance fade).
-                    # Plane height comes from the per-row value the wall pass
-                    # stored (the ceil-floor-41 delta it projected with); the
-                    # below-eye degenerate case falls back to VIEW_HEIGHT.
-                    var ch = load64(vp_ceil_h + y * 8);
-                    if (ch <= 0) { ch = VIEW_HEIGHT; }
-                    var cdist = fixed_div(fixed_mul(ch, PROJ_DIST), cdy << 16);
-                    var cl = load64(vp_ceil_light + y * 8);
-                    var clv = render_flat_light(cl, cdist);
+# Draw one horizontal span of a plane: row y, columns [x1, x2]. hd is the
+# ABSOLUTE height delta |plane height - view_z| (16.16).
+# dist = hd * PROJ_DIST / |y - horizon|  (DOOM r_plane.c: distance =
+# planeheight * yslope[y]). Pre-0.29.3 this math omitted the PROJ_DIST
+# factor — one texel smeared per row + fullbright flats; the factor lives on.
+fn render_plane_row(y, x1, x2, hd, flat, lightnum): i64 {
+    var ady = y - HALF_HEIGHT;
+    if (ady < 0) { ady = 0 - ady; }
+    if (ady == 0) { return 0; }
 
-                    # World coords at left edge of span
-                    var csx_left = fixed_div((cx1 - HALF_WIDTH) << 16, PROJ_DIST);
-                    var cwx = view_x + fixed_mul(cdist, view_cos) + fixed_mul(fixed_mul(csx_left, cdist), view_sin);
-                    var cwy = view_y + fixed_mul(cdist, view_sin) - fixed_mul(fixed_mul(csx_left, cdist), view_cos);
+    var dist = fixed_div(fixed_mul(hd, PROJ_DIST), ady << 16);
+    var lv = render_flat_light(lightnum, dist);
 
-                    # Step per pixel in X
-                    var cstep_wx = fixed_mul(fixed_div(cdist, PROJ_DIST), view_sin);
-                    var cstep_wy = fixed_mul(fixed_div(cdist, PROJ_DIST), -view_cos);
+    # World coords at the left edge of the span + per-pixel step
+    var sx_left = fixed_div((x1 - HALF_WIDTH) << 16, PROJ_DIST);
+    var wx = view_x + fixed_mul(dist, view_cos) + fixed_mul(fixed_mul(sx_left, dist), view_sin);
+    var wy = view_y + fixed_mul(dist, view_sin) - fixed_mul(fixed_mul(sx_left, dist), view_cos);
+    var step_wx = fixed_mul(fixed_div(dist, PROJ_DIST), view_sin);
+    var step_wy = fixed_mul(fixed_div(dist, PROJ_DIST), -view_cos);
 
-                    # Inline the flat fetch and hoist the COLORMAP row out of
-                    # the per-pixel loop. flat_get_pixel re-masked &63 and
-                    # render_shade re-clamped the light every pixel, though clv
-                    # is already 0..31 here — two calls + redundant work per
-                    # pixel on the dominant fill path. Byte-identical. (0.28.0 F11)
-                    if (colormap != 0) {
-                        var crow = colormap + clv * 256;
-                        for (var x = cx1; x <= cx2; x += 1) {
-                            var cp = load8(flat_cache + cf * FLAT_SIZE + (fixed_to_int(cwy) & 63) * 64 + (fixed_to_int(cwx) & 63));
-                            framebuf_pixel(x, y, load8(crow + cp));
-                            cwx += cstep_wx;
-                            cwy += cstep_wy;
-                        }
-                    } else {
-                        for (var x = cx1; x <= cx2; x += 1) {
-                            var cp = load8(flat_cache + cf * FLAT_SIZE + (fixed_to_int(cwy) & 63) * 64 + (fixed_to_int(cwx) & 63));
-                            framebuf_pixel(x, y, cp);
-                            cwx += cstep_wx;
-                            cwy += cstep_wy;
-                        }
-                    }
-                }
+    # Inline flat fetch + hoisted COLORMAP row (0.28.0 F11).
+    if (colormap != 0) {
+        var crow = colormap + lv * 256;
+        for (var x = x1; x <= x2; x += 1) {
+            var cp = load8(flat_cache + flat * FLAT_SIZE + (fixed_to_int(wy) & 63) * 64 + (fixed_to_int(wx) & 63));
+            framebuf_pixel(x, y, load8(crow + cp));
+            wx += step_wx;
+            wy += step_wy;
+        }
+    } else {
+        for (var x = x1; x <= x2; x += 1) {
+            var cp = load8(flat_cache + flat * FLAT_SIZE + (fixed_to_int(wy) & 63) * 64 + (fixed_to_int(wx) & 63));
+            framebuf_pixel(x, y, cp);
+            wx += step_wx;
+            wy += step_wy;
+        }
+    }
+    return 0;
+}
+
+# Convert one plane's per-column vertical spans into horizontal spans and
+# draw them (DOOM R_MakeSpans): walk columns left to right; a row enters
+# the open set when its column span starts covering it (record the start x
+# in plane_spanstart) and flushes when it stops.
+fn render_plane_spans(base): i64 {
+    var flat = load64(base + 8);
+    if (flat < 0) { return 0; }
+    var lightnum = load64(base + 16);
+    var minx = load64(base + 24);
+    var maxx = load64(base + 32);
+    if (minx > maxx) { return 0; }
+    var hd = load64(base) - view_z;
+    if (hd < 0) { hd = 0 - hd; }
+    if (hd == 0) { return 0; }   # plane at eye level: seen edge-on, invisible
+
+    # t1/b1 = previous column's span (empty before minx); t2/b2 = this
+    # column's stored span; nt/nb = mutable copies (vanilla's t2/b2 params).
+    var t1 = SCREEN_HEIGHT;
+    var b1 = -1;
+    for (var x = minx; x <= maxx + 1; x += 1) {
+        var t2 = SCREEN_HEIGHT;
+        var b2 = -1;
+        if (x <= maxx) {
+            var rt = load8(base + PLANE_TOP_OFF + x);
+            if (rt != PLANE_COL_EMPTY) {
+                t2 = rt;
+                b2 = load8(base + PLANE_BOT_OFF + x);
             }
         }
-
-        # Floor spans
-        var fx1 = load64(vp_floor_x1 + y * 8);
-        var fx2 = load64(vp_floor_x2 + y * 8);
-        var ff = load64(vp_floor_flat + y * 8);
-        if (fx1 <= fx2) {
-            if (ff >= 0) {
-                var fdy = y - HALF_HEIGHT;
-                if (fdy > 0) {
-                    # dist = eye_height * PROJ_DIST / dy (see ceiling above).
-                    var fdist = fixed_div(fixed_mul(VIEW_HEIGHT, PROJ_DIST), fdy << 16);
-                    var fl = load64(vp_floor_light + y * 8);
-                    var flv = render_flat_light(fl, fdist);
-
-                    var fsx_left = fixed_div((fx1 - HALF_WIDTH) << 16, PROJ_DIST);
-                    var fwx = view_x + fixed_mul(fdist, view_cos) + fixed_mul(fixed_mul(fsx_left, fdist), view_sin);
-                    var fwy = view_y + fixed_mul(fdist, view_sin) - fixed_mul(fixed_mul(fsx_left, fdist), view_cos);
-
-                    var fstep_wx = fixed_mul(fixed_div(fdist, PROJ_DIST), view_sin);
-                    var fstep_wy = fixed_mul(fixed_div(fdist, PROJ_DIST), -view_cos);
-
-                    # Inline flat fetch + hoist COLORMAP row (see ceiling). (0.28.0 F11)
-                    if (colormap != 0) {
-                        var frow = colormap + flv * 256;
-                        for (var x = fx1; x <= fx2; x += 1) {
-                            var fp = load8(flat_cache + ff * FLAT_SIZE + (fixed_to_int(fwy) & 63) * 64 + (fixed_to_int(fwx) & 63));
-                            framebuf_pixel(x, y, load8(frow + fp));
-                            fwx += fstep_wx;
-                            fwy += fstep_wy;
-                        }
-                    } else {
-                        for (var x = fx1; x <= fx2; x += 1) {
-                            var fp = load8(flat_cache + ff * FLAT_SIZE + (fixed_to_int(fwy) & 63) * 64 + (fixed_to_int(fwx) & 63));
-                            framebuf_pixel(x, y, fp);
-                            fwx += fstep_wx;
-                            fwy += fstep_wy;
-                        }
-                    }
-                }
-            }
+        var nt = t2;
+        var nb = b2;
+        # rows open in the previous column but not this one: flush at x-1
+        while (t1 < nt && t1 <= b1) {
+            render_plane_row(t1, load64(plane_spanstart + t1 * 8), x - 1, hd, flat, lightnum);
+            t1 += 1;
         }
+        while (b1 > nb && b1 >= t1) {
+            render_plane_row(b1, load64(plane_spanstart + b1 * 8), x - 1, hd, flat, lightnum);
+            b1 -= 1;
+        }
+        # rows new in this column: open them at x
+        while (nt < t1 && nt <= nb) {
+            store64(plane_spanstart + nt * 8, x);
+            nt += 1;
+        }
+        while (nb > b1 && nb >= nt) {
+            store64(plane_spanstart + nb * 8, x);
+            nb -= 1;
+        }
+        t1 = t2;
+        b1 = b2;
+    }
+    return 0;
+}
+
+fn render_draw_planes(): i64 {
+    for (var i = 0; i < plane_count; i += 1) {
+        render_plane_spans(plane_pool + i * PLANE_ENTRY_SIZE);
     }
     return 0;
 }
@@ -1433,7 +1511,8 @@ fn render_masked_one(mi): i64 {
         var depth = fixed_div(PROJ_DIST, col_scale);
         if (depth <= 0) { depth = 256; }
 
-        var eye_h = (mfloor << 16) + VIEW_HEIGHT;
+        # Frame-global eye (viewz), matching the wall pass projections.
+        var eye_h = view_z;
 
         var open_top = HALF_HEIGHT - fixed_to_int(
         fixed_div(fixed_mul((open_ceil << 16) - eye_h, PROJ_DIST), depth));
@@ -1479,10 +1558,11 @@ fn render_masked_one(mi): i64 {
 fn render_frame(): i64 {
     view_cos = fixed_cos(view_angle);
     view_sin = fixed_sin(view_angle);
+    render_update_view_z();
 
     framebuf_clear(0);
     render_init_clip();
-    render_init_visplanes();
+    render_init_planes();
     masked_count = 0;
     ds_count = 0;
 
@@ -1492,8 +1572,8 @@ fn render_frame(): i64 {
         render_bsp_node(map_num_nodes - 1);
     }
 
-    # No-silent-caps: if a scene ever exceeds DS_MAX, distant occlusion can
-    # leak — say so once instead of silently degrading.
+    # No-silent-caps: if a scene ever exceeds DS_MAX or PLANE_MAX, occlusion
+    # or flats can degrade — say so once instead of silently.
     if (ds_dropped > 0) {
         if (ds_warned == 0) {
             sakshi_warn("drawseg cap DS_MAX exceeded; sprite occlusion may leak", 54);
@@ -1501,9 +1581,16 @@ fn render_frame(): i64 {
         }
         ds_dropped = 0;
     }
+    if (plane_dropped > 0) {
+        if (plane_warned == 0) {
+            sakshi_warn("visplane cap PLANE_MAX exceeded; some flats unrendered", 54);
+            plane_warned = 1;
+        }
+        plane_dropped = 0;
+    }
 
-    # Flat pass: draw all floor/ceiling spans
-    render_flat_spans();
+    # Plane pass: convert per-column plane spans to horizontal spans + draw
+    render_draw_planes();
 
     # Masked midtextures now draw inside sprite_render_all's merged
     # depth-sorted walk (render_masked_one) so grates and sprites layer
