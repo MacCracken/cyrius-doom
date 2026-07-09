@@ -207,10 +207,41 @@ break play:
   saturates sign-aware; thing/player-start angles normalized against hostile-WAD
   degrees.
 
-Deferred from the sweep: RC-G6 (AGNOS menu edge-latch — QEMU-gated), plus the
-not-LOW residuals: monster thing-solidity/z (L8), BFG mechanics (L5 — unreachable in
-shareware), the speculative blocklist-header variant (L2), and registered-WAD WILV
-names (L6b). RC-W3 native-scale V remains the 0.29.x deep-fidelity item. Tests 115/115 + **175/175** (+8: sight blocked/clear
+**Release leftovers — the final cleanup** (2026-07-08):
+
+- **RC-G6 — AGNOS menu edge-latching.** Every discrete menu action (any-key on the
+  title, select, back, up/down navigation) now requires a FRESH press (the F-U3/F-U4
+  latch pattern): on AGNOS the raw scancode `key_state` persists until the break code,
+  so one held press used to blow through TITLE → MAIN → New Game → instant start, and
+  a held ESC backed out of a submenu then quit the program a tick later (a non-fresh
+  ESC is now consumed outright). `menu_init` swallows keys carried in from gameplay.
+  The Sound sliders keep their level-triggered repeat (own debounce). Linux behavior
+  preserved; menu navigation is now per-press like vanilla.
+- **F-R6 CLOSED — the texture path got its fill mask** (`tex_col_mask` alongside
+  `texture_get_column`, same shape as the sprite fix): masked midtextures get true
+  post-gap transparency while in-post index-0 texels draw; solid walls no longer punch
+  pinholes at dark texels. The palette-index-0-as-transparency conflation is now fully
+  retired across psprite, sprites, HUD, walls, and grates.
+- **L8-lite — monster thing-solidity** (`thing_move_clear`): chasing monsters now
+  AABB-test solid things and the player before stepping (vanilla P_CheckPosition's
+  thing pass) — no more stacking into one blob or melee-ing from inside your face.
+  Blocking engages at radius-sum (~36 units), inside melee range (64), so combat feel
+  is unchanged. (Full monster z/step parity stays roadmapped.)
+- **AGNOS QEMU smoke: PASS on the final binary** — `doom-smoke.sh` boots
+  gnoboot+OVMF+NVMe, execs `/bin/doom` ring-3 from the ext2 root: serial shows
+  `cyrius-doom v0.32.0` + `wad loaded`, and the framebuffer screendump is the
+  clean 240-color TITLEPIC. The release QEMU gate is green (audible
+  `--audio-test`/`--music-test` on the jack remain user-run checks).
+
+Final release numbers: binary **392,280 B** / `doom_agnos` **387,504 B**;
+`render_frame` **2.455 ms** / `+sprites` 2.440 ms (the wall fill-mask costs one byte
+load per pixel, ~+4% — net still ~20% faster than pre-visplane, ~9× headroom); tests
+**115/115 + 175/175**; fuzz 1000/50000/2000/1000 clean; all 9 maps + 5 menu screens
+render.
+
+Remaining on the roadmap from this audit: RC-W3 native-scale V (0.29.x), RC-F2 bsp
+`asr` floor semantics (upstream), F-U6 AGNOS scancode-prefix locals, real thing-z,
+BFG mechanics (unreachable in shareware), registered-WAD WILV names. Tests 115/115 + **175/175** (+8: sight blocked/clear
 pairs, missile-through-door, use-ray facing both ways, door-reversal cycle + completed
 close; `doors.cyr` now included in the test harness with sound/level stubs); fuzz
 2000/1000 clean on the changed paths; all 9 maps PPM-clean; `render_frame` 2.382 ms

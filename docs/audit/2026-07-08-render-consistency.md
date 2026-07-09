@@ -13,10 +13,11 @@ displaying correctly, plus any issues discovered in passing.
 > gone, −24% render_frame), and **Bite C shipped in 0.32.0 too** (RC-G1–G5, G7 — door entombment
 > reversal, trigger spans, real use-ray, closed-portal sight/hitscan, missile spawn + splash LOS,
 > alloc guards). **Bite D also shipped in 0.32.0** (RC-W4 sky V anchor, RC-F3 flat V parity,
-> RC-S6/S7/S8 slices, RC-W7, 7 of the RC-G8 LOWs — plus the see-through-gun fix: palette index 0
-> is a real color, not the patch transparency key, in the psprite/sprite blitters). Remaining:
-> RC-G6 (QEMU-gated), RC-W3 native-scale V (0.29.x), RC-F2 bsp asr (upstream), the F-R6
-> texture-path fill-mask, real thing-z, and G8's L2/L5/L8. See `roadmap.md` + CHANGELOG `[0.32.0]`.
+> RC-S6/S7/S8 slices, RC-W7, 7 of the RC-G8 LOWs — plus the see-through-gun fix), and the
+> **release leftovers closed the tail**: RC-G6 menu edge-latch, F-R6 fully retired (texture-path
+> fill mask), L8-lite monster solidity — **with an AGNOS QEMU smoke PASS on the final v0.32.0
+> binary**. Remaining: RC-W3 native-scale V (0.29.x), RC-F2 bsp asr (upstream), real thing-z,
+> G8's L2/L5/L6b. See `roadmap.md` + CHANGELOG `[0.32.0]`.
 
 **Verdict**: no memory-safety regressions found in the render path (the 0.28.0/0.31.2 patch-decoder
 hardening holds; `framebuf_pixel` bounds every write). The findings are **visual-correctness and

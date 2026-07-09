@@ -230,10 +230,20 @@ fn texture_find(name): i64 {
 
 fn texture_height(idx): i64 { return load64(tex_table + idx * TEX_ENTRY_SIZE + 16); }
 
+# Parallel fill mask for the most recent texture_get_column call: 1 where a
+# patch post actually covered the row, 0 where the composite left a gap
+# (F-R6 texture half). Palette index 0 is a REAL near-black color, so it can
+# no longer double as the transparency key — masked midtextures read this to
+# skip true gaps, and solid walls draw index-0 texels instead of holes.
+# Same shape as sprite.cyr's spr_col_mask. Single render thread: the mask is
+# valid until the next texture_get_column call.
+var tex_col_mask = 0;
+
 # Get a column of pixels from a texture
 # Returns pointer to column data (palette indices), writes height to out_height
 # tex_idx = texture index, col = column number (wrapped by texture width)
 # dest = buffer to write column pixels into (caller provides, must be >= tex_height)
+# Side effect: tex_col_mask marks which rows were actually covered by posts.
 fn texture_get_column(tex_idx, col, dest): i64 {
     if (tex_idx < 0) { return 0; }
     if (tex_idx >= tex_count) { return 0; }
@@ -257,9 +267,11 @@ fn texture_get_column(tex_idx, col, dest): i64 {
     # Each patch ref: originx(2) originy(2) patch_idx(2) stepdir(2) colormap(2) = 10 bytes
     var num_patches = read_le16(tex_def + 20);
 
-    # Clear destination column
+    # Clear destination column + fill mask
+    if (tex_col_mask == 0) { tex_col_mask = alloc(TEX_COL_MAX); }
     for (var y = 0; y < th; y += 1) {
         store8(dest + y, 0);
+        store8(tex_col_mask + y, 0);
     }
 
     # Composite patches into the column
@@ -318,6 +330,7 @@ fn texture_get_column(tex_idx, col, dest): i64 {
                 if (dy >= 0) {
                     if (dy < th) {
                         store8(dest + dy, load8(pixels + py));
+                        store8(tex_col_mask + dy, 1);
                     }
                 }
             }

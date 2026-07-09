@@ -498,6 +498,33 @@ fn thing_animate(idx): i64 {
     return 0;
 }
 
+# Can a monster occupy (nx, ny)? Walls via player_check_position, PLUS
+# thing-vs-thing and thing-vs-player solidity (RC-G8/L8-lite): monsters used
+# to test walls only, so chasers stacked into one blob and walked into the
+# player's space (melee from inside your face). AABB overlap on radii, like
+# vanilla P_CheckPosition's thing pass. Melee is unaffected: blocking engages
+# at radius-sum (~36 units), inside MONSTER_MELEE_RANGE (64).
+fn thing_move_clear(self_idx, nx, ny): i64 {
+    if (player_check_position(nx, ny) == 0) { return 0; }
+    var self_r = thing_radius(self_idx);
+    for (var i = 0; i < thing_count; i += 1) {
+        if (i == self_idx) { continue; }
+        var f = thing_flags(i);
+        if ((f & TF_ACTIVE) == 0) { continue; }
+        if ((f & TF_SOLID) == 0) { continue; }
+        var rr = self_r + thing_radius(i);
+        if (fixed_abs(thing_x(i) - nx) >= rr) { continue; }
+        if (fixed_abs(thing_y(i) - ny) >= rr) { continue; }
+        return 0;
+    }
+    # The player is solid too.
+    var pr = self_r + PLAYER_RADIUS;
+    if (fixed_abs(player_x - nx) < pr) {
+        if (fixed_abs(player_y - ny) < pr) { return 0; }
+    }
+    return 1;
+}
+
 fn thing_ai_tick(idx): i64 {
     var flags = thing_flags(idx);
     if ((flags & TF_ACTIVE) == 0) { return 0; }
@@ -570,14 +597,14 @@ fn thing_ai_tick(idx): i64 {
         var mx = fixed_mul(fixed_cos(ang), MONSTER_CHASE_SPEED);
         var my = fixed_mul(fixed_sin(ang), MONSTER_CHASE_SPEED);
         thing_set_angle(idx, ang);
-        if (player_check_position(tx + mx, ty + my) == 1) {
+        if (thing_move_clear(idx, tx + mx, ty + my) == 1) {
             thing_set_x(idx, tx + mx);
             thing_set_y(idx, ty + my);
         } else {
-            if (player_check_position(tx + mx, ty) == 1) {
+            if (thing_move_clear(idx, tx + mx, ty) == 1) {
                 thing_set_x(idx, tx + mx);
             } else {
-                if (player_check_position(tx, ty + my) == 1) {
+                if (thing_move_clear(idx, tx, ty + my) == 1) {
                     thing_set_y(idx, ty + my);
                 }
             }

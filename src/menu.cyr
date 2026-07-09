@@ -43,8 +43,29 @@ var menu_slide_timer = 0;
 # WAD patch drawing for menu
 # ================================================================
 
+# Previous-tick input snapshot for edge detection (RC-G6): on AGNOS the raw
+# scancode key_state persists until the break code arrives, so one held press
+# spanned several menu ticks — TITLE -> MAIN -> "New Game" -> instant game
+# start at the default skill, and a held ESC backed out of a submenu then quit
+# the program on the next tick. Every discrete menu action now requires a
+# FRESH press (the F-U3/F-U4 latch pattern; the Sound sliders stay
+# level-triggered on purpose — they have their own repeat debounce). Linux
+# (per-tick key_state clear) keeps its behavior.
+var menu_prev_any = 0;
+var menu_prev_use = 0;
+var menu_prev_quit = 0;
+var menu_prev_up = 0;
+var menu_prev_down = 0;
+
 fn menu_init(): i64 {
     if (menu_patch_buf == 0) { menu_patch_buf = alloc(MENU_PATCH_BUF_SIZE); }
+    # Swallow anything held when the menu opens: first tick counts as "not
+    # fresh", so a key carried in from gameplay can't trigger an action.
+    menu_prev_any = 1;
+    menu_prev_use = 1;
+    menu_prev_quit = 1;
+    menu_prev_up = 1;
+    menu_prev_down = 1;
     return 0;
 }
 
@@ -225,20 +246,53 @@ fn menu_draw_sound(): i64 {
 # ================================================================
 
 fn menu_handle_input(): i64 {
+    # Edge detection (RC-G6): compute fresh-press flags against the previous
+    # tick's snapshot, then update the snapshot immediately so every return
+    # path below is covered.
+    var now_any = 0;
+    if (input_flags != 0) { now_any = 1; }
+    var now_use = input_use();
+    var now_quit = 0;
+    if (input_quit == 1) { now_quit = 1; }
+    var now_up = input_forward();
+    var now_down = input_backward();
+    var fresh_any = 0;
+    if (now_any == 1 && menu_prev_any == 0) { fresh_any = 1; }
+    var fresh_use = 0;
+    if (now_use == 1 && menu_prev_use == 0) { fresh_use = 1; }
+    var fresh_quit = 0;
+    if (now_quit == 1 && menu_prev_quit == 0) { fresh_quit = 1; }
+    var fresh_up = 0;
+    if (now_up == 1 && menu_prev_up == 0) { fresh_up = 1; }
+    var fresh_down = 0;
+    if (now_down == 1 && menu_prev_down == 0) { fresh_down = 1; }
+    menu_prev_any = now_any;
+    menu_prev_use = now_use;
+    menu_prev_quit = now_quit;
+    menu_prev_up = now_up;
+    menu_prev_down = now_down;
+
+    # Consume a held (non-fresh) ESC outright: on AGNOS it would otherwise
+    # leak past the submenu back-out into the caller's program-quit check on
+    # the very next tick.
+    if (now_quit == 1) {
+        if (fresh_quit == 0) { input_quit = 0; }
+    }
+
     if (menu_screen == MENU_TITLE) {
-        # Any key advances to main menu
-        if (input_flags != 0) {
+        # Any FRESH key advances to main menu
+        if (fresh_any == 1) {
             menu_screen = MENU_MAIN;
             menu_cursor = 0;
         }
         return 0;
     }
 
-    # Navigate up/down
-    if (input_forward() == 1) {
+    # Navigate up/down (per press, like vanilla menus)
+    if (fresh_up == 1) {
         if (menu_cursor > 0) { menu_cursor -= 1; }
     }
-    if (input_backward() == 1) {
+    if (fresh_down == 1) {
         if (menu_cursor < menu_item_count - 1) { menu_cursor += 1; }
     }
 
@@ -278,8 +332,8 @@ fn menu_handle_input(): i64 {
         }
     }
 
-    # Select (E key / use)
-    if (input_use() == 1) {
+    # Select (E key / use) — fresh press only (RC-G6)
+    if (fresh_use == 1) {
         # Snapshot the screen BEFORE any transition. The branches below run as
         # sequential (non-exclusive) ifs, so using the live `menu_screen` made
         # "New Game" (which sets it to MENU_SKILL) fall straight through the
@@ -319,8 +373,10 @@ fn menu_handle_input(): i64 {
         }
     }
 
-    # ESC / Q goes back
-    if (input_quit == 1) {
+    # ESC / Q goes back — fresh press only (RC-G6); the input_quit = 0 clears
+    # below still CONSUME the press so the caller's program-quit check can't
+    # fire on the same key.
+    if (fresh_quit == 1) {
         if (menu_screen == MENU_SKILL) {
             menu_screen = MENU_MAIN;
             menu_cursor = 0;

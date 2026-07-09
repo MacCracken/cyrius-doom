@@ -704,9 +704,11 @@ fn render_draw_tex_column(x, y1, y2, tex_idx, tex_col, tex_y_start, tex_y_step, 
     for (var y = y1; y <= y2; y += 1) {
         var ty = fixed_to_int(tex_y) % th;
         if (ty < 0) { ty += th; }
-        var pal = load8(tex_col_buf + ty);
-        if (pal != 0) {
-            framebuf_pixel(x, y, render_shade(pal, light_level));
+        # Draw rows a patch post actually covered (tex_col_mask, F-R6):
+        # palette index 0 is a real color, not the transparency key — dark
+        # texels no longer punch holes in walls; composite gaps still skip.
+        if (load8(tex_col_mask + ty) != 0) {
+            framebuf_pixel(x, y, render_shade(load8(tex_col_buf + ty), light_level));
         }
         tex_y += tex_y_step;
     }
@@ -1551,9 +1553,10 @@ fn render_masked_one(mi): i64 {
             var src_y = fixed_to_int(ty_pos);
             if (src_y >= 0) {
                 if (src_y < th) {
-                    var pal = load8(tex_col_buf + src_y);
-                    if (pal != 0) {
-                        framebuf_pixel(col, row, render_shade(pal, col_lv));
+                    # Post-gap transparency via the fill mask (F-R6): grate
+                    # gaps skip, but in-post index-0 (near-black) texels draw.
+                    if (load8(tex_col_mask + src_y) != 0) {
+                        framebuf_pixel(col, row, render_shade(load8(tex_col_buf + src_y), col_lv));
                     }
                 }
             }
