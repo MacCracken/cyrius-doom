@@ -23,6 +23,12 @@ include "lib/bsp.cyr"
 include "src/fixed.cyr"
 include "src/tables.cyr"
 include "src/wad.cyr"
+# Wayland backend (v0.33.0) — framebuf.cyr references win_*/present_mode in its
+# #ifndef-AGNOS branch, so this (Linux) fuzz build needs the platform files too.
+include "src/platform/wayland/wire.cyr"
+include "src/platform/wayland/client.cyr"
+include "src/platform/wayland/shm.cyr"
+include "src/platform/window.cyr"
 include "src/framebuf.cyr"
 include "src/map.cyr"
 include "src/texture.cyr"

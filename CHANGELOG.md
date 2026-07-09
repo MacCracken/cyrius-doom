@@ -5,6 +5,54 @@ All notable changes to cyrius-doom will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.33.0] - 2026-07-09
+
+### Added
+
+**Native Wayland window backend — DOOM as a real, resizable desktop window.** doom now opens a sovereign
+Wayland window on Hyprland/wlroots — raw wl protocol over the AF_UNIX socket via syscalls, **no libwayland,
+no new deps** — that blits the 320×200 palette-indexed frame and takes keyboard input, replacing the
+`/dev/fb0`-or-GTK-PPM-bridge (`scripts/x11view.py`) desktop story. Pulls the v1.0.0 "Wayland display backend"
+item forward; the working example is [puka](https://github.com/MacCracken/puka), whose sovereign Wayland
+client (`wire`/`shm`/`client` + a `win_*` seam) doom lifts and adapts. Design + phasing:
+[`docs/proposals/wayland-backend.md`](docs/proposals/wayland-backend.md); security: [`docs/audit/2026-07-09-wayland-backend.md`](docs/audit/2026-07-09-wayland-backend.md).
+
+- **The seam** — four new files under `src/platform/` (`wayland/{wire,client,shm}.cyr` + `window.cyr`), all
+  `#ifndef CYRIUS_TARGET_AGNOS`, behind a runtime `present_mode` (`PM_FB0` / `PM_WAYLAND` / `PM_PPM`). One
+  prepended branch in `framebuf_flip` (→ `framebuf_present_wayland`) and `input_poll` (→ `input_poll_wayland`);
+  the existing fb0/AGNOS/`--ppm` bodies are untouched and stay **byte-identical**.
+- **Backend selection** — `--wayland` / `--fb0` force it; `--wayland-probe` lists the compositor's globals and
+  exits; else `WAYLAND_DISPLAY` present → Wayland; `--ppm`/`--ppm-menu` always force PPM (a window never pops
+  during screenshot runs). Resolved **before** `framebuf_init` so init opens the right surface.
+- **Pixel path** — the palette→XRGB8888 integer-scale-center blit (reused from the fb0 path; byte order
+  B,G,R,X on LE — no R/B swap) into a wl_shm buffer, letterboxed. **Double-buffered**: two wl_buffers
+  ping-ponged over one 2×-sized pool (`shm_pick`/`shm_cur_oid`, per-buffer release tracking) so doom writes
+  the back buffer while the compositor samples the front — no tearing.
+- **Keyboard** — a raw-evdev-keycode → doom `key_state` table with the Linux desktop scheme (arrows turn, A/D
+  strafe, F/Ctrl fire, Space/E use, R run, Tab map, 1–7 weapons, Esc/Q quit); `poll(7)`-gated non-blocking
+  drain so the compositor read never stalls the 35 Hz tick; `wl_keyboard.leave` clears latches on focus loss.
+- **Window lifecycle** — xdg_shell toplevel + configure/ack, `xdg_wm_base.ping`→`pong`, close-button →
+  quit, and **drag-resize** (adopt the new size, rebuild buffers, recompute scale/letterbox, repaint).
+- **Security (P(-1))** — the wire parser is bounds-checked against malformed compositor messages (the
+  `wl_registry.global` string length can no longer OOB-read past `wl_rbuf`; key events are size-guarded; the
+  recv buffer has read-slack). SCM_RIGHTS fd-passing zeroes its ancillary scratch. See the audit doc.
+
+Built through four reviewed "bites" (seam+window → double-buffer → keyboard [folded into bite 1] → resize),
+each adversarially reviewed — the reviews caught + fixed a `var x[N]`-is-BYTES stack-overflow (I'd divided
+puka's buffer sizes by 8), a menu-lock (`input_flags` hardcoded 0), and a resize-OOM dangling-pointer crash.
+
+**No `cyrius.cyml` dep change** (pure syscalls + existing stdlib). +4 source files (25 modules now).
+`VERSION` 0.32.1 → **0.33.0**; banner + CHANGELOG synced.
+
+Verification: `--ppm`/`--ppm-menu` **byte-identical** to pre-change; tests **129 → 133** WAD-free / **189 →
+193** full (+4 Wayland: pure wire codec + `wl__parse` untrusted-registry bounds); fuzz 1000/50000/2000/1000
+clean; 9-map PPM + 5 menus; clean-from-scratch resolve+DCE (34/0 lock unchanged, 477 fns / 89,580 B NOPed);
+**AGNOS QEMU smoke PASS on the final 0.33.0 binary** (the backend is fully `#ifndef`'d out — agnos codegen
+unregressed). `render_frame` **2.469 ms** (variance — the Wayland present is off the render path). Binary
+392,304 → **418,224 B** (+25,920 B: the four platform files). **The window itself is user-verified on
+Hyprland** — the dev shell has no live compositor, same build-here/confirm-on-hardware split as the audio and
+AGNOS paths.
+
 ## [0.32.1] - 2026-07-08
 
 ### Fixed

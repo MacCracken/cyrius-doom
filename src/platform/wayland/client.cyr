@@ -159,7 +159,11 @@ fn wl__sock_path(buf): i64 {
 }
 fn wl_connect(): i64 {
     # Lazy-alloc the persistent buffers once (doom big-buffer convention).
-    if (wl_rbuf == 0) { wl_rbuf = alloc(WL_RBUF_CAP); }
+    # wl_rbuf gets 64 bytes of read-slack past WL_RBUF_CAP: wl_pump never WRITES
+    # past WL_RBUF_CAP (its read cap is WL_RBUF_CAP - wl_rlen), but a fixed-offset
+    # field read (e.g. a key event's key@+16/state@+20) on a short message at the
+    # buffer tail can read a few bytes past wl_rlen — the slack keeps that mapped.
+    if (wl_rbuf == 0) { wl_rbuf = alloc(WL_RBUF_CAP + 64); }
     if (wl_sbuf == 0) { wl_sbuf = alloc(512); }
     if (wl_kq == 0)   { wl_kq = alloc(768); }
     var path[128];             # `var x[N]` = N BYTES in Cyrius; a wl socket path is < 120 chars
@@ -249,11 +253,16 @@ fn wl__pong(serial): i64 { return wl__req1(wl_xdg_oid, OP_XDG_PONG, serial); }
 # enter sets focus, leave clears it (bite 3 zeroes latches when unfocused).
 # wl_keyboard.key delivers the RAW evdev keycode (NOT evdev+8 — that offset is
 # only for feeding libxkbcommon, which a sovereign client doesn't use).
-fn wl__kbd(o, op): i64 {
+fn wl__kbd(o, op, sz): i64 {
     if (op == EV_KBD_ENTER) { wl_focus = 1; return 0; }
     if (op == EV_KBD_LEAVE) { wl_focus = 0; return 0; }
-    if (op == EV_KBD_MODS) { wl_mods = wl__derive_mods(load32(wl_rbuf + o + 12)); return 0; }
+    if (op == EV_KBD_MODS) {
+        if (sz < 16) { return 0; }       # serial(4)@8 + depressed(4)@12
+        wl_mods = wl__derive_mods(load32(wl_rbuf + o + 12));
+        return 0;
+    }
     if (op == EV_KBD_KEY) {
+        if (sz < 24) { return 0; }       # serial,time,key@16,state@20
         var key = load32(wl_rbuf + o + 16);
         var state = load32(wl_rbuf + o + 20);
         wl__push_key(key, state, wl_mods);
@@ -262,9 +271,14 @@ fn wl__kbd(o, op): i64 {
 }
 
 # ---- event dispatch ----
+# `o` is the message start; the caller (wl__parse) guarantees the full message
+# [o, o+size) is within wl_rbuf. `size` here re-derives that bound so every
+# field read is validated against the message length (untrusted-input boundary:
+# a malformed/hostile compositor message must not read past its own extent).
 fn wl__handle(o): i64 {
     var id = load32(wl_rbuf + o);
     var op = load32(wl_rbuf + o + 4) & 0xFFFF;
+    var size = (load32(wl_rbuf + o + 4) >> 16) & 0xFFFF;
     if (id == WL_DISPLAY_ID) {
         if (op == EV_DISPLAY_ERROR) { sakshi_error("wayland: wl_display.error (fatal)", 33); wl_closed = 1; }
         return 0;
@@ -273,8 +287,15 @@ fn wl__handle(o): i64 {
     if (id == wl_frame_oid) { if (op == EV_CALLBACK_DONE) { wl_frame_done = 1; } return 0; }
     if (id == wl_reg_id) {
         if (op == EV_REGISTRY_GLOBAL) {
+            # Need name(4)@8 + strlen(4)@12 within the message before reading L.
+            if (16 > size) { return 0; }
             var nm = load32(wl_rbuf + o + 8);
             var L = wire_str_len(wl_rbuf, o + 12);
+            # Bound the attacker-controlled string length: the name bytes AND the
+            # trailing version u32 must fit within [o, o+size). Otherwise a huge
+            # L would make wire_str_next / wl__streq read past wl_rbuf.
+            if (L <= 0) { return 0; }
+            if (wire_str_next(o + 12, L) + 4 > o + size) { return 0; }
             var sp = wire_str_ptr(wl_rbuf, o + 12);
             var ver = load32(wl_rbuf + wire_str_next(o + 12, L));
             wl_nglobals = wl_nglobals + 1;
@@ -321,7 +342,7 @@ fn wl__handle(o): i64 {
         }
         return 0;
     }
-    if (id == wl_kbd_oid) { return wl__kbd(o, op); }
+    if (id == wl_kbd_oid) { return wl__kbd(o, op, size); }
     return 0;
 }
 

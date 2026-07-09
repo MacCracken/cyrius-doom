@@ -91,9 +91,20 @@ src/
   automap.cyr     — 2D overhead map (TAB toggle, Bresenham lines)
   level.cyr       — episode/map tracking, exit lines, level stats
   menu.cyr        — WAD-native title screen (TITLEPIC), main menu, skill select
+
+  platform/                    — desktop-display backends (v0.33.0), all #ifndef CYRIUS_TARGET_AGNOS
+    wayland/wire.cyr    — Wayland wire-protocol codec (pure, no syscalls)
+    wayland/client.cyr  — AF_UNIX connect + registry/bind + xdg dispatch + SCM_RIGHTS fd-passing + key ring
+    wayland/shm.cyr     — double-buffered wl_shm present (memfd/mmap, two-buffer ping-pong pool)
+    window.cyr          — the win_* seam (present/poll/resize/key/close); fb0/AGNOS/Wayland behind one contract
 ```
 
-Dep pins (bsp / vani versions) and 20-modules-vs-libs counts live in [`state.md`](docs/development/state.md). What composes what is durable; the version numbers are not.
+The Wayland backend is sovereign (raw wl protocol via syscalls — no libwayland, no new deps) and selected at
+runtime via `present_mode` (PM_FB0 / PM_WAYLAND / PM_PPM); `framebuf_flip`/`input_poll` branch to it on Linux,
+fb0/AGNOS/`--ppm` byte-identical. Any build that includes `src/framebuf.cyr` on Linux (tests, fuzz_weapon,
+`benches/doom.bcyr`) must also include the four `platform/` files first (framebuf references `win_*`).
+
+Dep pins (bsp / vani versions) and module/lib counts live in [`state.md`](docs/development/state.md). What composes what is durable; the version numbers are not.
 
 ## Key Principles
 

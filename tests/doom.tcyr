@@ -589,6 +589,45 @@ fn main() {
     assert_eq(load32(wbuf + 8), 0xABCD, "wire_put_u32 stores value");
 
     # ============================================================
+    test_group("wayland: wl__parse bounds untrusted registry (v0.33.0, headless)");
+    # ============================================================
+    # The wire parser is an untrusted-input boundary. A malformed wl_registry.global
+    # claiming a huge string length must be rejected without reading past wl_rbuf
+    # (the P(-1) hardening). Drive wl__parse against crafted bytes — no compositor.
+    wl_rbuf = alloc(8192 + 64);
+    wl_reg_id = 2;
+    # Well-formed wl_registry.global for "wl_shm": id=2, op=0, name=5, len=7,
+    # "wl_shm\0" (pad 8), version=1; total size = 28.
+    store32(wl_rbuf, 2);
+    store32(wl_rbuf + 4, (28 << 16) | 0);
+    store32(wl_rbuf + 8, 5);          # name
+    store32(wl_rbuf + 12, 7);         # strlen (incl NUL)
+    memcpy(wl_rbuf + 16, "wl_shm", 6);
+    store8(wl_rbuf + 22, 0);
+    store32(wl_rbuf + 24, 1);         # version
+    wl_gn_shm = 0;
+    wl_rlen = 28;
+    wl__parse();
+    assert_eq(wl_gn_shm, 5, "well-formed registry global binds wl_shm name");
+    # Malformed: same header but a huge string length. Must be rejected, no bind,
+    # no OOB read/crash.
+    store32(wl_rbuf, 2);
+    store32(wl_rbuf + 4, (28 << 16) | 0);
+    store32(wl_rbuf + 8, 9);
+    store32(wl_rbuf + 12, 0xFFFF);    # hostile length >> message size
+    store32(wl_rbuf + 24, 1);
+    wl_gn_shm = 0; wl_gn_comp = 0; wl_gn_xdg = 0; wl_gn_seat = 0;
+    wl_rlen = 28;
+    wl__parse();
+    assert_eq(wl_gn_shm, 0, "malformed registry global rejected (no bind, no OOB)");
+    assert_eq(wl_gn_comp, 0, "malformed global sets no compositor");
+    # A message claiming size < 8 aborts the parse safely.
+    store32(wl_rbuf, 2);
+    store32(wl_rbuf + 4, (4 << 16) | 0);   # size = 4 (< 8)
+    wl_rlen = 8;
+    assert_eq(wl__parse(), 0 - 1, "size<8 message aborts parse (returns -1)");
+
+    # ============================================================
     # WAD tests require DOOM1.WAD — skip if not available
     # ============================================================
 

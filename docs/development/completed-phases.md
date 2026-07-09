@@ -4,6 +4,12 @@
 
 Each entry: one row, headline only. For the full changelog see [`CHANGELOG.md`](../../CHANGELOG.md).
 
+## v0.33.0 — Desktop rendering (native Wayland window)
+
+| Version | Shipped | Milestone |
+|---------|---------|-----------|
+| v0.33.0 | 2026-07-09 | **Native Wayland window backend — DOOM as a real, resizable desktop window.** Sovereign wl protocol over the AF_UNIX socket via syscalls (no libwayland, no new deps), lifted+adapted from [puka](https://github.com/MacCracken/puka). Four `src/platform/` files (`wayland/{wire,client,shm}.cyr` + `window.cyr`, all `#ifndef CYRIUS_TARGET_AGNOS`) behind a runtime `present_mode`; `framebuf_flip`/`input_poll` branch to Wayland, fb0/AGNOS/`--ppm` byte-identical. Double-buffered ping-pong present (no tearing), full keyboard (evdev→key_state, arrows-turn, poll(7)-gated), xdg_shell lifecycle + ping/pong + drag-resize + close, wire-parser security hardening ([audit](../audit/2026-07-09-wayland-backend.md)). Selection via `--wayland`/`--fb0`/`--wayland-probe`/`WAYLAND_DISPLAY`. Built through 4 adversarially-reviewed bites (reviews caught+fixed a `var x[N]`-is-BYTES stack overflow, a menu lock, a resize-OOM crash). **25 modules** now. Tests **133/193** (+15); binary 418,224 B (agnos 387,592 B, QEMU PASS); `render_frame` 2.469 ms (present off the render path). Window user-verified on Hyprland. Design: [proposal](../proposals/wayland-backend.md). |
+
 ## v0.32.x — The July render-consistency mega-cut + patch
 
 | Version | Shipped | Milestone |

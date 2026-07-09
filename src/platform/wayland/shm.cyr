@@ -49,6 +49,11 @@ fn shm__mk_buffer(offset, w, h, stride): i64 {
 # Allocate a memfd of 2*W*H*4, map it, and create the wl_shm pool + TWO
 # wl_buffers. Returns the mapped base pointer, or 0 on failure.
 fn shm_create(w, h): i64 {
+    # Clear the buffer pointers up front so ANY failure below leaves them 0 (not
+    # a dangling/unmapped value) — shm_pick then returns 0 and the caller's
+    # dst==0 guard skips the frame instead of writing unmapped memory (a resize
+    # OOM mid-drag would otherwise SIGSEGV). Set to live values only on success.
+    shm_ptr0 = 0; shm_ptr1 = 0;
     var stride = w * 4;
     var bsize = stride * h;
     if (bsize <= 0) { return 0; }

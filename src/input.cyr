@@ -281,6 +281,17 @@ fn input_poll_wayland(): i64 {
             else {
                 var ev = win_poll_events(1);         # one read + dispatch
                 if ((ev & WIN_EV_CLOSE) != 0) { input_quit = 1; }
+                # Drag-resize (bite 4): adopt the compositor's new size, rebuild
+                # the present buffers, recompute scale/letterbox, and re-black
+                # both buffers' bars at the new geometry (else stale bar pixels
+                # smear — see win_resize_apply). The next framebuf_flip repaints
+                # the frame at the new scale.
+                if ((ev & WIN_EV_RESIZE) != 0) {
+                    if (win_resize_apply(1) == 0) {
+                        framebuf_wl_recompute();
+                        shm_fill(0);
+                    }
+                }
                 while (win_next_key(1, &wl_kr) == 1) {
                     var idx = doom_evdev_to_key(load64(&wl_kr));
                     if (idx >= 0) { store64(key_state + idx * 8, load64(&wl_kr + 8)); }
