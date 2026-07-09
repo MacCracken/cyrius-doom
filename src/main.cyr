@@ -123,7 +123,7 @@ fn doom_main(): i64 {
     # non-identity arena top (0x3FC00000); no warm-up needed.
     alloc_init();
     args_init();
-    sakshi_info("cyrius-doom v0.32.0", 19);
+    sakshi_info("cyrius-doom v0.32.1", 19);
 
     # WAD path: argv[1] on Linux. On agnos, agnsh `run /bin/doom` passes no argv
     # beyond the path, so default to /DOOM1.WAD (staged on the ext2 root).
@@ -262,8 +262,15 @@ fn doom_main(): i64 {
     # path (device pick, S16/stereo/44100 conversion, non-blocking writes) is
     # actually producing sound out of the speaker/jack. load_map() above already
     # ran audio_init()+audio_preload(), so the cache + device are ready.
+    #
+    # SFX-ONLY: load_map() also ran music_start() (music_volume defaults to 8),
+    # so E1M1's MUS track was mixing into every audio_tick below — the "audio
+    # test also plays music" bug. Stop it so this test isolates the SFX path;
+    # --music-test is the music-focused counterpart. music_stop() clears
+    # music_playing, so music_render_sample() returns 0 and nothing music mixes.
     if (audio_test == 1) {
-        sakshi_info("audio test: 6 sfx + L/R pan, ~8s", 32);
+        music_stop();
+        sakshi_info("audio test: 6 sfx + L/R pan, ~8s (sfx only)", 43);
         tick_init();   # the 35Hz clock isn't set up until the game loop below
         # Two positional sources 400u to the player's left / right of facing, to
         # audibly verify the stereo pan (audio_play_at). player_x/y/angle are set
@@ -295,11 +302,15 @@ fn doom_main(): i64 {
     }
 
     # Music self-test: play the current map's MUS track through the mixer for
-    # ~15 s, then exit. load_map() above already ran music_load()+music_start()
-    # for the default map (E1M1). Confirms the MUS sequencer + synth reach the
-    # audio device. No framebuffer needed.
+    # ~15 s, then exit. MUSIC-ONLY: no SFX are triggered in the loop below, and
+    # music_start() re-arms the track from bar 1 so the test is deterministic
+    # and self-contained (load_map already loaded + started E1M1's D_E1M1, but
+    # keying off an explicit start here mirrors --audio-test's explicit
+    # music_stop). Confirms the MUS sequencer + synth reach the audio device.
+    # No framebuffer needed.
     if (music_test == 1) {
-        sakshi_info("music test ~15s", 15);
+        music_start();
+        sakshi_info("music test ~15s (music only)", 28);
         tick_init();
         var mt_total = 35 * 15;
         var mt_t = 0;

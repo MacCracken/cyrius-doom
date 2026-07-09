@@ -4,10 +4,11 @@
 
 Each entry: one row, headline only. For the full changelog see [`CHANGELOG.md`](../../CHANGELOG.md).
 
-## v0.32.0 — The July render-consistency mega-cut
+## v0.32.x — The July render-consistency mega-cut + patch
 
 | Version | Shipped | Milestone |
 |---------|---------|-----------|
+| v0.32.1 | 2026-07-08 | **Patch — `--audio-test` / `--music-test` cleanly separated.** `--audio-test` was also playing music (`load_map()` runs `music_start()`, `music_volume` defaults to 8, so `D_E1M1` mixed into the SFX test's every `audio_tick`): it now `music_stop()`s first (SFX-only), and `--music-test` `music_start()`s to re-arm from bar 1 (music-only). Audio-path-only — render gates byte-identical. +3 WAD-free regression asserts (a playing voice renders sound; `music_stop()` → pure silence). AGNOS QEMU smoke PASS on the final 0.32.1 binary. Tests **118/178**; binary 392,304 B (agnos 387,528 B). |
 | v0.32.0 | 2026-07-08 | **Render-consistency audit (Bites A–D) + both render keystones + vani vendoring + toolchain 6.4.30.** One-day arc off the [2026-07-08 audit](../audit/2026-07-08-render-consistency.md) (21 findings, staged-viewpoint PPM evidence). **A**: 12 invisible thing types (63 spectres!), `fixed_atan2` octant compression, shredded magnified sprites, sky-to-sky walls, closed-door see-through seam, masked order. **B (0.28.6)**: drawseg depth clipping — near sprites no longer deleted by far portals, sprite x-ray gone, grate/sprite depth merge; +RC-W9 screen-edge endpoint re-anchor (the E1M7 stripe band). **0.28.5**: global `view_z` + real visplane pool — **world elevation renders**, flat bleed gone, `render_frame` **−24%** (2.35 ms). **C**: door-entombment reversal, trigger segment-spans, real use-ray, closed-portal sight/hitscan, missile spawn check + splash LOS, alloc-leak guards. **D**: the see-through gun (palette-0 ≠ transparent in post pixels), sky V screen-anchoring, flat V parity, projectile height/fullbright, 7 LOW leftovers. **Release cleanup**: RC-G6 AGNOS menu edge-latch, F-R6 fully retired (texture fill-mask — true grate transparency), L8-lite monster solidity; **AGNOS QEMU smoke PASS on the final binary** (v0.32.0 banner + WAD + 240-color TITLEPIC). vani-core vendored (`vendor/vani-core.cyr` 0.9.9, lock 100→34); pin 6.4.2→**6.4.30**. Tests **115/175** (+35 regression asserts this cut); binary 392,280 B (agnos 387,504 B). |
 
 ## v0.31.x — Playability, fidelity, sound-on-AGNOS, music

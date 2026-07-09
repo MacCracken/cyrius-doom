@@ -530,6 +530,34 @@ fn main() {
     assert_eq(mperc, 0, "percussion channel 15 takes no voice (v1)");
 
     # ============================================================
+    test_group("music: stop silences the mix (--audio-test isolation, 0.32.1)");
+    # ============================================================
+    # --audio-test used to also play music: load_map() calls music_start()
+    # (music_volume defaults to 8), and audio_tick()'s mixer adds
+    # music_render_sample() into every source sample. --audio-test now calls
+    # music_stop() first. Prove the mechanism: a playing voice renders sound
+    # (it WOULD mix in), and after music_stop() every sample is pure silence,
+    # so the SFX test is isolated.
+    music_init();
+    music_playing = 1;
+    music_wait = 1000000;              # freeze the sequencer (WAD-free)
+    music_note_on(0, 69, 127);
+    var iso_pk = 0;
+    for (var ii = 0; ii < 200; ii += 1) {
+        var isv = music_render_sample();
+        if (isv < 0) { isv = 0 - isv; }
+        if (isv > iso_pk) { iso_pk = isv; }
+    }
+    assert(iso_pk > 0, "playing music renders sound (would mix into audio_tick)");
+    music_stop();
+    assert_eq(music_playing, 0, "music_stop clears music_playing");
+    var iso_post = 0;
+    for (var ij = 0; ij < 200; ij += 1) {
+        if (music_render_sample() != 0) { iso_post += 1; }
+    }
+    assert_eq(iso_post, 0, "stopped music renders pure silence (audio-test SFX-only)");
+
+    # ============================================================
     # WAD tests require DOOM1.WAD — skip if not available
     # ============================================================
 

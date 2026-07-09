@@ -5,6 +5,31 @@ All notable changes to cyrius-doom will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.32.1] - 2026-07-08
+
+### Fixed
+
+**`--audio-test` was also playing music.** `load_map()` (which the self-tests run to
+prime the device + WAD caches) calls `music_start()`, and `music_volume` defaults to
+8, so E1M1's `D_E1M1` MUS track mixed into every `audio_tick()` of the SFX test
+(`audio_mix_chunk` sums `music_render_sample()` into each source sample). The two
+self-tests are now cleanly separated: **`--audio-test` calls `music_stop()` first**
+(clears `music_playing`, so `music_render_sample()` returns 0 → the six SFX + L/R pan
+pings play with no music underneath), and **`--music-test` calls `music_start()`** to
+re-arm the track from bar 1 and triggers no SFX in its loop — it is the music-focused
+counterpart. Log lines now say "(sfx only)" / "(music only)". Audio-path-only change:
+render/collision/boot untouched, so all render gates are byte-identical.
+
+Verified: new WAD-free regression group asserts the mechanism — a playing voice renders
+non-silent output (it *would* mix in), and after `music_stop()` every sample is pure
+silence. Tests **115→118** WAD-free / **175→178** full. `render_frame` 2.429 ms
+(variance — off the audio path); binary 392,280→**392,304 B** (agnos 387,504→387,528 B).
+Gates re-run under the pinned cyrius **6.4.30** (versioned binary; the local wrapper has
+drifted to 6.4.31): clean-from-scratch resolve+DCE, 4 fuzzers clean, 9-map PPM + 5
+menus, **AGNOS QEMU doom-smoke PASS on the final binary** (serial `cyrius-doom v0.32.1`
++ `wad loaded`, 240-color TITLEPIC). Audible confirmation on the jack is the user's run
+(the agent context can't open `/dev/snd`).
+
 ## [0.32.0] - 2026-07-08
 
 ### Fixed
