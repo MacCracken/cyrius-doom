@@ -60,6 +60,13 @@ fn win_open(title, w_hint, h_hint): i64 {
     if (win_w <= 0) { win_w = w_hint; }
     if (win_h <= 0) { win_h = h_hint; }
     if (shm_create(win_w, win_h) == 0) { return 0; }
+    # F2: prove the shm fd actually reached the compositor. A wl_shm.create_pool
+    # whose SCM_RIGHTS fd went missing triggers wl_display.error (-> wl_closed);
+    # roundtrip and check before reporting a working window, rather than showing
+    # a blank one and guessing.
+    wl_sync();
+    if (wl_dispatch() < 0) { return 0; }
+    if (wl_closed == 1) { return 0; }
     return 1;
 }
 
@@ -67,12 +74,13 @@ fn win_caps(win): i64 { return WIN_CAP_SHM; }
 fn win_fd(win): i64 { return wl_fd; }
 fn win_size_px(win, out16): i64 { store64(out16, win_w); store64(out16 + 8, win_h); return 0; }
 
-# CPU path: the writable XRGB8888 buffer the renderer blits into.
-fn win_present_begin(win): i64 { return shm_ptr; }
+# CPU path: pick + return the free back buffer to blit into (bite 2 double-buffer).
+fn win_present_begin(win): i64 { return shm_pick(); }
 
-# attach + damage + frame (throttle) + commit. x,y,w,h = damage rect (buffer px).
+# attach the buffer win_present_begin chose (shm_cur_oid) + damage + frame
+# (throttle) + commit, then mark it busy. x,y,w,h = damage rect (buffer px).
 fn win_present_commit(win, x, y, w, h): i64 {
-    store32(wl_sbuf + 8, wl_buf_oid);
+    store32(wl_sbuf + 8, shm_cur_oid());
     store32(wl_sbuf + 12, 0);
     store32(wl_sbuf + 16, 0);
     wire_hdr_put(wl_sbuf, wl_surf_oid, OP_SURFACE_ATTACH, 20);
@@ -87,7 +95,7 @@ fn win_present_commit(win, x, y, w, h): i64 {
     wl_frame_done = 0;
     wl__req1(wl_surf_oid, OP_SURFACE_FRAME, wl_frame_oid);
     wl__req0(wl_surf_oid, OP_SURFACE_COMMIT);
-    wl_buf_busy = 1;
+    shm_mark_busy();
     return 0;
 }
 
@@ -107,8 +115,11 @@ fn win_poll_events(win): i64 {
 }
 
 # Adopt the latest configured size: update win_w/win_h and refit the present
-# buffer. After this the caller recomputes scale/letterbox and repaints fully.
-# Returns 0, or -1 if the buffer refit failed.
+# buffer. Currently UNREACHED — bite 4 wires WIN_EV_RESIZE into input_poll_wayland.
+# When it does, the caller MUST, after a successful return: framebuf_wl_recompute()
+# (new scale/letterbox) THEN shm_fill(0) (re-black both buffers' bars at the new
+# geometry) BEFORE the first repaint — shm_resize rebuilds the wl_buffers but does
+# NOT re-fill, so stale bar pixels would smear otherwise. Returns 0, or -1 on refit fail.
 fn win_resize_apply(win): i64 {
     win_w = wl_cfg_w;
     win_h = wl_cfg_h;

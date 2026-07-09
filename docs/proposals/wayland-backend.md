@@ -1,12 +1,17 @@
 # Proposal — v0.33.0 native Wayland window backend (desktop rendering)
 
-> **Status**: **bite 1 landed** (2026-07-08, uncommitted) — the four platform files + seam are wired behind
-> `present_mode`; `--wayland` opens a window presenting the real integer-scaled frame with full keyboard
-> (movement/weapons/quit) and clean close. Regressions verified: `--ppm`/`--ppm-menu` byte-identical, tests
-> **129/189**, AGNOS QEMU PASS, fuzz + 9-map sweep clean. The window itself is **user-verified on Hyprland**
-> (no live compositor in the dev shell). A 4-lens adversarial review caught + fixed a `var x[N]`-is-BYTES
-> sizing bug (I had divided puka's stack-buffer sizes by 8 → overflow; see [[cyrius-var-array-is-bytes]]) and
-> the `input_flags`-hardcoded-0 menu lock (now fully wired). Bites 2–4 (double-buffer, resize, polish) remain.
+> **Status**: **bites 1 + 2 landed** (2026-07-08/09). Bite 1 (committed): the four platform files + seam wired
+> behind `present_mode`; `--wayland` opens a window presenting the real integer-scaled frame with full keyboard
+> (movement/weapons/quit) + clean close. Bite 2 (uncommitted): **double-buffering** — two wl_buffers ping-ponged
+> over one 2×-sized shm pool (`shm_pick`/`shm_cur_oid`/`shm_mark_busy`, per-buffer `wl_bbusy0/1`) so doom writes
+> the back buffer while the compositor samples the front — kills the single-buffer tearing; plus the **F2**
+> fd-reachability check (`win_open` roundtrips after `shm_create` and fails if the compositor rejects the pool).
+> Regressions: `--ppm`/`--ppm-menu` byte-identical, tests **129/189**, AGNOS byte-identical to bite 1's
+> QEMU-PASS binary (Wayland fully `#ifndef`'d). Bite-1 review caught + fixed a `var x[N]`-is-BYTES sizing bug
+> (see [[cyrius-var-array-is-bytes]]) + the `input_flags`-menu lock; bite-2 review returned clean (no bug). The
+> window/tearing are **user-verified on Hyprland** (no live compositor in the dev shell). Bites 3–4 (keyboard
+> polish already largely in bite 1; **resize** + `ping`/`pong`) remain — `shm_resize` exists but is unreached
+> until bite 4 wires `WIN_EV_RESIZE`, which must then re-run `framebuf_wl_recompute()` + `shm_fill(0)`.
 >
 > **Security follow-up (closeout)**: `wl__parse` only checks `size >= 8` before `wl__handle` reads
 > attacker-controlled string lengths (`wire_str_len`/`wire_str_next` on a `wl_registry.global`) — a malformed

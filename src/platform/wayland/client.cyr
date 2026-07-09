@@ -59,12 +59,24 @@ var wl_gn_comp = 0; var wl_gn_shm = 0; var wl_gn_xdg = 0; var wl_gn_seat = 0;
 var wl_gv_seat = 0;
 var wl_comp_oid = 0; var wl_shm_oid = 0; var wl_xdg_oid = 0; var wl_seat_oid = 0;
 var wl_surf_oid = 0; var wl_xsurf_oid = 0; var wl_top_oid = 0;
-var wl_buf_oid = 0; var wl_kbd_oid = 0; var wl_frame_oid = 0;
+var wl_kbd_oid = 0; var wl_frame_oid = 0;
+
+# Double-buffer ping-pong (bite 2): two wl_buffers over one 2x-sized shm pool,
+# so doom writes the back buffer while the compositor still samples the front
+# one — no tearing (single-buffer overwrote an in-flight buffer at 35 Hz).
+# shm.cyr sets the oids + pointers; the seam picks the free buffer each frame;
+# wl_buffer.release (below) clears the busy flag for whichever buffer the
+# compositor is done with. wl_boid0/1 = the two buffer object ids; wl_bbusy0/1
+# = in-use flags; wl_bcur = index (0/1) of the buffer the seam handed out this
+# frame (so present_commit attaches the same one it began).
+var wl_boid0 = 0; var wl_boid1 = 0;
+var wl_bbusy0 = 0; var wl_bbusy1 = 0;
+var wl_bcur = 0;
 
 # dispatch flags
 var wl_cur_sync = 0; var wl_sync_done = 0;
 var wl_configured = 0; var wl_cfg_w = 0; var wl_cfg_h = 0;
-var wl_closed = 0; var wl_buf_busy = 0; var wl_frame_done = 1; var wl_nglobals = 0;
+var wl_closed = 0; var wl_frame_done = 1; var wl_nglobals = 0;
 var wl_focus = 1;          # keyboard focus (0 after wl_keyboard.leave — bite 3 clears latches)
 
 # keyboard: a ring of (evdev_keycode, value, mods) records + the live mod mask.
@@ -296,7 +308,8 @@ fn wl__handle(o): i64 {
         if (op == EV_TOPLEVEL_CLOSE) { wl_closed = 1; }
         return 0;
     }
-    if (id == wl_buf_oid) { if (op == EV_BUFFER_RELEASE) { wl_buf_busy = 0; } return 0; }
+    if (id == wl_boid0) { if (op == EV_BUFFER_RELEASE) { wl_bbusy0 = 0; } return 0; }
+    if (id == wl_boid1) { if (op == EV_BUFFER_RELEASE) { wl_bbusy1 = 0; } return 0; }
     if (id == wl_seat_oid) {
         if (op == EV_SEAT_CAPS) {
             if ((load32(wl_rbuf + o + 8) & 2) != 0) {     # KEYBOARD capability
