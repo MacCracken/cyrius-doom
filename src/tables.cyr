@@ -42,6 +42,19 @@ fn p_random_range(n): i64 {
     return p_random() % n;
 }
 
+# First-octant arctangent: r is a 16.16 ratio in [0, 1.0], returns angle
+# units 0..128 (1024-unit circle). Quadratic minimax form
+#   atan(r) ~= (pi/4)r + 0.273 r (1 - r)      [max err ~0.0038 rad]
+# which is <= ~0.7 angle units — the previous diamond-angle interpolation
+# (linear in r) was off by up to ~11 units (~3.9 deg) mid-octant: monster
+# chase headings wobbled, and exact-aim rays whiffed past ~350 units
+# (lateral error > thing radius). 0.273 rad = 44.492 units = 2915838 in 16.16.
+fn atan_octant(r): i64 {
+    var quad = fixed_mul(r, 65536 - r);
+    var units = 128 * r + fixed_mul(2915838, quad);
+    return asr(units + 32768, 16);
+}
+
 fn tables_init(): i64 {
     sine_table = alloc(8192);
     viewangle_to_x = alloc(2560);
@@ -49,6 +62,23 @@ fn tables_init(): i64 {
 
     # Fixed seed: deterministic combat RNG (demo/test reproducibility).
     p_random_seed(0x13572468);
+
+    # Per-column view angle (vanilla xtoviewangle): the signed angle offset of
+    # screen column x from the view axis, atan((HALF_WIDTH - x) / PROJ_DIST)
+    # in 1024-circle units. Screen geometry is the fixed 320x200 / 90-deg-FOV
+    # projection (HALF_WIDTH = PROJ_DIST = 160; render.cyr's enums are not yet
+    # visible here — single-pass include order). Columns left of center get
+    # +0..+128, right of center -0..-128. Used by the sky mapper so sky
+    # columns advance at the same tan-projected rate as walls — a linear
+    # col->angle map made the sky slide against the world during turns.
+    for (var xa = 0; xa < 320; xa += 1) {
+        var dxa = 160 - xa;
+        var neg = 0;
+        if (dxa < 0) { neg = 1; dxa = 0 - dxa; }
+        var va = atan_octant((dxa << 16) / 160);
+        if (neg == 1) { va = 0 - va; }
+        store64(x_to_viewangle + xa * 8, va);
+    }
 
     # Build sine table using Bhaskara I approximation
     # First quadrant: indices 0..256 (0..90 degrees)
@@ -101,17 +131,17 @@ fn fixed_atan2(y, x): i64 {
         return ANG180;
     }
 
-    # Diamond-angle approximation over the first quadrant: exact at 0/45/90
-    # degrees, <= ~4 deg between. The coefficient must be 256 (a full quadrant
-    # is 256 units, so the diagonal is 128): with 128 each octant compressed to
-    # half its range (0..64 and 192..256), 65..191 was unreachable, and the
-    # result jumped 64->192 as ay crossed ax — wrong sprite rotation bands,
-    # off-course monster chase headings, and a 45-degree pan snap (RC-S4).
+    # First-quadrant angle via the minimax quadratic octant atan (atan_octant,
+    # <= ~0.7 unit error). Replaces the diamond-angle approximation whose
+    # mid-octant error reached ~11 units (~3.9 deg): monster chase headings
+    # wobbled and exact-aim hitscan rays missed 20-unit-radius targets beyond
+    # ~350 units (lateral error 27 units at 457 — the "shots don't register"
+    # component of the 0.33.0 field report). Octant fold: ratio min/max <= 1.
     var ang = 0;
     if (ax >= ay) {
-        ang = 256 * ay / (ax + ay);
+        ang = atan_octant(fixed_div(ay, ax));
     } else {
-        ang = 256 - 256 * ax / (ax + ay);
+        ang = 256 - atan_octant(fixed_div(ax, ay));
     }
 
     if (x < 0) {

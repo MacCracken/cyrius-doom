@@ -5,7 +5,7 @@ description = "DOOM in Cyrius — clean-room, direct framebuffer, no libc, just 
 license = "GPL-3.0-only"
 repository = "https://github.com/MacCracken/cyrius-doom"
 language = "cyrius"
-cyrius = "6.4.30"
+cyrius = "6.4.43"
 
 [build]
 src = "src/main.cyr"
@@ -34,7 +34,7 @@ stdlib = ["string", "alloc", "fmt", "vec", "str", "io", "fs", "args", "syscalls"
 # the shim → "dep vani requires 'yukti'" errors. Vendoring compiles just
 # the shim against doom's own stdlib list. Refresh: copy vani's
 # `dist/vani-core.cyr` on a vani release. Mirrors cyrius-polyomino/-bb.
-# (Provenance: vani 0.9.9.)
+# (Provenance: vani 1.0.0 — audio_* surface identical to 0.9.9.)
 
 # bsp — spatial geometry primitives. Consumed as a single-file vendor
 # (`lib/bsp.cyr`) produced from bsp's `dist/bsp.cyr` bundle. 1.1.1 added

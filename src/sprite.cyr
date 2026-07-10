@@ -84,6 +84,10 @@ fn sprite_build_lookup(): i64 {
     sprite_add_lookup(12, "PLAY");
     # Rocket-in-flight (synthetic projectile type, see things.cyr MissileConst).
     sprite_add_lookup(TTYPE_ROCKET_MISSILE, "MISL");
+    # Monster fireballs (0.33.1 ranged attacks). Baron balls (BAL7) are not
+    # in the shareware WAD, so barons stay melee-only.
+    sprite_add_lookup(TTYPE_IMP_FIREBALL, "BAL1");
+    sprite_add_lookup(TTYPE_CACO_FIREBALL, "BAL2");
     # 2026-07-08 audit RC-S3: these 12 shareware types spawned and functioned
     # (things.cyr knows them) but had no lookup entry, so they were INVISIBLE —
     # including 63 attacking spectres across E1M3-M9. Spectre renders as a

@@ -68,21 +68,41 @@ fn render_load_sky(): i64 {
 # behavior) sheared the sky vertically wherever wall tops varied, and made
 # it ride up and down with the geometry. Absolute anchoring also keeps
 # stacked sky bands in one column (ceiling sky + a sky-to-sky portal band)
-# continuous for free. Horizontal mapping: full turn = FOUR texture wraps
-# (DOOM ANGLETOSKYSHIFT), one screen width = one wrap (F-R2); the per-column
-# term is linear rather than tan-distributed — the remaining (subtle) F09
-# parity gap.
+# continuous for free.
+#
+# U (0.33.1, closes the F09 parity gap): vanilla maps each column's WORLD
+# angle to the sky — angle = viewangle + xtoviewangle[x], full turn = FOUR
+# texture wraps (DOOM ANGLETOSKYSHIFT, F-R2). The old per-column term was
+# LINEAR in col; walls project tan-style, so near the screen edges a turn
+# sweeps wall columns up to ~2x faster than a linear sky — the mountains
+# slid against the world on every turn ("sky moves with the view instead of
+# staying locked", 0.33.0 field report). x_to_viewangle (tables.cyr) is the
+# projection-matched atan offset, so the sky is world-anchored per column.
+#
+# V (0.33.1): 1:1 texel-per-pixel from screen row 0 — vanilla's
+# skytexturemid=100 at centery=100 with FRACUNIT iscale reduces to
+# texture row == screen row at 320x200. The old sky_h/HALF_HEIGHT step
+# squeezed all 128 sky rows into the top 100 screen rows, pushing the
+# mountain band ~28% too high ("mountains higher than they should be").
+# Rows past sky_h wrap in render_draw_tex_column, like vanilla tiling.
+# Sky texture U for screen column col of a sky_w-wide texture: the column's
+# WORLD angle (view_angle + x_to_viewangle[col]) at the 4-wraps-per-turn
+# rate. Factored out of render_draw_sky_column so the WAD-free tests can
+# assert the world-anchoring invariants directly.
+fn render_sky_u(col, sky_w): i64 {
+    var u = ((view_angle + load64(x_to_viewangle + col * 8)) * sky_w * 4 / ANG360) % sky_w;
+    if (u < 0) { u += sky_w; }
+    return u;
+}
+
 fn render_draw_sky_column(col, y1, y2): i64 {
     if (sky_tex_idx < 0) { return 0; }
     var sky_w = load64(tex_table + sky_tex_idx * TEX_ENTRY_SIZE + 8);
     var sky_h = load64(tex_table + sky_tex_idx * TEX_ENTRY_SIZE + 16);
     if (sky_w <= 0) { return 0; }
     if (sky_h <= 0) { return 0; }
-    var sky_col = (view_angle * sky_w * 4 / ANG360 + col * sky_w / SCREEN_WIDTH) % sky_w;
-    if (sky_col < 0) { sky_col += sky_w; }
-    var sky_step = fixed_div(sky_h << 16, HALF_HEIGHT << 16);
-    render_draw_tex_column(col, y1, y2, sky_tex_idx, sky_col,
-    y1 * sky_step, sky_step, 0);
+    render_draw_tex_column(col, y1, y2, sky_tex_idx, render_sky_u(col, sky_w),
+    y1 << 16, FIXED_ONE, 0);
     return 0;
 }
 

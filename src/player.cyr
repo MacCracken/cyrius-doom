@@ -103,42 +103,32 @@ fn player_init(): i64 {
 # Walk the BSP tree to find the subsector containing the player,
 # then get the sector from the first seg's linedef/sidedef.
 
+# BSP descend generalized into map_point_sector (map.cyr, 0.33.1) so monster
+# movement can resolve its own floor height; this keeps the player-shaped ABI.
 fn player_find_sector(): i64 {
-    if (map_num_nodes == 0) { return 0; }
-
-    var node_idx = map_num_nodes - 1;
-
-    # Walk BSP to leaf (via the bsp library — same 112-byte layout).
-    while (bsp_is_subsector(node_idx) == 0) {
-        var side = bsp_point_on_side(map_nodes, node_idx, player_x, player_y);
-        if (side == 0) {
-            node_idx = bsp_node_child_r(map_nodes, node_idx);
-        } else {
-            node_idx = bsp_node_child_l(map_nodes, node_idx);
-        }
-    }
-
-    # Got a subsector -- find sector from first seg
-    var ss_idx = bsp_subsector_idx(node_idx);
-    var first_seg = map_ssector_first(ss_idx);
-    var line_idx = map_seg_linedef(first_seg);
-    var seg_side = map_seg_side(first_seg);
-
-    var sidedef_idx = map_linedef_side_right(line_idx);
-    if (seg_side == 1) {
-        sidedef_idx = map_linedef_side_left(line_idx);
-    }
-    if (sidedef_idx < 0) { return 0; }
-
-    return map_sidedef_sector(sidedef_idx);
+    return map_point_sector(player_x, player_y);
 }
 
 # ================================================================
 # Collision detection
 # ================================================================
 # Uses BLOCKMAP when available for O(1) cell lookup, falls back to brute-force.
+#
+# 0.33.1: generalized to carry the MOVER's current position + floor height.
+# Two field bugs shared this core: (1) the step check compared ledge floors
+# against the PLAYER's z for every mover, so monster chases froze near any
+# ledge whenever the player stood on different ground; (2) after a drop-off
+# the player z-snapped to the low floor while still inside the ledge line's
+# radius, and every subsequent move re-failed the step check — locked in
+# place in all 8 directions (the armor-platform wedge).
 
+# Player wrapper — original ABI, player context (drop-offs allowed: players
+# can walk off any ledge, like vanilla).
 fn player_check_position(nx, ny): i64 {
+    return move_check_position(player_x, player_y, fixed_to_int(player_z), nx, ny, 1);
+}
+
+fn move_check_position(cx, cy, cfloor, nx, ny, allow_drop): i64 {
     var radius = PLAYER_RADIUS;
 
     # Use BLOCKMAP if loaded
@@ -189,7 +179,7 @@ fn player_check_position(nx, ny): i64 {
                     if (li == 0xFFFF) { break; }
                     if (li >= 0x8000) { break; }
                     if (li < map_num_linedefs) {
-                        var ok = player_check_linedef(nx, ny, radius, li);
+                        var ok = move_check_linedef(cx, cy, cfloor, nx, ny, radius, li, allow_drop);
                         if (ok == 0) { return 0; }
                     }
                     ptr += 2;
@@ -202,14 +192,19 @@ fn player_check_position(nx, ny): i64 {
 
     # Fallback: brute-force all linedefs
     for (var i = 0; i < map_num_linedefs; i += 1) {
-        var ok = player_check_linedef(nx, ny, radius, i);
+        var ok = move_check_linedef(cx, cy, cfloor, nx, ny, radius, i, allow_drop);
         if (ok == 0) { return 0; }
     }
     return 1;
 }
 
 # Check a single linedef for collision. Returns 1 if OK, 0 if blocked.
-fn player_check_linedef(nx, ny, radius, i): i64 {
+# (cx, cy) is the mover's CURRENT position, cfloor its current floor height
+# in integer map units; (nx, ny) the move destination. allow_drop=0 adds the
+# vanilla monster rule: refuse moves over a ledge falling more than
+# PLAYER_MAX_STEP (P_TryMove's MF_DROPOFF check) — monsters hold ledges,
+# players may walk off.
+fn move_check_linedef(cx, cy, cfloor, nx, ny, radius, i, allow_drop): i64 {
     var flags = map_linedef_flags(i);
 
     # One-sided solid walls are handled at the distance test below: in the
@@ -247,14 +242,48 @@ fn player_check_linedef(nx, ny, radius, i): i64 {
     var t = fixed_div(dot, len_sq);
     t = fixed_clamp(t, 0, FIXED_ONE);
 
-    # Closest point on segment
-    var cx = lx1 + fixed_mul(t, ldx);
-    var cy = ly1 + fixed_mul(t, ldy);
+    # Closest point on segment (to the destination)
+    var cx2 = lx1 + fixed_mul(t, ldx);
+    var cy2 = ly1 + fixed_mul(t, ldy);
 
-    # Distance from player to closest point
-    var dist = fixed_approx_dist(nx - cx, ny - cy);
+    # Distance from the move destination to the closest point on the line
+    var dist = fixed_approx_dist(nx - cx2, ny - cy2);
 
     if (dist < radius) {
+        # Escape rule (0.33.1 drop-off wedge), PLAYER-ONLY (allow_drop==1):
+        # if the mover's CURRENT position already violates this line's radius
+        # — e.g. the z-snap after walking off a ledge leaves the player at
+        # the low floor still inside the ledge line's 16-unit standoff — the
+        # line may only veto moves that actually CROSS it. Blocking same-side
+        # moves too left no legal move in any direction: permanently wedged
+        # at the base of the platform. Vanilla never wedges here because
+        # tmfloorz keeps the mover at the HIGH floor until its box fully
+        # clears the ledge line. Monsters do NOT get the escape: vanilla
+        # P_TryMove is dest-only, so a monster inside a ledge line's radius
+        # (e.g. spawned on a narrow pier) is dropoff-pinned — it holds the
+        # ledge and fights from there rather than creeping over the lip.
+        if (allow_drop == 1) {
+            var cpdx = cx - lx1;
+            var cpdy = cy - ly1;
+            var cdot = fixed_mul(asr(cpdx, 8), asr(ldx, 8)) + fixed_mul(asr(cpdy, 8), asr(ldy, 8));
+            var ct = fixed_div(cdot, len_sq);
+            ct = fixed_clamp(ct, 0, FIXED_ONE);
+            var ccx = lx1 + fixed_mul(ct, ldx);
+            var ccy = ly1 + fixed_mul(ct, ldy);
+            var cdist = fixed_approx_dist(cx - ccx, cy - ccy);
+            if (cdist < radius) {
+                var side_c = fixed_mul(asr(cx - lx1, 8), asr(ldy, 8)) - fixed_mul(asr(cy - ly1, 8), asr(ldx, 8));
+                var side_n = fixed_mul(asr(nx - lx1, 8), asr(ldy, 8)) - fixed_mul(asr(ny - ly1, 8), asr(ldx, 8));
+                var crossing = 0;
+                if (side_c > 0 && side_n < 0) { crossing = 1; }
+                if (side_c < 0 && side_n > 0) { crossing = 1; }
+                # Same-side move while already inside the radius: always
+                # legal — it's the only way back out. Crossing falls through
+                # to the normal veto checks below.
+                if (crossing == 0) { return 1; }
+            }
+        }
+
         # Blocking line -- reject this position
         if ((flags & ML_BLOCKING) != 0) { return 0; }
 
@@ -264,7 +293,7 @@ fn player_check_linedef(nx, ny, radius, i): i64 {
         if ((flags & ML_TWOSIDED) == 0) { return 0; }
         if (map_linedef_side_left(i) < 0) { return 0; }
 
-        # Two-sided: check if player can step over height difference
+        # Two-sided: check if the mover can step over the height difference
         if ((flags & ML_TWOSIDED) != 0) {
             var right_side = map_linedef_side_right(i);
             var left_side = map_linedef_side_left(i);
@@ -274,14 +303,27 @@ fn player_check_linedef(nx, ny, radius, i): i64 {
                 var rf = map_sector_floorh(rs);
                 var lf = map_sector_floorh(ls);
 
-                # Can't step up more than 24 units
-                var step = lf - rf;
-                if (step < 0) { step = -step; }
-                var player_floor = fixed_to_int(player_z);
+                # Can't step up more than 24 units. Height reference is the
+                # MOVER's floor (cfloor) — this used to read player_z for
+                # every mover, so a monster's chase move near a ledge was
+                # judged against the PLAYER's height: monsters froze in
+                # place whenever the player stood on lower/higher ground
+                # ("enemies not alive", 0.33.0 field report).
                 var target_floor = rf;
                 if (lf > rf) { target_floor = lf; }
-                if (target_floor - player_floor > PLAYER_MAX_STEP) {
+                if (target_floor - cfloor > PLAYER_MAX_STEP) {
                     return 0;
+                }
+
+                # Monsters refuse drop-offs deeper than a step (vanilla
+                # MF_DROPOFF rule): without this, un-freezing monster
+                # movement would let chasers plunge off any platform.
+                if (allow_drop == 0) {
+                    var min_floor = rf;
+                    if (lf < min_floor) { min_floor = lf; }
+                    if (cfloor - min_floor > PLAYER_MAX_STEP) {
+                        return 0;
+                    }
                 }
 
                 # Can't fit under ceiling
@@ -604,6 +646,11 @@ fn player_tick(): i64 {
         if (player_try_fire() == 1) {
             weapon_fire();
             player_hitscan();
+            # Gunfire wakes monsters that HEAR it (vanilla P_NoiseAlert):
+            # sound floods through open portals from the firing sector, so
+            # sight-blocked monsters (e.g. behind E1M1's barred window) come
+            # hunting instead of dozing through the barrage (0.33.1).
+            things_noise_alert(player_x, player_y);
             # Weapon sound
             if (player_weapon == 2) { sound_pistol(); audio_play_name("DSPISTOL"); }
             if (player_weapon == 3) { sound_shotgun(); audio_play_name("DSSHOTGN"); }

@@ -188,6 +188,55 @@ fn main() {
     assert(at_hi - at_lo <= 2, "atan2 continuous across the diagonal (was a 128-unit jump)");
 
     # ============================================================
+    test_group("fixed_atan2: minimax accuracy (0.33.1)");
+    # ============================================================
+    # The diamond-angle approximation was off by up to ~11 units (~3.9 deg)
+    # mid-octant: exact-aim hitscan rays whiffed 20-unit-radius monsters past
+    # ~350 units (lateral error grows with range — the "shots don't register"
+    # component of the 0.33.0 field report) and chase headings wobbled. The
+    # quadratic minimax octant atan is within ~1 unit everywhere.
+    # Ground truth: atan2(399,-116) = 106.20 deg = 302.1 units (diamond: 313).
+    var aa = fixed_atan2(399 << 16, 0 - (116 << 16));
+    assert(aa >= 301, "atan2(399,-116) >= 301 (true 302; diamond gave 313)");
+    assert(aa <= 303, "atan2(399,-116) <= 303");
+    # atan(1/2) = 26.57 deg = 75.6 units.
+    var ab = fixed_atan2(1 << 16, 2 << 16);
+    assert(ab >= 75, "atan2(1,2) >= 75 (true 75.6)");
+    assert(ab <= 76, "atan2(1,2) <= 76");
+    # atan(1/5) = 11.31 deg = 32.2 units.
+    var ac = fixed_atan2(1 << 16, 5 << 16);
+    assert(ac >= 31, "atan2(1,5) >= 31 (true 32.2)");
+    assert(ac <= 33, "atan2(1,5) <= 33");
+
+    # ============================================================
+    test_group("sky: world-anchored U mapping (0.33.1)");
+    # ============================================================
+    # x_to_viewangle = projection-matched per-column view-angle offsets
+    # (vanilla xtoviewangle): +45 deg at col 0, 0 at center, -45 deg at 319.
+    assert_eq(load64(x_to_viewangle), 128, "col 0 offset = +128 units (+45 deg)");
+    assert_eq(load64(x_to_viewangle + 160 * 8), 0, "center col offset = 0");
+    var e319 = load64(x_to_viewangle + 319 * 8);
+    assert(e319 <= 0 - 126, "col 319 offset <= -126 (~-45 deg)");
+    assert(e319 >= 0 - 128, "col 319 offset >= -128");
+    # Wrap: +256 view-angle units (90 deg) = exactly one 256-wide sky width
+    # at DOOM's 4-wraps-per-turn rate.
+    view_angle = 100;
+    var u80 = render_sky_u(80, 256);
+    view_angle = 356;
+    assert_eq(render_sky_u(80, 256), u80, "sky U invariant under va+256 (wrap)");
+    # World anchoring: U depends only on va + x_to_viewangle[col], so the sky
+    # texel under a fixed WORLD direction stays put as the view turns. The
+    # old linear col term panned sky features AGAINST the wall projection
+    # ("mountains move with the view", 0.33.0 field report).
+    var o60 = load64(x_to_viewangle + 60 * 8);
+    var o250 = load64(x_to_viewangle + 250 * 8);
+    view_angle = 100;
+    var u60 = render_sky_u(60, 256);
+    view_angle = 100 + o60 - o250;
+    assert_eq(render_sky_u(250, 256), u60, "sky U world-anchored across a turn");
+    view_angle = 0;
+
+    # ============================================================
     test_group("combat: RNG (p_random)");
     # ============================================================
     # Deterministic LCG: same seed reproduces the sequence; bytes stay 0..255.
@@ -363,6 +412,65 @@ fn main() {
     assert(thing_x(0) < mx0, "chaser moves toward the player on open ground");
     assert(thing_x(0) > 190 << 16, "chaser steps ~1 unit/tick (not teleporting)");
     assert_eq(thing_state(0), STATE_CHASE, "still chasing (200u > attack range)");
+
+    # ============================================================
+    test_group("combat: ranged attacks (0.33.1)");
+    # ============================================================
+    # Monsters used to have ONLY melee (attack armed under 64 units): any
+    # enemy that couldn't path to the player stood inert forever — the
+    # "enemies not reactionary" field report. Zombiemen now hitscan and
+    # imps throw BAL1 fireballs, vanilla-style (distance-rolled arm, LOS
+    # re-check at release, cooldown in aux).
+    p_random_seed(0x13572468);
+    thing_count = 0;
+    var rz = things;                          # zombieman 600 units east
+    store64(rz, 600 << 16); store64(rz + 8, 0);
+    store64(rz + 32, TTYPE_ZOMBIEMAN); store64(rz + 40, STATE_CHASE); store64(rz + 48, 20);
+    store64(rz + 56, CAT_MONSTER); store64(rz + 80, 20 << 16);
+    store64(rz + 104, TF_ACTIVE | TF_SOLID | TF_SHOOTABLE); store64(rz + 112, 0);
+    store64(rz + 120, 0);
+    thing_count = 1;
+    player_x = 0; player_y = 0; player_health = 100; player_armor = 0;
+    for (var rt = 0; rt < 400; rt += 1) { things_tick(); }
+    # 400 ticks closes at most ~400 units: still 200+ away, melee impossible.
+    assert(player_health < 100, "zombieman hitscans at range (was melee-only stasis)");
+
+    p_random_seed(0x13572468);
+    thing_count = 0;
+    var ri = things;                          # imp 600 units east
+    store64(ri, 600 << 16); store64(ri + 8, 0);
+    store64(ri + 32, TTYPE_IMP); store64(ri + 40, STATE_CHASE); store64(ri + 48, 60);
+    store64(ri + 56, CAT_MONSTER); store64(ri + 80, 20 << 16);
+    store64(ri + 104, TF_ACTIVE | TF_SOLID | TF_SHOOTABLE); store64(ri + 112, 0);
+    store64(ri + 120, 0);
+    thing_count = 1;
+    player_x = 0; player_y = 0; player_health = 100; player_armor = 0;
+    var saw_ball = 0;
+    for (var rt2 = 0; rt2 < 400; rt2 += 1) {
+        things_tick();
+        for (var rb = 0; rb < thing_count; rb += 1) {
+            if (thing_type(rb) == TTYPE_IMP_FIREBALL) {
+                if ((thing_flags(rb) & TF_ACTIVE) != 0) { saw_ball = 1; }
+            }
+        }
+    }
+    assert_eq(saw_ball, 1, "imp throws a BAL1 fireball (projectile spawned in flight)");
+    assert(player_health < 100, "imp fireball connects (owner-immune, hits the player)");
+
+    # Melee-only monsters gained nothing: a demon at range stays quiet.
+    p_random_seed(0x13572468);
+    thing_count = 0;
+    var rd = things;
+    store64(rd, 600 << 16); store64(rd + 8, 0);
+    store64(rd + 32, TTYPE_DEMON); store64(rd + 40, STATE_CHASE); store64(rd + 48, 150);
+    store64(rd + 56, CAT_MONSTER); store64(rd + 80, 30 << 16);
+    store64(rd + 104, TF_ACTIVE | TF_SOLID | TF_SHOOTABLE); store64(rd + 112, 0);
+    store64(rd + 120, 0);
+    thing_count = 1;
+    player_x = 0; player_y = 0; player_health = 100; player_armor = 0;
+    for (var rt3 = 0; rt3 < 300; rt3 += 1) { things_tick(); }
+    assert_eq(player_health, 100, "demon (melee-only) cannot hurt from 300+ units");
+    thing_count = 0;
 
     # ============================================================
     test_group("combat: spent barrel is not a bullet shield (F-G5)");
@@ -756,6 +864,97 @@ fn main() {
             sweep_d = sweep_d + (64 << 16);
         }
         assert(blk > 0, "collision blocks on the spawn sweep (not walk-through-walls)");
+
+        # ============================================================
+        test_group("collision: drop-off wedge escape (0.33.1)");
+        # ============================================================
+        # Field repro: walking off the armor-walkway ledge (112-unit drop,
+        # landing at (72,-3083) on the -8 nukage floor) left the player
+        # inside the ledge line's radius; every move then re-failed the
+        # step-up check — locked in place in all 8 directions. The escape
+        # rule (move_check_linedef) allows same-side moves when the current
+        # position already violates the line; only the crossing back into
+        # the tall ledge stays vetoed.
+        player_x = 72 << 16;
+        player_y = 0 - (3083 << 16);
+        player_z = 0 - (8 << 16);
+        var free_dirs = 0;
+        var wd = 0;
+        while (wd < 8) {
+            var wang = wd * 128;
+            var wmx = fixed_mul(fixed_cos(wang), PLAYER_WALK_SPEED);
+            var wmy = fixed_mul(fixed_sin(wang), PLAYER_WALK_SPEED);
+            if (player_check_position(player_x + wmx, player_y + wmy) == 1) { free_dirs += 1; }
+            wd += 1;
+        }
+        assert(free_dirs >= 6, "post-drop position escapable (was 0/8 directions free)");
+        assert(free_dirs <= 7, "crossing back into the 112-unit ledge still vetoed");
+
+        # ============================================================
+        test_group("collision: monster moves use the MONSTER's floor (0.33.1)");
+        # ============================================================
+        # The wall pass step check used to read player_z for every mover:
+        # monsters near ledges froze or un-froze depending on where the
+        # PLAYER stood. An imp on the narrow zigzag pier at (3390,-3461)
+        # (floor 96, inside the radius of edge line 201 over the -48 room
+        # floor) is dropoff-pinned — vanilla MF_DROPOFF semantics — and the
+        # verdict must NOT change when player_z does. Pre-fix, raising the
+        # player to z=104 made the step check read 96-104 < 24 and the imp
+        # could stroll off the 144-unit cliff.
+        thing_count = 0;
+        var tmv = things;
+        store64(tmv, 3390 << 16); store64(tmv + 8, 0 - (3461 << 16));
+        store64(tmv + 32, TTYPE_IMP); store64(tmv + 40, STATE_CHASE); store64(tmv + 48, 60);
+        store64(tmv + 56, CAT_MONSTER); store64(tmv + 80, 20 << 16);
+        store64(tmv + 104, TF_ACTIVE | TF_SOLID | TF_SHOOTABLE); store64(tmv + 112, 0);
+        thing_count = 1;
+        player_x = 3100 << 16; player_y = 0 - (3400 << 16);
+        player_z = 0 - (24 << 16);
+        assert_eq(thing_move_clear(0, thing_x(0) - 65536, thing_y(0)), 0,
+            "pier imp refuses the west ledge (vanilla MF_DROPOFF)");
+        player_z = 104 << 16;
+        assert_eq(thing_move_clear(0, thing_x(0) - 65536, thing_y(0)), 0,
+            "west verdict invariant under player_z (pre-fix: walked off the cliff)");
+        # Open ground far from any ledge line: a chase step is legal and
+        # equally player_z-invariant (pre-fix a LOW player froze HIGH-ground
+        # monsters this way).
+        store64(tmv, 2000 << 16); store64(tmv + 8, 0 - (3300 << 16));
+        assert_eq(thing_move_clear(0, thing_x(0) + 65536, thing_y(0)), 1,
+            "open-ground chase step legal");
+        player_z = 0 - (300 << 16);
+        assert_eq(thing_move_clear(0, thing_x(0) + 65536, thing_y(0)), 1,
+            "open-ground verdict invariant under player_z");
+        thing_count = 0;
+
+        # ============================================================
+        test_group("noise alert wakes sound-connected monsters (0.33.1)");
+        # ============================================================
+        # Vanilla P_NoiseAlert: gunfire floods sound through open portals and
+        # stops at closed doors. E1M1's computer-room zombiemen are
+        # 2D-sight-blocked behind the barred window, so before this they
+        # ignored any amount of gunfire ("enemies not alive / shots don't
+        # register" field report). 5 of the 6 HMP monsters are in door-free
+        # sound range of the spawn; the southern-room imp (sector 74) is
+        # behind the closed staircase door and correctly sleeps through it
+        # (python BFS over the WAD's open portals confirms 74 unreachable).
+        game_skill = 3;
+        things_spawn_from_map();
+        var idle0 = 0;
+        for (var nm = 0; nm < thing_count; nm += 1) {
+            if (thing_category(nm) == CAT_MONSTER && thing_state(nm) == STATE_SPAWN) { idle0 += 1; }
+        }
+        assert_eq(idle0, 6, "HMP E1M1 spawns 6 idle monsters");
+        things_noise_alert(player_start_x(), player_start_y());
+        var woke = 0;
+        var asleep = 0;
+        for (var nw = 0; nw < thing_count; nw += 1) {
+            if (thing_category(nw) != CAT_MONSTER) { continue; }
+            if (thing_state(nw) == STATE_SEE) { woke += 1; }
+            if (thing_state(nw) == STATE_SPAWN) { asleep += 1; }
+        }
+        assert_eq(woke, 5, "one shot at spawn wakes the 5 door-free monsters");
+        assert_eq(asleep, 1, "the closed south door keeps its imp asleep (vanilla)");
+        things_spawn_from_map();
 
         # ============================================================
         test_group("rendering");

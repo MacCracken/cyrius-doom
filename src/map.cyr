@@ -59,6 +59,7 @@ enum MapLineFlag {
     ML_DONTPEGTOP = 8;
     ML_DONTPEGBOTTOM = 16;
     ML_SECRET = 32;
+    ML_SOUNDBLOCK = 64;
     ML_DONTDRAW = 128;
     ML_MAPPED = 256;
 }
@@ -445,4 +446,31 @@ fn map_print_stats(): i64 {
     var n = fmt_sprintf(&sb, 96, "map: V=%d L=%d SD=%d S=%d SG=%d SS=%d N=%d T=%d", args);
     sakshi_info(&sb, n);
     return 0;
+}
+
+# Sector containing world point (px, py): BSP descend to the leaf subsector,
+# then resolve the sector through the first seg's sidedef. Generalized from
+# player_find_sector (0.33.1) so monster movement can resolve the MOVER's own
+# floor height — the collision step check used to read the player's z for
+# every mover, freezing chases near ledges whenever the player stood on
+# different ground.
+fn map_point_sector(px, py): i64 {
+    if (map_num_nodes == 0) { return 0; }
+    var node_idx = map_num_nodes - 1;
+    while (bsp_is_subsector(node_idx) == 0) {
+        if (bsp_point_on_side(map_nodes, node_idx, px, py) == 0) {
+            node_idx = bsp_node_child_r(map_nodes, node_idx);
+        } else {
+            node_idx = bsp_node_child_l(map_nodes, node_idx);
+        }
+    }
+    var ss_idx = bsp_subsector_idx(node_idx);
+    var first_seg = map_ssector_first(ss_idx);
+    var line_idx = map_seg_linedef(first_seg);
+    var sidedef_idx = map_linedef_side_right(line_idx);
+    if (map_seg_side(first_seg) == 1) {
+        sidedef_idx = map_linedef_side_left(line_idx);
+    }
+    if (sidedef_idx < 0) { return 0; }
+    return map_sidedef_sector(sidedef_idx);
 }

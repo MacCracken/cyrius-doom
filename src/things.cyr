@@ -107,9 +107,11 @@ enum ThingCat {
 #  96: tics (countdown for state transitions)
 # 104: flags (active, solid, shootable, etc.)
 # 112: frame (sprite animation frame, 0=A, 1=B, ...)
+# 120: aux (0.33.1 — monsters: ranged-attack cooldown tics;
+#      projectiles: owner thing idx, -1 = the player)
 
 enum ThingLayout {
-    THING_SIZE = 120;
+    THING_SIZE = 128;
     THING_MAX = 512;
 }
 var things = 0;
@@ -126,6 +128,17 @@ enum ThingFlags {
     TF_PICKUP = 8;
     TF_MISSILE = 16;
     TF_CORPSE = 32;
+}
+
+# Ranged-attack constants (0.33.1). Declared before thing_ai_tick — enum
+# members resolve lexically in the single-pass compile.
+enum RangedConst {
+    TTYPE_IMP_FIREBALL = 9998;    # synthetic types (not DoomEd numbers)
+    TTYPE_CACO_FIREBALL = 9997;
+    FIREBALL_SPEED = 655360;      # 10 map units/tic, << 16 (vanilla ball speed)
+    MISSILE_RANGE = 134217728;    # 2048 units, << 16 — max ranged-arm distance
+    RANGED_RETRY_TICS = 8;        # failed distance-roll: re-roll ~4x/s
+    RANGED_COOLDOWN_TICS = 35;    # base refractory after a release (~1 s)
 }
 
 # Field accessors
@@ -146,6 +159,8 @@ fn thing_set_tics(idx, t): i64 { store64(things + idx * THING_SIZE + 96, t); ret
 fn thing_set_flags(idx, f): i64 { store64(things + idx * THING_SIZE + 104, f); return 0; }
 fn thing_frame(idx): i64 { return load64(things + idx * THING_SIZE + 112); }
 fn thing_set_frame(idx, f): i64 { store64(things + idx * THING_SIZE + 112, f); return 0; }
+fn thing_aux(idx): i64 { return load64(things + idx * THING_SIZE + 120); }
+fn thing_set_aux(idx, v): i64 { store64(things + idx * THING_SIZE + 120, v); return 0; }
 fn thing_set_x(idx, v): i64 { store64(things + idx * THING_SIZE, v); return 0; }
 fn thing_set_y(idx, v): i64 { store64(things + idx * THING_SIZE + 8, v); return 0; }
 fn thing_set_angle(idx, v): i64 { store64(things + idx * THING_SIZE + 24, v); return 0; }
@@ -336,6 +351,7 @@ fn things_spawn_from_map(): i64 {
         store64(base + 88, 56 << 16);
         store64(base + 96, 0);
         store64(base + 112, 0);
+        store64(base + 120, 0);
         # Corpse decor spawns on its corpse frame (RC-S3): dead marine (15) =
         # PLAY N, gibbed marine (10/12) = PLAY W. Decor never animates, so the
         # spawn frame is the displayed frame — without this, 10/12 rendered as
@@ -498,14 +514,27 @@ fn thing_animate(idx): i64 {
     return 0;
 }
 
-# Can a monster occupy (nx, ny)? Walls via player_check_position, PLUS
+# Can a monster occupy (nx, ny)? Walls via move_check_position, PLUS
 # thing-vs-thing and thing-vs-player solidity (RC-G8/L8-lite): monsters used
 # to test walls only, so chasers stacked into one blob and walked into the
 # player's space (melee from inside your face). AABB overlap on radii, like
 # vanilla P_CheckPosition's thing pass. Melee is unaffected: blocking engages
 # at radius-sum (~36 units), inside MONSTER_MELEE_RANGE (64).
+#
+# 0.33.1: the wall pass carries the MONSTER's own position + floor height
+# (was player_check_position, whose step check read player_z — chases froze
+# near any ledge whenever the player stood on different ground), with
+# allow_drop=0: vanilla monsters never walk off a >24-unit ledge.
 fn thing_move_clear(self_idx, nx, ny): i64 {
-    if (player_check_position(nx, ny) == 0) { return 0; }
+    var mcx = thing_x(self_idx);
+    var mcy = thing_y(self_idx);
+    # Hermetic guard: the WAD-free tests run combat with no map loaded —
+    # map_sectors is null there, so only resolve the floor when sectors exist.
+    var mfloor = 0;
+    if (map_num_sectors > 0) {
+        mfloor = map_sector_floorh(map_point_sector(mcx, mcy));
+    }
+    if (move_check_position(mcx, mcy, mfloor, nx, ny, 0) == 0) { return 0; }
     var self_r = thing_radius(self_idx);
     for (var i = 0; i < thing_count; i += 1) {
         if (i == self_idx) { continue; }
@@ -619,16 +648,46 @@ fn thing_ai_tick(idx): i64 {
             thing_set_state(idx, STATE_ATTACK);
             thing_set_tics(idx, 15);
         } else {
-            # Lost sight? Give up after a grace window. Visible-but-not-in-range
-            # resets the timer.
-            if (sight == 0) {
-                var tics = thing_tics(idx);
-                thing_set_tics(idx, tics + 1);
-                if (tics > 100) {
-                    thing_set_state(idx, STATE_SPAWN);
+            # Ranged arm (0.33.1): a visible player beyond melee range draws
+            # fire from hitscan/fireball monsters. aux paces the attempts —
+            # it counts down each chase tick; at 0 a vanilla-style distance
+            # roll decides (P_CheckMissileRange: farther = less likely),
+            # re-rolling every RANGED_RETRY_TICS. The release itself sets the
+            # full cooldown. Without any of this, monsters could only melee:
+            # anything that couldn't path to the player (ledge imps, enemies
+            # across a pit) stood inert forever ("not reactionary").
+            var armed = 0;
+            if (sight == 1 && dist < MISSILE_RANGE) {
+                if (thing_is_ranged(thing_type(idx)) == 1) {
+                    var cool = thing_aux(idx);
+                    if (cool > 0) {
+                        thing_set_aux(idx, cool - 1);
+                    } else {
+                        var mchance = fixed_to_int(dist) - 64;
+                        if (mchance < 0) { mchance = 0; }
+                        if (mchance > 200) { mchance = 200; }
+                        if (p_random() >= mchance) {
+                            thing_set_state(idx, STATE_ATTACK);
+                            thing_set_tics(idx, 15);
+                            armed = 1;
+                        } else {
+                            thing_set_aux(idx, RANGED_RETRY_TICS);
+                        }
+                    }
                 }
-            } else {
-                thing_set_tics(idx, 0);
+            }
+            if (armed == 0) {
+                # Lost sight? Give up after a grace window.
+                # Visible-but-not-in-range resets the timer.
+                if (sight == 0) {
+                    var tics = thing_tics(idx);
+                    thing_set_tics(idx, tics + 1);
+                    if (tics > 100) {
+                        thing_set_state(idx, STATE_SPAWN);
+                    }
+                } else {
+                    thing_set_tics(idx, 0);
+                }
             }
         }
     }
@@ -646,6 +705,18 @@ fn thing_ai_tick(idx): i64 {
                 # weapons in 0.30.0); p_random makes it a real random roll.
                 var dmg = (p_random() % 8 + 1) * 3;
                 player_take_damage(dmg);
+            } else {
+                # Ranged release (0.33.1): re-aim at the player's CURRENT
+                # position; LOS re-checked so the shot doesn't cross a wall
+                # the player ducked behind during the wind-up. aux takes the
+                # refractory cooldown (randomized so a room doesn't volley
+                # in lockstep).
+                if (thing_is_ranged(thing_type(idx)) == 1) {
+                    if (thing_check_sight(tx, ty, player_x, player_y) == 1) {
+                        thing_ranged_release(idx);
+                    }
+                    thing_set_aux(idx, RANGED_COOLDOWN_TICS + p_random() % 35);
+                }
             }
             # Return to chase
             thing_set_state(idx, STATE_CHASE);
@@ -944,12 +1015,122 @@ fn thing_spawn_missile(px, py, ang): i64 {
     store64(base + 96,  MISSILE_LIFETIME);
     store64(base + 104, TF_ACTIVE | TF_MISSILE);
     store64(base + 112, 0);
+    store64(base + 120, 0 - 1);   # owner: the player
     return idx;
+}
+
+# ================================================================
+# Monster ranged attacks (0.33.1)
+# ================================================================
+# The "enemies not reactionary" half of the 0.33.0 field report: monsters
+# could ONLY melee (attack armed under 64 units), so anything that couldn't
+# path to the player — ledge imps, monsters across a pit — stood inert
+# forever. Vanilla zombiemen/sergeants hitscan and imps/cacodemons throw
+# fireballs from any distance with line of sight. (RangedConst lives up by
+# ThingFlags — enum members resolve lexically.)
+
+# Which monsters have a ranged attack (shareware set; barons stay melee —
+# their BAL7 projectile sprites aren't in DOOM1.WAD).
+fn thing_is_ranged(ttype): i64 {
+    if (ttype == TTYPE_ZOMBIEMAN) { return 1; }
+    if (ttype == TTYPE_SHOTGUY) { return 1; }
+    if (ttype == TTYPE_IMP) { return 1; }
+    if (ttype == TTYPE_CACODEMON) { return 1; }
+    return 0;
+}
+
+# Monster hitscan at the player (zombieman: 1 bullet, sergeant: 3 pellets).
+# Vanilla aims with a random angle jitter, so the hit odds fall off with
+# range; modelled directly as a distance-scaled hit roll per pellet.
+fn thing_hitscan_player(idx): i64 {
+    var dist = fixed_approx_dist(player_x - thing_x(idx), player_y - thing_y(idx));
+    var threshold = 176 - fixed_to_int(dist) / 16;
+    if (threshold < 32) { threshold = 32; }
+    var pellets = 1;
+    if (thing_type(idx) == TTYPE_SHOTGUY) { pellets = 3; }
+    audio_play_at("DSPISTOL", thing_x(idx), thing_y(idx));
+    for (var p = 0; p < pellets; p += 1) {
+        if (p_random() < threshold) {
+            # Vanilla trooper/sergeant bullet: (P_Random()%5 + 1) * 3.
+            player_take_damage((p_random() % 5 + 1) * 3);
+        }
+    }
+    return 0;
+}
+
+# Spawn a monster fireball aimed at the player's current position. Reuses
+# the rocket's slot pool; owner recorded in aux so the ball doesn't detonate
+# on the imp that threw it.
+fn thing_spawn_fireball(owner): i64 {
+    var idx = -1;
+    for (var i = 0; i < thing_count; i += 1) {
+        if (thing_category(i) == CAT_PROJECTILE) {
+            if ((thing_flags(i) & TF_ACTIVE) == 0) { idx = i; break; }
+        }
+    }
+    if (idx < 0) {
+        if (thing_count >= THING_MAX) { return -1; }
+        idx = thing_count;
+        thing_count += 1;
+    }
+
+    var tx = thing_x(owner);
+    var ty = thing_y(owner);
+    var ang = fixed_atan2(player_y - ty, player_x - tx);
+    var ca = fixed_cos(ang);
+    var sa = fixed_sin(ang);
+    var btype = TTYPE_IMP_FIREBALL;
+    if (thing_type(owner) == TTYPE_CACODEMON) { btype = TTYPE_CACO_FIREBALL; }
+
+    var base = things + idx * THING_SIZE;
+    store64(base,       tx + fixed_mul(ca, MISSILE_SPAWN_OFFSET));
+    store64(base + 8,   ty + fixed_mul(sa, MISSILE_SPAWN_OFFSET));
+    store64(base + 16,  0);
+    store64(base + 24,  ang);
+    store64(base + 32,  btype);
+    store64(base + 40,  STATE_SPAWN);
+    store64(base + 48,  0);
+    store64(base + 56,  CAT_PROJECTILE);
+    store64(base + 64,  fixed_mul(ca, FIREBALL_SPEED));
+    store64(base + 72,  fixed_mul(sa, FIREBALL_SPEED));
+    store64(base + 80,  6 << 16);
+    store64(base + 88,  8 << 16);
+    store64(base + 96,  MISSILE_LIFETIME * 2);   # slower ball, longer fuse
+    store64(base + 104, TF_ACTIVE | TF_MISSILE);
+    store64(base + 112, 0);
+    store64(base + 120, owner);
+    audio_play_at("DSFIRSHT", tx, ty);
+    return idx;
+}
+
+# Ranged release at the end of the attack wind-up.
+fn thing_ranged_release(idx): i64 {
+    var ttype = thing_type(idx);
+    if (ttype == TTYPE_ZOMBIEMAN || ttype == TTYPE_SHOTGUY) {
+        thing_hitscan_player(idx);
+        return 0;
+    }
+    thing_spawn_fireball(idx);
+    return 0;
 }
 
 # Detonate a missile: splash damage, then free the slot for reuse.
 fn thing_missile_explode(idx): i64 {
     thing_explode(idx, ROCKET_SPLASH_RADIUS, ROCKET_SPLASH_DMG);
+    thing_set_flags(idx, 0);
+    thing_set_state(idx, STATE_NONE);
+    return 0;
+}
+
+# Fireball direct-hit damage roll, per ball type (vanilla A_TroopAttack /
+# A_HeadAttack rolls).
+fn thing_fireball_damage(btype): i64 {
+    if (btype == TTYPE_CACO_FIREBALL) { return (p_random() % 6 + 1) * 5; }
+    return (p_random() % 8 + 1) * 3;
+}
+
+# Deactivate a monster fireball without splash (vanilla balls just puff out).
+fn thing_fireball_out(idx): i64 {
     thing_set_flags(idx, 0);
     thing_set_state(idx, STATE_NONE);
     return 0;
@@ -961,14 +1142,57 @@ fn thing_missile_tick(idx): i64 {
     if ((flags & TF_ACTIVE) == 0) { return 0; }
     if ((flags & TF_MISSILE) == 0) { return 0; }
 
+    var mtype = thing_type(idx);
     var tics = thing_tics(idx);
-    if (tics <= 0) { thing_missile_explode(idx); return 0; }
+    if (tics <= 0) {
+        if (mtype == TTYPE_ROCKET_MISSILE) { thing_missile_explode(idx); }
+        else { thing_fireball_out(idx); }
+        return 0;
+    }
     thing_set_tics(idx, tics - 1);
 
     var vx = load64(things + idx * THING_SIZE + 64);
     var vy = load64(things + idx * THING_SIZE + 72);
     var nx = thing_x(idx) + vx;
     var ny = thing_y(idx) + vy;
+
+    # Monster fireball (0.33.1): its own flight rules.
+    if (mtype != TTYPE_ROCKET_MISSILE) {
+        var owner = thing_aux(idx);
+        # Player hit: direct damage, no splash.
+        var pd = fixed_approx_dist(player_x - nx, player_y - ny);
+        if (pd < thing_radius(idx) + PLAYER_RADIUS) {
+            player_take_damage(thing_fireball_damage(mtype));
+            thing_fireball_out(idx);
+            return 0;
+        }
+        # Walls: vanilla missiles fly through any OPEN two-sided portal
+        # regardless of floor steps (they're airborne) and stop on solid
+        # walls / closed portals — exactly thing_check_sight's crossing
+        # rule. The player-context step check would detonate a ledge imp's
+        # ball on its own platform lip.
+        if (thing_check_sight(thing_x(idx), thing_y(idx), nx, ny) == 0) {
+            thing_fireball_out(idx);
+            return 0;
+        }
+        # Direct hit on a shootable thing (not the thrower).
+        for (var fi = 0; fi < thing_count; fi += 1) {
+            if (fi == idx) { continue; }
+            if (fi == owner) { continue; }
+            var ff = thing_flags(fi);
+            if ((ff & TF_ACTIVE) == 0) { continue; }
+            if ((ff & TF_SHOOTABLE) == 0) { continue; }
+            var fd = fixed_approx_dist(thing_x(fi) - nx, thing_y(fi) - ny);
+            if (fd < thing_radius(fi) + thing_radius(idx)) {
+                thing_damage(fi, thing_fireball_damage(mtype));
+                thing_fireball_out(idx);
+                return 0;
+            }
+        }
+        thing_set_x(idx, nx);
+        thing_set_y(idx, ny);
+        return 0;
+    }
 
     # Wall? Detonate in place.
     if (player_check_position(nx, ny) == 0) {
@@ -1036,5 +1260,92 @@ fn things_print_stats(): i64 {
     vec_push(args, decor);
     var n = fmt_sprintf(&sb, 96, "things: %d total (%d monsters, %d items, %d decor)", args);
     sakshi_info(&sb, n);
+    return 0;
+}
+
+# ================================================================
+# Noise alert (0.33.1) — vanilla P_NoiseAlert
+# ================================================================
+# Weapon fire floods sound outward from the shooter's sector through open
+# two-sided portals; idle monsters in reached sectors wake and hunt. This is
+# how vanilla wakes monsters the player can't SEE — e.g. E1M1's computer-room
+# zombiemen behind the barred window: 2D sight is legitimately blocked by the
+# bar segs, so before this they dozed through any amount of gunfire
+# ("enemies not alive / shots don't register", 0.33.0 field report). A
+# closed door (portal height <= 0) stops sound; an ML_SOUNDBLOCK line lets
+# it through once and a second one stops it (vanilla's two-level rule).
+
+var noise_mark = 0;      # per-sector visit mask: bit0 = 0-blocks, bit1 = 1-block
+var noise_stack = 0;     # DFS stack of (sector * 2 + soundblocks)
+
+fn things_noise_alert(sx, sy): i64 {
+    if (map_num_sectors <= 0) { return 0; }
+    if (noise_mark == 0) {
+        noise_mark = alloc(MAP_MAX_SECTORS);
+        noise_stack = alloc(MAP_MAX_SECTORS * 2 * 8);
+    }
+    for (var ci = 0; ci < map_num_sectors; ci += 1) { store8(noise_mark + ci, 0); }
+
+    var start = map_point_sector(sx, sy);
+    if (start < 0) { return 0; }
+    if (start >= map_num_sectors) { return 0; }
+    var sp = 0;
+    store64(noise_stack + sp * 8, start * 2);
+    sp += 1;
+    store8(noise_mark + start, 1);
+
+    var pops = 0;
+    while (sp > 0 && pops < MAP_MAX_SECTORS * 2 + 8) {
+        sp -= 1;
+        pops += 1;
+        var node = load64(noise_stack + sp * 8);
+        var cur = node / 2;
+        var blocks = node % 2;
+        for (var i = 0; i < map_num_linedefs; i += 1) {
+            var rs = map_linedef_side_right(i);
+            var ls = map_linedef_side_left(i);
+            if (rs < 0) { continue; }
+            if (ls < 0) { continue; }
+            var fs = map_sidedef_sector(rs);
+            var bs = map_sidedef_sector(ls);
+            var other = 0 - 1;
+            if (fs == cur) { other = bs; }
+            if (bs == cur) { other = fs; }
+            if (other < 0) { continue; }
+            if (other >= map_num_sectors) { continue; }
+            # Closed portal (shut door / lift) blocks sound.
+            var open_low = map_sector_floorh(fs);
+            var bfh = map_sector_floorh(bs);
+            if (bfh > open_low) { open_low = bfh; }
+            var open_high = map_sector_ceilh(fs);
+            var bch = map_sector_ceilh(bs);
+            if (bch < open_high) { open_high = bch; }
+            if (open_high <= open_low) { continue; }
+            var nb = blocks;
+            if ((map_linedef_flags(i) & ML_SOUNDBLOCK) != 0) { nb += 1; }
+            if (nb >= 2) { continue; }
+            var bit = 1 << nb;
+            if ((load8(noise_mark + other) & bit) != 0) { continue; }
+            store8(noise_mark + other, load8(noise_mark + other) | bit);
+            if (sp < MAP_MAX_SECTORS * 2) {
+                store64(noise_stack + sp * 8, other * 2 + nb);
+                sp += 1;
+            }
+        }
+    }
+
+    # Wake idle monsters in flooded sectors.
+    for (var m = 0; m < thing_count; m += 1) {
+        if (thing_category(m) != CAT_MONSTER) { continue; }
+        if ((thing_flags(m) & TF_SHOOTABLE) == 0) { continue; }
+        if (thing_state(m) != STATE_SPAWN) { continue; }
+        var msec = map_point_sector(thing_x(m), thing_y(m));
+        if (msec < 0) { continue; }
+        if (msec >= map_num_sectors) { continue; }
+        if (load8(noise_mark + msec) != 0) {
+            thing_set_state(m, STATE_SEE);
+            thing_set_tics(m, 10);
+        }
+    }
     return 0;
 }

@@ -5,6 +5,102 @@ All notable changes to cyrius-doom will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.33.1] - 2026-07-10
+
+Field-report patch: four live-play bugs from the first real 0.33.0 Wayland-window session
+("enemies not alive/reactionary", "shots don't register damage/die", "mountains too high and
+moving with the view", "locked in place after dropping off the armor platform"), all reproduced
+headlessly before fixing, plus the toolchain/dep refresh. Every fix is anchored to a staged
+reproduction against real E1M1 geometry (the sims live in the session scratchpad; the durable
+regressions are in `tests/doom.tcyr`).
+
+### Fixed
+
+- **Sky: mountains sat ~28% too high and slid against the world on turns** (the render half of the
+  field report). Two independent causes in `render_draw_sky_column`:
+  - **V**: the sky stepped `sky_h/HALF_HEIGHT` (1.28 texels/row), squeezing all 128 SKY1 rows into
+    the top 100 screen rows. Vanilla is 1:1 (skytexturemid=100 at centery=100 ⇒ texture row ==
+    screen row at 320×200); now drawn 1:1 with wrap.
+  - **U**: the per-column term was LINEAR in screen col while walls project tan-style — near the
+    screen edges a turn sweeps wall columns up to ~2× faster than the sky, so sky features slid
+    against the geometry ("moves with the view instead of locked"). Now vanilla's
+    `viewangle + xtoviewangle[x]`: a projection-matched atan offset per column
+    (`x_to_viewangle`, filled in `tables_init` — the table had been alloc'd since early days but
+    never populated). Verified: A/B renders at Δangle=16 show sky and wall features shifting the
+    same direction and magnitude (+17 vs +15 columns; the old formula moved the sky ~20 columns the
+    OPPOSITE way), sky region byte-stable under player translation, wrap-exact at +90°.
+    New `render_sky_u()` helper + 8 WAD-free asserts.
+- **`fixed_atan2` was off by up to ~11 angle units (~3.9°) mid-octant** — the diamond-angle
+  interpolation's documented error. Chase headings wobbled and **exact-aim hitscan rays whiffed
+  20-unit-radius monsters beyond ~350 units** (lateral error 27 units at 457 — the reproducible
+  half of "shots don't register"). Replaced with the quadratic minimax octant form
+  (atan(r) ≈ (π/4)r + 0.273·r(1−r), ≤ ~0.7 unit error): the staged shot at 457 units now lands
+  with lateral error 1 unit and a symmetric ±8-unit hit window. 6 accuracy asserts.
+- **Drop-off wedge: dropping off a >24-unit ledge locked the player in place** (field report:
+  the armor platform). The per-tick z-snap lands the player at the low floor still inside the
+  ledge line's 16-unit collision radius; every subsequent move then re-failed the step-up check —
+  0 of 8 directions legal, permanently. Vanilla never wedges because tmfloorz keeps the mover at
+  the high floor until its bounding box clears the line. Fix: a PLAYER-ONLY escape rule in the
+  collision core — when the current position already violates a line's radius, that line may only
+  veto moves that actually CROSS it. Reproduced at the real E1M1 armor-walkway ledge (112-unit
+  drop at (72,−3083)): was 0/8 directions free, now 7/8 with only the crossing back up vetoed.
+- **Monster chase moves were step-checked against the PLAYER's floor height** —
+  `thing_move_clear` routed through the player collision wrapper, so `player_z` decided every
+  mover's ledge verdicts: monsters near any floor-height change froze solid whenever the player
+  stood on different ground (the movement half of "enemies not alive"), and worse, a player on
+  HIGH ground made cliff-edge monsters free to walk off. The collision core now takes the mover's
+  own position + floor (`move_check_position`/`move_check_linedef`, resolved via the new
+  `map_point_sector`), with vanilla's MF_DROPOFF rule for monsters (never step off a >24-unit
+  ledge; players may). Verdicts asserted invariant under `player_z`.
+
+### Added
+
+- **Noise alert (vanilla `P_NoiseAlert`)** — weapon fire floods sound from the firing sector
+  through open two-sided portals (closed doors stop it; `ML_SOUNDBLOCK` lines pass it once,
+  vanilla's two-level rule); idle monsters in flooded sectors wake and hunt. This is how vanilla
+  wakes monsters the player can't see — E1M1's computer-room zombiemen behind the barred window
+  are legitimately 2D-sight-blocked (the bars are one-sided segs), so before this they dozed
+  through any amount of point-blank gunfire: the "enemies not alive + shots don't register"
+  combination in one scenario. WAD-gated regression: one shot at the E1M1 spawn wakes exactly the
+  5 door-free HMP monsters; the southern-room imp behind the closed staircase door correctly
+  sleeps through it (python BFS over the WAD's open portals confirms sector 74 unreachable).
+- **Monster ranged attacks** — monsters could previously ONLY melee (attack armed under 64
+  units), so anything that couldn't path to the player — ledge imps, monsters across a pit —
+  stood inert forever, and nothing ever shot back ("not reactionary"). Now vanilla-style:
+  zombiemen hitscan (1 bullet, (P%5+1)×3, distance-scaled hit odds), sergeants 3 pellets, imps
+  and cacodemons throw fireballs (`BAL1`/`BAL2` sprites, 10 units/tic, direct damage, owner-immune,
+  no splash; fireballs fly by the sight-crossing rule — through open portals over any floor step,
+  stopped by solid walls/closed portals, so a ledge imp's ball no longer detonates on its own
+  platform lip). Arming is distance-rolled per vanilla `P_CheckMissileRange` with a paced re-roll
+  and a randomized ~1–2 s cooldown (new per-thing `aux` field; `THING_SIZE` 120→128). LOS is
+  re-checked at release so shots don't cross walls the player ducked behind during the wind-up.
+  Barons stay melee — their BAL7 sprites aren't in the shareware WAD (roadmap). In the staged
+  E1M1 fight, monsters at 376–678 units now deal steady ranged damage (player 100→40 hp over 6 s)
+  where before they were statues. 5 WAD-free asserts (zombie range damage, imp ball spawn+hit,
+  melee-only demon unchanged).
+
+### Changed
+
+- **Toolchain pin `cyrius 6.4.30 → 6.4.43`** (latest release, published 2026-07-10); lock
+  regenerated from scratch (`rm -rf lib && cyrius deps`) — **34 entries, verifies 34/0**,
+  count unchanged. Builds in this cut ran the versioned `~/.cyrius/versions/6.4.43/bin/cyrius`
+  (true pin match; note the versioned wrapper resolves cycc through CYRIUS_HOME, so it reported
+  drift until the pin caught up — final gates all ran true 6.4.43).
+- **vani vendor refresh 0.9.9 → 1.0.0** (`vendor/vani-core.cyr` from vani 1.0.0's dist; the
+  `audio_*` surface is byte-for-byte identical fn-for-fn, zero code changes downstream).
+- `player_find_sector` now delegates to the new general `map_point_sector(x, y)`.
+
+Verification: tests **149/149** WAD-free (was 133; +16) and **218/218** full (was 193; +25);
+fuzz `fuzz_wad`/`fuzz_fixed`/`fuzz_weapon`/`fuzz_mus` = 1000/50000/2000/1000 clean; all 9
+shareware maps + 5 menu PPMs render at 192,015 B; clean-from-scratch resolve + `CYRIUS_DCE=1`
+build (478 fns / 89,664 B NOPed); `render_frame` **2.349 ms** / +sprites **2.345 ms** (E1M1,
+cycc 6.4.43 — prior row 2.469/2.466 on 6.4.30; the sky U map is a table lookup replacing a
+division, everything else is off the render path); binary 418,224 → **426,496 B**
+(`doom_agnos` 387,592 → **395,968 B**). **AGNOS QEMU doom-smoke PASS on the final 0.33.1
+binary** (serial `cyrius-doom v0.33.1` + `wad loaded`, 240-color TITLEPIC screendump) plus the
+in-game sendkey harness. Desktop window play re-verify on Hyprland remains the user's run
+(no live compositor in the dev shell).
+
 ## [0.33.0] - 2026-07-09
 
 ### Added
