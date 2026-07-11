@@ -1,0 +1,85 @@
+# setu_present.cyr — DOOM's AGNOS DESKTOP backend: present the game as a WINDOW to
+# the aethersafha compositor over the setu display protocol, instead of owning the raw
+# framebuffer via blit#39. Selected at runtime by present_mode == PM_SETU (framebuf.cyr);
+# framebuf_init falls back to the blit#39 fullscreen path when no compositor answers.
+#
+# This is the OS-agnostic twin of the Wayland backend (src/platform/wayland/) — agnos
+# presents over setu, Linux over Wayland — the same cross-platform split jalwa, crab and
+# puka use. Modeled 1:1 on jalwa/src/gui/setu_present.cyr. doom's existing fb_buf
+# (320x200 XRGB8888 / BGRA, filled by framebuf_blit_agnos) is EXACTLY what setu wants
+# (ATTACH fmt=1, stride = w*4), so there is no new rasterizer — framebuf_present_setu
+# just fills fb_buf then hands it here. setu_client_present pushes the surface over a
+# SHARED BUFFER (sys_shm), which sidesteps the 2 KB loopback-TCP window a 256 KB frame
+# could never fit — needs cyrius >= 6.4.34 (doom pins 6.4.43).
+#
+# This file is agnos-only: main.cyr includes it under #ifdef CYRIUS_TARGET_AGNOS after
+# vendor/setu.cyr (the setu_* client API) and before framebuf.cyr / input.cyr.
+
+var doom_setu_client = 0;      # *SetuClient (setu.cyr), 0 = not connected
+
+# Connect to the compositor (loopback:7700; the path arg is advisory). Returns 1 on
+# success — framebuf_init then sets present_mode = PM_SETU — or 0 when no compositor is
+# listening, in which case the caller keeps the blit#39 fullscreen fallback.
+fn doom_setu_open(): i64 {
+    var c = setu_client_connect("/tmp/aethersafha-setu.sock");
+    if (c == 0) { return 0; }
+    doom_setu_client = c;
+    return 1;
+}
+
+# Present an already-rendered w*h XRGB8888/BGRA buffer as this frame. Called from
+# framebuf_present_setu after framebuf_blit_agnos fills fb_buf. Returns setu's code
+# (0 ok). Taking the buffer as an ARG keeps this file free of any framebuf dependency
+# (framebuf.cyr owns fb_buf + the palette conversion), so the include order is one-way.
+fn doom_setu_present_buf(pix, w, h): i64 {
+    return setu_client_present(doom_setu_client, pix, w, h);
+}
+
+# Drain ONE pending setu input frame. Returns the pressed key's USB-HID usage id (> 0),
+# 0 when nothing is buffered this poll, or -1 when the compositor closed the connection.
+# aethersafha forwards key-DOWN only (setu_dispatch.cyr) — there are NO release events —
+# so the caller (input_poll_setu) uses a press-pulse model.
+fn doom_setu_next_key(): i64 {
+    if (doom_setu_client == 0) { return 0; }
+    var msg = setu_msg_new();
+    var r = setu_poll_input(setu_client_fd(doom_setu_client), msg);
+    if (r < 0) { return 0 - 1; }                                # EOF / compositor gone
+    if (r == 0) { return 0; }                                   # nothing this poll
+    if (setu_msg_kind(msg) == SETU_INPUT_KEY) { return setu_msg_arg(msg, 1); }   # arg1 = HID usage
+    return 0;
+}
+
+# Map a USB-HID usage (keyboard/keypad page 0x07) to DOOM's key_state index (the codes
+# in input.cyr's KeyCode enum: ASCII for letters/space/enter/tab/esc, 128-131 arrows,
+# 132 = fire/ctrl, 133 = shift). Unmapped usages return -1. Held-key note: aethersafha
+# sends key-DOWN only, so smooth held movement depends on OS key-repeat; a future
+# aethersafha key-UP (encode press/release in the unused mods arg) would make it exact.
+fn doom_hid_to_key(u): i64 {
+    if (u == 0x1A) { return 119; }   # w -> forward
+    if (u == 0x04) { return 97; }    # a -> strafe left
+    if (u == 0x16) { return 115; }   # s -> back
+    if (u == 0x07) { return 100; }   # d -> strafe right
+    if (u == 0x08) { return 101; }   # e -> use
+    if (u == 0x09) { return 102; }   # f -> fire
+    if (u == 0x15) { return 114; }   # r -> run
+    if (u == 0x14) { return 113; }   # q -> quit
+    if (u == 0x52) { return 128; }   # Up    -> forward
+    if (u == 0x51) { return 129; }   # Down  -> back
+    if (u == 0x50) { return 130; }   # Left  -> turn left
+    if (u == 0x4F) { return 131; }   # Right -> turn right
+    if (u == 0x2C) { return 32; }    # Space -> use
+    if (u == 0x28) { return 10; }    # Enter -> menu confirm
+    if (u == 0x2B) { return 9; }     # Tab   -> automap
+    if (u == 0x29) { return 27; }    # Esc   -> menu / quit
+    if (u == 0xE0) { return 132; }   # LCtrl -> fire
+    if (u == 0xE4) { return 132; }   # RCtrl -> fire
+    if (u == 0xE1) { return 133; }   # LShift -> run / turn
+    if (u == 0xE5) { return 133; }   # RShift
+    if (u >= 0x1E) { if (u <= 0x24) { return 49 + (u - 0x1E); } }   # 1..7 -> weapon '1'..'7'
+    return 0 - 1;
+}
+
+fn doom_setu_close(): i64 {
+    if (doom_setu_client != 0) { setu_client_close(doom_setu_client); doom_setu_client = 0; }
+    return 0;
+}

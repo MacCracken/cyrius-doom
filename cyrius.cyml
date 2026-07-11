@@ -25,7 +25,7 @@ output = "build/doom"
 # double-resolution (the cycc deps writer can't reconcile stdlib
 # copy + git symlink for the same lib/ path). Mirrors what vani
 # 0.9.0 did internally to its own stdlib list.
-stdlib = ["string", "alloc", "fmt", "vec", "str", "io", "fs", "args", "syscalls", "hashmap", "tagged", "fnptr", "freelist", "process", "sakshi"]
+stdlib = ["string", "alloc", "fmt", "vec", "str", "io", "fs", "args", "syscalls", "hashmap", "tagged", "fnptr", "freelist", "process", "sakshi", "net", "result", "assert"]
 
 # vani — audio_* PCM shim. VENDORED as a committed single file
 # (`vendor/vani-core.cyr`), NOT a git `[deps.vani]` dep: since vani's
@@ -34,7 +34,8 @@ stdlib = ["string", "alloc", "fmt", "vec", "str", "io", "fs", "args", "syscalls"
 # the shim → "dep vani requires 'yukti'" errors. Vendoring compiles just
 # the shim against doom's own stdlib list. Refresh: copy vani's
 # `dist/vani-core.cyr` on a vani release. Mirrors cyrius-polyomino/-bb.
-# (Provenance: vani 1.0.0 — audio_* surface identical to 0.9.9.)
+# (Provenance: vani 1.1.0 — adds the non-blocking sink pair audio_write_nb /
+#  audio_avail; doom uses only the blocking audio_write shim, so they DCE out.)
 
 # bsp — spatial geometry primitives. Consumed as a single-file vendor
 # (`lib/bsp.cyr`) produced from bsp's `dist/bsp.cyr` bundle. 1.1.1 added

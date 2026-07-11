@@ -332,6 +332,54 @@ fn input_poll_wayland(): i64 {
 }
 #endif
 
+#ifdef CYRIUS_TARGET_AGNOS
+# PM_SETU input: the aethersafha compositor delivers key-DOWN events over setu (there
+# are NO key-UP events at this milestone — setu_dispatch.cyr forwards presses only). So
+# this uses a PRESS-PULSE model, like doom's Linux tty path: set key_state=1 for every
+# key that arrived this frame, build the action flags, then CLEAR key_state so a key
+# only counts on the frame(s) it (re)arrives. Smooth held movement therefore relies on
+# OS key-repeat; a future aethersafha key-UP (encode press/release in the unused mods
+# arg) would make held keys exact. Desktop control scheme: arrows TURN, A/D strafe.
+fn input_poll_setu(): i64 {
+    input_flags = 0;
+    var guard = 0;
+    while (guard < 64) {
+        var u = doom_setu_next_key();
+        if (u == 0) { guard = 64; }                     # nothing more pending this frame
+        else {
+            if (u < 0) { input_quit = 1; guard = 64; }  # compositor closed the window -> quit
+            else {
+                var kc = doom_hid_to_key(u);
+                if (kc >= 0) { store64(key_state + kc * 8, 1); }
+                guard = guard + 1;
+            }
+        }
+    }
+    if (load64(key_state + KEY_W * 8) == 1) { input_flags |= INP_FORWARD; }
+    if (load64(key_state + KEY_UP * 8) == 1) { input_flags |= INP_FORWARD; }
+    if (load64(key_state + KEY_S * 8) == 1) { input_flags |= INP_BACKWARD; }
+    if (load64(key_state + KEY_DOWN * 8) == 1) { input_flags |= INP_BACKWARD; }
+    if (load64(key_state + KEY_LEFT * 8) == 1) { input_flags |= INP_TURN_LEFT; }
+    if (load64(key_state + KEY_RIGHT * 8) == 1) { input_flags |= INP_TURN_RIGHT; }
+    if (load64(key_state + KEY_A * 8) == 1) { input_flags |= INP_STRAFE_LEFT; }
+    if (load64(key_state + KEY_D * 8) == 1) { input_flags |= INP_STRAFE_RIGHT; }
+    if (load64(key_state + KEY_SPACE * 8) == 1) { input_flags |= INP_USE; }
+    if (load64(key_state + KEY_E * 8) == 1) { input_flags |= INP_USE; }
+    if (load64(key_state + KEY_CTRL * 8) == 1) { input_flags |= INP_FIRE; }
+    if (load64(key_state + 102 * 8) == 1) { input_flags |= INP_FIRE; }   # F
+    if (load64(key_state + KEY_R * 8) == 1) { input_flags |= INP_RUN; }
+    if (load64(key_state + KEY_TAB * 8) == 1) { input_flags |= INP_TAB; }
+    input_weapon = 0;
+    for (var wwi = 1; wwi <= 7; wwi += 1) {
+        if (load64(key_state + (48 + wwi) * 8) == 1) { input_weapon = wwi; }
+    }
+    if (load64(key_state + KEY_Q * 8) == 1) { input_quit = 1; }
+    if (load64(key_state + KEY_ESC * 8) == 1) { input_quit = 1; }
+    for (var ci = 0; ci < 256; ci += 1) { store64(key_state + ci * 8, 0); }   # press-pulse clear
+    return 0;
+}
+#endif
+
 fn input_poll(): i64 {
     input_flags = 0;
 
@@ -348,6 +396,9 @@ fn input_poll(): i64 {
     # NB: distinct local names (ag_*) — Cyrius locals are function-scoped, and
     # the Linux path below is still compiled (dead) under --agnos, so its loop
     # vars (n / i / wi) would collide otherwise.
+    # DESKTOP: when windowed on aethersafha the compositor owns the keyboard and
+    # delivers keys over setu — do NOT drain the raw kbscan#42 buffer.
+    if (present_mode == PM_SETU) { return input_poll_setu(); }
     var ag_buf[64];
     var ag_n = syscall(42, &ag_buf, 64);
     var ag_i = 0;

@@ -37,12 +37,14 @@ var palette = 0;
 var fb_fd = -1;
 var pipe_fd = -1;
 
-# Runtime present backend (Linux only; AGNOS is compile-time via #ifdef and
-# always uses the blit#39 path, ignoring this). Resolved in doom_main BEFORE
-# framebuf_init (F1) so a Wayland window never opens during --ppm screenshot
-# runs. PM_FB0 = /dev/fb0 (or PPM fallback if it won't open); PM_WAYLAND =
-# native Wayland window; PM_PPM = screenshot mode (--ppm/--ppm-menu).
-enum PresentMode { PM_FB0 = 0; PM_WAYLAND = 1; PM_PPM = 2; }
+# Runtime present backend. Resolved in doom_main BEFORE framebuf_init (F1) so a window
+# never opens during --ppm screenshot runs. Linux: PM_FB0 = /dev/fb0 (or PPM fallback),
+# PM_WAYLAND = native Wayland window, PM_PPM = screenshot mode (--ppm/--ppm-menu).
+# AGNOS: PM_SETU = a WINDOW on the aethersafha desktop (setu protocol — the OS-agnostic
+# twin of the Wayland path), else PM_FB0 = the raw framebuffer via blit#39 (fullscreen
+# fallback when no compositor answers, or forced with --fb0). present_mode is now LIVE
+# on agnos too — framebuf_init sets it after probing for a compositor.
+enum PresentMode { PM_FB0 = 0; PM_WAYLAND = 1; PM_PPM = 2; PM_SETU = 3; }
 var present_mode = 0;
 # Wayland letterbox placement into the shm buffer (recomputed on resize).
 var wl_scale = 1; var wl_xoff = 0; var wl_yoff = 0;
@@ -64,7 +66,19 @@ fn framebuf_init(): i64 {
     if (palette == 0) { palette = alloc(768); }
 
     #ifdef CYRIUS_TARGET_AGNOS
-    # agnos: geometry via fbinfo(#38) — 24-byte struct {w@0 h@4 pitch@8 bpp@12
+    # DESKTOP first: try the aethersafha compositor and present as a WINDOW over setu.
+    # On success we render into fb_buf and hand it to setu_client_present each frame,
+    # skipping ALL the blit#39 fullscreen geometry below. On no-compositor (connect
+    # returns 0) downgrade to PM_FB0 and fall through to the raw-framebuffer path —
+    # the mirror of the Linux Wayland fallback (win_open fails -> PM_FB0).
+    if (present_mode == PM_SETU) {
+        if (doom_setu_open() != 0) {
+            fb_buf = alloc(SCREEN_WIDTH * SCREEN_HEIGHT * 4);   # 320x200 BGRA present buffer
+            return 0;
+        }
+        present_mode = PM_FB0;
+    }
+    # agnos fullscreen: geometry via fbinfo(#38) — 24-byte struct {w@0 h@4 pitch@8 bpp@12
     # fmt@16 flags@20}; pixels reach the screen via blit(#39), not /dev/fb0.
     var fbi = alloc(24);
     memset(fbi, 0, 24);
@@ -267,7 +281,7 @@ fn framebuf_blit(): i64 {
         # Replicate the just-built row to fill the scale block.
         for (var ry = 1; ry < fb_scale; ry += 1) {
             memcpy(fb_buf + (dy0 + ry) * fb_pitch + fb_xoff * bpp_bytes,
-                   first, row_bytes);
+            first, row_bytes);
         }
     }
     return 0;
@@ -292,6 +306,15 @@ fn framebuf_blit_agnos(): i64 {
         }
     }
     return 0;
+}
+
+# PM_SETU present: fill fb_buf from the paletted frame (the SAME conversion the blit#39
+# path uses) then hand that BGRA buffer to the aethersafha compositor as this frame's
+# window surface. setu_client_present pushes it over a shared buffer (setu owns scaling
+# / placement). Returns setu's code (0 = ok).
+fn framebuf_present_setu(): i64 {
+    framebuf_blit_agnos();
+    return doom_setu_present_buf(fb_buf, SCREEN_WIDTH, SCREEN_HEIGHT);
 }
 #endif
 
@@ -346,6 +369,7 @@ fn framebuf_present_wayland(): i64 {
 
 fn framebuf_flip(): i64 {
     #ifdef CYRIUS_TARGET_AGNOS
+    if (present_mode == PM_SETU) { return framebuf_present_setu(); }   # windowed on the desktop
     if (fb_fd >= 0) {
         framebuf_blit_agnos();
         # blit(src, w, h, a4 = (scale<<32)|(dst_y<<16)|dst_x) — the kernel expands each
@@ -353,7 +377,7 @@ fn framebuf_flip(): i64 {
         # bits are simply ignored (unscaled 320x200 at the centered offset — degraded
         # but harmless); ship this doom with kernel >= 1.44.20.
         syscall(39, fb_buf, SCREEN_WIDTH, SCREEN_HEIGHT,
-                (fb_scale << 32) | (fb_yoff << 16) | fb_xoff);
+        (fb_scale << 32) | (fb_yoff << 16) | fb_xoff);
     }
     return 0;
     #endif
@@ -404,6 +428,9 @@ fn framebuf_write_ppm(path): i64 {
 }
 
 fn framebuf_shutdown(): i64 {
+    #ifdef CYRIUS_TARGET_AGNOS
+    if (present_mode == PM_SETU) { doom_setu_close(); return 0; }
+    #endif
     if (fb_fd >= 0) { file_close(fb_fd); fb_fd = -1; }
     return 0;
 }

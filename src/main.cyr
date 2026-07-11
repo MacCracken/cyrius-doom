@@ -29,6 +29,16 @@ include "src/platform/wayland/wire.cyr"
 include "src/platform/wayland/client.cyr"
 include "src/platform/wayland/shm.cyr"
 include "src/platform/window.cyr"
+# AGNOS desktop backend — present as a WINDOW to the aethersafha compositor over setu
+# (the OS-agnostic twin of the Wayland block above). vendor/setu.cyr = the setu client
+# API (needs the net/result/assert stdlib, added in cyrius.cyml); setu_present.cyr =
+# doom's setu shell. Both BEFORE framebuf.cyr / input.cyr, which call doom_setu_*.
+# vendored (like bsp/vani-core) to keep setu's own deps off doom's tree. Refresh: copy
+# setu's dist/setu.cyr on a setu release. (Provenance: setu 0.4.0.)
+#ifdef CYRIUS_TARGET_AGNOS
+include "vendor/setu.cyr"
+include "src/setu_present.cyr"
+#endif
 include "src/framebuf.cyr"
 include "src/map.cyr"
 include "src/texture.cyr"
@@ -172,8 +182,9 @@ fn doom_main(): i64 {
     # Resolve the display backend BEFORE framebuf_init (F1): the mode must be
     # known so init opens the right surface — a Wayland window must NOT pop up
     # during --ppm/--ppm-menu screenshot runs. --wayland-probe is a diagnostic
-    # that lists the compositor's globals and exits. Linux-only; AGNOS uses the
-    # compile-time blit#39 path and leaves present_mode at PM_FB0.
+    # that lists the compositor's globals and exits. This Linux block picks
+    # PM_WAYLAND/PM_FB0/PM_PPM; the AGNOS block just below picks PM_SETU (desktop)
+    # vs PM_FB0 (fullscreen), so present_mode is resolved on both platforms.
     #ifndef CYRIUS_TARGET_AGNOS
     var wl_probe_mode = 0; var force_fb0 = 0; var force_wl = 0; var want_ppm = 0;
     for (var di = 2; di < argc(); di += 1) {
@@ -194,9 +205,21 @@ fn doom_main(): i64 {
     }
     if (want_ppm == 1) { present_mode = PM_PPM; }
     else { if (force_fb0 == 1) { present_mode = PM_FB0; }
-    else { if (force_wl == 1) { present_mode = PM_WAYLAND; }
-    else { if (getenv("WAYLAND_DISPLAY") != 0) { present_mode = PM_WAYLAND; }
-    else { present_mode = PM_FB0; } } } }
+        else { if (force_wl == 1) { present_mode = PM_WAYLAND; }
+            else { if (getenv("WAYLAND_DISPLAY") != 0) { present_mode = PM_WAYLAND; }
+                else { present_mode = PM_FB0; } } } }
+    #endif
+
+    #ifdef CYRIUS_TARGET_AGNOS
+    # AGNOS: default to the sovereign DESKTOP (PM_SETU) — present as a window to the
+    # aethersafha compositor. framebuf_init downgrades to PM_FB0 (fullscreen framebuffer
+    # via blit#39) when no compositor answers, so this is safe headless. --fb0 forces
+    # fullscreen. (ag_ai: distinct name — the Linux selection block above is #ifndef'd
+    # out here, but keep the agnos-local naming discipline.)
+    present_mode = PM_SETU;
+    for (var ag_ai = 2; ag_ai < argc(); ag_ai += 1) {
+        if (streq(argv(ag_ai), "--fb0") == 1) { present_mode = PM_FB0; }
+    }
     #endif
 
     framebuf_init();

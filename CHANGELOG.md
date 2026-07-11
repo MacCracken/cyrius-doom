@@ -5,6 +5,29 @@ All notable changes to cyrius-doom will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **DOOM on the sovereign desktop — a `PM_SETU` display + input backend.** doom can now
+  run as a **window on the aethersafha compositor** (over the setu display protocol) on
+  AGNOS, instead of only owning the raw framebuffer via blit#39 — the OS-agnostic twin
+  of the Wayland window backend (agnos → setu, Linux → Wayland; the same split jalwa,
+  crab and puka use). New `src/setu_present.cyr` (the setu client shell, mirroring
+  jalwa's) + a `PM_SETU` runtime branch threaded through `framebuf_init` / `framebuf_flip`
+  / `framebuf_shutdown` and `input_poll`. doom's existing `fb_buf` (320×200 XRGB8888 /
+  BGRA, from `framebuf_blit_agnos`) is exactly what `setu_client_present` wants, so there
+  is **no new rasterizer** — the frame is presented over setu's shared-buffer path
+  (sidesteps the 2 KB loopback-TCP window). agnos defaults to `PM_SETU`; `framebuf_init`
+  auto-downgrades to `PM_FB0` (fullscreen blit#39) when no compositor is listening, and
+  `--fb0` forces fullscreen. Vendors `vendor/setu.cyr` (setu 0.4.0) + adds `net`/`result`/
+  `assert` to the stdlib. Builds clean `--agnos` and host (Linux Wayland path untouched).
+  - **Input limitation (known):** aethersafha forwards key-**DOWN** only over setu (no
+    key-up), so `input_poll_setu` uses a press-pulse model (like doom's Linux tty path) —
+    menus/fire/weapon-switch work, and held movement rides OS key-repeat. Smooth held
+    movement wants a future aethersafha key-up (encode press/release in the unused setu
+    `mods` arg).
+
 ## [0.33.1] - 2026-07-10
 
 Field-report patch: four live-play bugs from the first real 0.33.0 Wayland-window session
