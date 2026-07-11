@@ -34,7 +34,7 @@ include "src/platform/window.cyr"
 # API (needs the net/result/assert stdlib, added in cyrius.cyml); setu_present.cyr =
 # doom's setu shell. Both BEFORE framebuf.cyr / input.cyr, which call doom_setu_*.
 # vendored (like bsp/vani-core) to keep setu's own deps off doom's tree. Refresh: copy
-# setu's dist/setu.cyr on a setu release. (Provenance: setu 0.4.0.)
+# setu's dist/setu.cyr on a setu release. (Provenance: setu 0.5.0 — full key events.)
 #ifdef CYRIUS_TARGET_AGNOS
 include "vendor/setu.cyr"
 include "src/setu_present.cyr"
@@ -142,7 +142,7 @@ fn doom_main(): i64 {
     # non-identity arena top (0x3FC00000); no warm-up needed.
     alloc_init();
     args_init();
-    sakshi_info("cyrius-doom v0.33.1", 19);
+    sakshi_info("cyrius-doom v0.33.2", 19);
 
     # WAD path: argv[1] on Linux. On agnos, agnsh `run /bin/doom` passes no argv
     # beyond the path, so default to /DOOM1.WAD (staged on the ext2 root).

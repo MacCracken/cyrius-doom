@@ -333,24 +333,26 @@ fn input_poll_wayland(): i64 {
 #endif
 
 #ifdef CYRIUS_TARGET_AGNOS
-# PM_SETU input: the aethersafha compositor delivers key-DOWN events over setu (there
-# are NO key-UP events at this milestone — setu_dispatch.cyr forwards presses only). So
-# this uses a PRESS-PULSE model, like doom's Linux tty path: set key_state=1 for every
-# key that arrived this frame, build the action flags, then CLEAR key_state so a key
-# only counts on the frame(s) it (re)arrives. Smooth held movement therefore relies on
-# OS key-repeat; a future aethersafha key-UP (encode press/release in the unused mods
-# arg) would make held keys exact. Desktop control scheme: arrows TURN, A/D strafe.
+# PM_SETU input: the aethersafha compositor delivers FULL key events — press AND release —
+# over setu, which doom opts into via setu_client_request_keys (SETU_SURF_FULL_KEYS). So
+# this tracks PERSISTENT make/break held state (a key stays down until its release
+# arrives), exactly like doom's raw-scancode kbscan path — hold W to keep moving. key_state
+# is NOT cleared each frame. Desktop control scheme: arrows TURN, A/D strafe.
 fn input_poll_setu(): i64 {
     input_flags = 0;
+    var kr[16];                                     # [+0] = HID usage, [+8] = value (1 press / 0 release)
     var guard = 0;
-    while (guard < 64) {
-        var u = doom_setu_next_key();
-        if (u == 0) { guard = 64; }                     # nothing more pending this frame
+    while (guard < 128) {
+        var r = doom_setu_next_key(&kr);
+        if (r == 0) { guard = 128; }                    # nothing more pending this frame
         else {
-            if (u < 0) { input_quit = 1; guard = 64; }  # compositor closed the window -> quit
+            if (r < 0) { input_quit = 1; guard = 128; } # compositor closed the window -> quit
             else {
-                var kc = doom_hid_to_key(u);
-                if (kc >= 0) { store64(key_state + kc * 8, 1); }
+                #ifdef DOOM_SETU_KEYLOG
+                _dsetu_keylog(load64(&kr + 8));   # input-smoke diagnostic (press/release marker)
+                #endif
+                var kc = doom_hid_to_key(load64(&kr));
+                if (kc >= 0) { store64(key_state + kc * 8, load64(&kr + 8)); }   # make/break
                 guard = guard + 1;
             }
         }
@@ -375,7 +377,8 @@ fn input_poll_setu(): i64 {
     }
     if (load64(key_state + KEY_Q * 8) == 1) { input_quit = 1; }
     if (load64(key_state + KEY_ESC * 8) == 1) { input_quit = 1; }
-    for (var ci = 0; ci < 256; ci += 1) { store64(key_state + ci * 8, 0); }   # press-pulse clear
+    # No per-frame clear — key_state is PERSISTENT make/break held state now (aethersafha
+    # sends key-UP, which zeroes the slot above), exactly like the raw-scancode kbscan path.
     return 0;
 }
 #endif

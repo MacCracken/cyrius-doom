@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.33.2] - 2026-07-10 — DOOM on the sovereign desktop (setu backend + held keys)
+
 ### Added
 
 - **DOOM on the sovereign desktop — a `PM_SETU` display + input backend.** doom can now
@@ -20,13 +22,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is **no new rasterizer** — the frame is presented over setu's shared-buffer path
   (sidesteps the 2 KB loopback-TCP window). agnos defaults to `PM_SETU`; `framebuf_init`
   auto-downgrades to `PM_FB0` (fullscreen blit#39) when no compositor is listening, and
-  `--fb0` forces fullscreen. Vendors `vendor/setu.cyr` (setu 0.4.0) + adds `net`/`result`/
+  `--fb0` forces fullscreen. Vendors `vendor/setu.cyr` (setu 0.5.0) + adds `net`/`result`/
   `assert` to the stdlib. Builds clean `--agnos` and host (Linux Wayland path untouched).
-  - **Input limitation (known):** aethersafha forwards key-**DOWN** only over setu (no
-    key-up), so `input_poll_setu` uses a press-pulse model (like doom's Linux tty path) —
-    menus/fire/weapon-switch work, and held movement rides OS key-repeat. Smooth held
-    movement wants a future aethersafha key-up (encode press/release in the unused setu
-    `mods` arg).
+  **QEMU-validated** (`agnos scripts/aethersafha-doom-smoke.sh`, reusing the
+  `AETHERSAFHA_SETU_SELFTEST` hook with doom seeded as the first-resident setu client): the
+  compositor spawns doom, doom loads `/DOOM1.WAD`, connects over setu, and presents — the
+  screendump shows the DOOM title screen composited as a window on the desktop next to crab,
+  with the game loop live (map/things stats printing).
+  - **Held-key input — real make/break.** doom opts into setu 0.5.0 FULL key events
+    (`setu_client_request_keys` / `SETU_SURF_FULL_KEYS`), so aethersafha delivers key
+    **press AND release**; `input_poll_setu` tracks persistent held state exactly like
+    doom's raw-scancode path — **hold W to keep moving**, no reliance on key-repeat.
+    QEMU-validated (`agnos scripts/aethersafha-doom-input-smoke.sh`, USB-xHCI keyboard +
+    HMP `sendkey`): doom receives a balanced **10 press / 10 release** over setu. Requires
+    setu ≥ 0.5.0 + aethersafha (which honours the flag per-surface); press-only nav clients
+    (crab) are unaffected.
 
 ## [0.33.1] - 2026-07-10
 

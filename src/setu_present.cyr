@@ -24,6 +24,10 @@ fn doom_setu_open(): i64 {
     var c = setu_client_connect("/tmp/aethersafha-setu.sock");
     if (c == 0) { return 0; }
     doom_setu_client = c;
+    # Opt into FULL key events (press AND release, setu 0.5.0 SETU_SURF_FULL_KEYS) so doom
+    # can track HELD keys — hold W to keep moving. Must be called BEFORE the first present
+    # (the flag rides the CREATE_SURFACE handshake). Without it we'd get press-only.
+    setu_client_request_keys(c);
     return 1;
 }
 
@@ -35,17 +39,32 @@ fn doom_setu_present_buf(pix, w, h): i64 {
     return setu_client_present(doom_setu_client, pix, w, h);
 }
 
-# Drain ONE pending setu input frame. Returns the pressed key's USB-HID usage id (> 0),
-# 0 when nothing is buffered this poll, or -1 when the compositor closed the connection.
-# aethersafha forwards key-DOWN only (setu_dispatch.cyr) — there are NO release events —
-# so the caller (input_poll_setu) uses a press-pulse model.
-fn doom_setu_next_key(): i64 {
+# Drain ONE pending setu key event into `out2`: out2[+0] = HID usage, out2[+8] = value
+# (1 = press / 0 = release — the make/break in the SETU_INPUT_KEY mods arg, delivered
+# because doom opted into FULL_KEYS). Returns 1 on a key event, 0 when nothing is pending
+# this poll, or -1 when the compositor closed the connection. input_poll_setu uses the
+# value as persistent make/break held state (hold-to-move), like doom's raw-scancode path.
+#ifdef DOOM_SETU_KEYLOG
+# Diagnostic (off by default): emit a marker per received key event so the input smoke
+# (agnos scripts/aethersafha-doom-input-smoke.sh) can confirm BOTH press and release reach
+# doom over setu — a "dsetu-release" line proves aethersafha no longer drops key-UP.
+fn _dsetu_keylog(v): i64 {
+    if (v == 0) { return syscall(1, 1, "dsetu-release\n", 14); }
+    return syscall(1, 1, "dsetu-press\n", 12);
+}
+#endif
+
+fn doom_setu_next_key(out2): i64 {
     if (doom_setu_client == 0) { return 0; }
     var msg = setu_msg_new();
     var r = setu_poll_input(setu_client_fd(doom_setu_client), msg);
     if (r < 0) { return 0 - 1; }                                # EOF / compositor gone
     if (r == 0) { return 0; }                                   # nothing this poll
-    if (setu_msg_kind(msg) == SETU_INPUT_KEY) { return setu_msg_arg(msg, 1); }   # arg1 = HID usage
+    if (setu_msg_kind(msg) == SETU_INPUT_KEY) {
+        store64(out2, setu_msg_arg(msg, 1));                    # arg1 = HID usage
+        store64(out2 + 8, setu_msg_arg(msg, 2));                # arg2 = value (1 press / 0 release)
+        return 1;
+    }
     return 0;
 }
 
