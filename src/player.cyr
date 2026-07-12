@@ -39,6 +39,10 @@ enum PlayerConst {
 # Combat state
 var player_health = 100;
 var player_armor = 0;
+# Armor class fixes the absorption fraction (1=green 1/3, 2=blue 1/2) for the life
+# of the armor, independent of the remaining count — vanilla keeps blue at 1/2 down
+# to 0 (audit G-4). Set at pickup, zeroed when armor depletes.
+var player_armor_class = 0;
 var player_weapon = 1;
 var player_weapons = 0;
 var player_ammo_bullets = 50;
@@ -87,6 +91,7 @@ fn player_init(): i64 {
 
     player_health = 100;
     player_armor = 0;
+    player_armor_class = 0;
     player_ammo_bullets = 50;
     player_weapon = 2;
     # Bitmask: bit N = has weapon N (bit 1=fist, bit 2=pistol)
@@ -375,12 +380,16 @@ fn player_move_ok(nx, ny): i64 {
 fn player_take_damage(dmg): i64 {
     if (dmg <= 0) { return 0; }
     if (player_armor > 0) {
-        # Blue armor absorbs 1/2, green absorbs 1/3
+        # Absorption is fixed by the armor CLASS at pickup, not the live count:
+        # blue (class 2) absorbs 1/2 down to 0, green (class 1) 1/3. The old
+        # `player_armor > 100` test silently degraded a depleting blue set to 1/3
+        # once it dropped past 100 (audit G-4).
         var absorb = dmg / 3;
-        if (player_armor > 100) { absorb = dmg / 2; }
+        if (player_armor_class == 2) { absorb = dmg / 2; }
         if (absorb > player_armor) { absorb = player_armor; }
         player_armor -= absorb;
         dmg -= absorb;
+        if (player_armor <= 0) { player_armor_class = 0; }
     }
     player_health -= dmg;
     sound_player_pain();
@@ -622,8 +631,12 @@ fn player_tick(): i64 {
     if (player_x != old_px) { doors_walk_trigger(old_px, old_py, player_x, player_y); }
     if (player_y != old_py) { doors_walk_trigger(old_px, old_py, player_x, player_y); }
 
-    # Weapon switching (number keys 1-7)
-    if (input_weapon > 0) {
+    # Weapon switching (number keys 1-7). Deferred while a fire animation is in
+    # flight (weapon_fire_frame != 0): render_set_weapon resets weapon_fire_frame
+    # AND weapon_fire_timer to 0, which would re-open the fire gate below and let a
+    # mid-refire weapon-tap collapse the rocket/shotgun cadence from ~20/18 ticks to
+    # ~3 (audit G-1). The switch takes effect once the animation returns to frame 0.
+    if (input_weapon > 0 && weapon_fire_frame == 0) {
         if (input_weapon <= 7) {
             var wmask = 1 << input_weapon;
             if ((player_weapons & wmask) != 0) {

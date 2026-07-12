@@ -30,6 +30,11 @@ enum DoorState {
     # once and latch — they never wait+close. Distinct opening state so
     # doors_tick knows to release the thinker (not schedule a close) at the top.
     DS_OPENING_STAY = 8;
+    # One-way floor lower (specials 23/38/70/71/102). Lowers the floor to target
+    # and LATCHES — never raises (unlike DS_LIFT_DOWN, which waits + raises). These
+    # were mis-routed to lift_activate, so a "lower floor" permanently-open path
+    # instead re-sealed itself after 105 tics / could crush (audit G-2 motion fix).
+    DS_FLOOR_LOWER = 9;
 }
 
 # Thinker entry: sector(8) state(8) height(8) target(8) wait(8) original(8) = 48 bytes
@@ -123,6 +128,63 @@ fn find_lowest_neighbor_floor(sector_idx): i64 {
     return best;
 }
 
+# Find the highest floor of sectors NEIGHBORING a given sector (excludes the
+# sector's own floor — vanilla P_FindHighestFloorSurrounding starts at -500 and
+# maxes over neighbors only). Used by the "lower floor to highest neighbor"
+# specials (70/71/102). Returns the sector's own floor if it has no neighbors
+# (→ no motion).
+fn find_highest_neighbor_floor(sector_idx): i64 {
+    var best = 0;
+    var found = 0;
+    for (var i = 0; i < map_num_linedefs; i += 1) {
+        var rs = map_linedef_side_right(i);
+        var ls = map_linedef_side_left(i);
+        if (rs < 0) { continue; }
+        if (ls < 0) { continue; }
+        var rs_sec = map_sidedef_sector(rs);
+        var ls_sec = map_sidedef_sector(ls);
+        if (rs_sec == sector_idx) {
+            var fh = map_sector_floorh(ls_sec);
+            if (found == 0 || fh > best) { best = fh; found = 1; }
+        }
+        if (ls_sec == sector_idx) {
+            var fh = map_sector_floorh(rs_sec);
+            if (found == 0 || fh > best) { best = fh; found = 1; }
+        }
+    }
+    if (found == 0) { return map_sector_floorh(sector_idx); }
+    return best;
+}
+
+# One-way floor lower: lower `sector_idx`'s floor to `target` and latch (never
+# raise). Shares the thinker array + door_free-on-arrival pattern. Lower-only —
+# if target is not BELOW the current floor, there's nothing to do (and no slot is
+# allocated, mirroring door_start's already-open guard). (audit G-2 motion fix)
+fn floor_lower_start(sector_idx, target): i64 {
+    if (door_find_sector(sector_idx) >= 0) { return 0; }
+    var floor_h = map_sector_floorh(sector_idx);
+    if (target >= floor_h) { return 0; }
+    var idx = door_alloc_slot();
+    if (idx < 0) { return 0; }
+    var base = door_thinkers + idx * DOOR_ENTRY_SIZE;
+    store64(base, sector_idx);
+    store64(base + 8, DS_FLOOR_LOWER);
+    store64(base + 16, floor_h);
+    store64(base + 24, target);
+    store64(base + 32, 0);
+    store64(base + 40, floor_h);
+    return 0;
+}
+fn floor_lower_to_lowest(sector_idx): i64 {
+    return floor_lower_start(sector_idx, find_lowest_neighbor_floor(sector_idx));
+}
+fn floor_lower_to_highest(sector_idx): i64 {
+    return floor_lower_start(sector_idx, find_highest_neighbor_floor(sector_idx));
+}
+fn floor_lower_to_highest8(sector_idx): i64 {
+    return floor_lower_start(sector_idx, find_highest_neighbor_floor(sector_idx) + 8);
+}
+
 # Check if sector already has an active thinker (skips freed slots)
 fn door_find_sector(sector_idx): i64 {
     for (var i = 0; i < door_count; i += 1) {
@@ -137,15 +199,25 @@ fn door_find_sector(sector_idx): i64 {
 #   DS_OPENING_STAY -> open and latch     (D1/W1/S1 stay-open)
 fn door_start(sector_idx, open_state): i64 {
     if (door_find_sector(sector_idx) >= 0) { return 0; }
-    var idx = door_alloc_slot();
-    if (idx < 0) { return 0; }
 
-    var base = door_thinkers + idx * DOOR_ENTRY_SIZE;
     var ceil_h = map_sector_ceilh(sector_idx);
     var target = find_highest_neighbor_ceil(sector_idx) - 4;
     # A sector with no higher neighbor would "open" to its own ceiling − 4,
     # DIPPING the ceiling for the wait period (RC-G8/L7). Never open downward.
     if (target < ceil_h) { target = ceil_h; }
+
+    # Already at (or above) the open target — a latched stay-open door whose
+    # thinker freed itself, re-used: don't spawn a no-motion 1-tick thinker and
+    # replay DSDOROPN on every use pulse (~15-30 Hz on tty autorepeat → audio spam
+    # + mixer voice stealing, audit G-8). Also covers the no-higher-neighbor case
+    # (target clamped to ceil_h above). Checked BEFORE door_alloc_slot so an
+    # already-open door doesn't leak a slot (door_alloc_slot bumps door_count).
+    # Closed doors have ceil_h < target → proceed.
+    if (ceil_h >= target) { return 0; }
+
+    var idx = door_alloc_slot();
+    if (idx < 0) { return 0; }
+    var base = door_thinkers + idx * DOOR_ENTRY_SIZE;
 
     store64(base, sector_idx);
     store64(base + 8, open_state);
@@ -266,6 +338,20 @@ fn doors_tick(): i64 {
             door_set_height(i, h);
             store64(map_sectors + sec * MAP_SECTOR_SIZE, h);
         }
+        if (state == DS_FLOOR_LOWER) {
+            # One-way (audit G-2): lower the floor to target and release the slot
+            # — no wait, no raise (contrast DS_LIFT_DOWN). Floor = sector offset 0.
+            h -= LIFT_SPEED;
+            if (h <= target) {
+                h = target;
+                door_set_height(i, h);
+                store64(map_sectors + sec * MAP_SECTOR_SIZE, h);
+                door_free(i);
+            } else {
+                door_set_height(i, h);
+                store64(map_sectors + sec * MAP_SECTOR_SIZE, h);
+            }
+        }
         if (state == DS_LIFT_WAIT) {
             w -= 1;
             door_set_wait(i, w);
@@ -379,47 +465,53 @@ fn doors_use(): i64 {
     var door_sec = -1;
     if (ls >= 0) { door_sec = map_sidedef_sector(ls); }
 
-    # Direct use-activated specials (back-side sector). if/else ladder, NOT
-    # switch: cycc's switch codegen can smash the enclosing fn's return with
-    # sparse/out-of-order labels (the thing_animate combat coredump, 0.30.2)
-    # — this fn crashed the same way once the RC-G3 rewrite changed its
-    # local-variable layout.
+    # MANUAL doors ONLY (DR / D1) — the only specials that legitimately act on the
+    # switch line's own back sector with the tag ignored. Flat if statements (NOT a
+    # switch — sparse labels risk the cycc return-smash; NOT that they need to be
+    # mutually-exclusive-chained since `special` is one value). The S1/SR switch
+    # doors+lifts and the W1/WR walk specials that used to live here were WRONG on
+    # the back sector — moved to the tag loop below and to doors_walk_trigger
+    # (audit G-2). DR keyed: 26=blue 27=yellow 28=red. D1 keyed open-stay: 32=blue
+    # 33=red 34=yellow (note the DR/D1 colour orders differ — vanilla).
     if (door_sec >= 0) {
-        # Doors (open wait close)
-        if (special == 1) { door_open(door_sec); }
-        else { if (special == 26) { if ((player_keys & KEY_CARD_BLUE) != 0) { door_open(door_sec); } }
-        else { if (special == 27) { if ((player_keys & KEY_CARD_YELLOW) != 0) { door_open(door_sec); } }
-        else { if (special == 28) { if ((player_keys & KEY_CARD_RED) != 0) { door_open(door_sec); } }
-        else { if (special == 29) { door_open(door_sec); }
-        else { if (special == 31) { door_open_stay(door_sec); }   # D1 open & stay
-        else { if (special == 63) { door_open(door_sec); }
-        else { if (special == 90) { door_open(door_sec); }
-        else { if (special == 117) { door_open(door_sec); }
-        # Lifts
-        else { if (special == 10) { lift_activate(door_sec); }
-        else { if (special == 21) { lift_activate(door_sec); }
-        else { if (special == 62) { lift_activate(door_sec); }
-        else { if (special == 88) { lift_activate(door_sec); }
-        else { if (special == 121) { lift_activate(door_sec); }
-        else { if (special == 122) { lift_activate(door_sec); } } } } } } } } } } } } } } }
+        if (special == 1)   { door_open(door_sec); }                                                          # DR
+        if (special == 26)  { if ((player_keys & KEY_CARD_BLUE)   != 0) { door_open(door_sec); } }            # DR blue
+        if (special == 27)  { if ((player_keys & KEY_CARD_YELLOW) != 0) { door_open(door_sec); } }            # DR yellow
+        if (special == 28)  { if ((player_keys & KEY_CARD_RED)    != 0) { door_open(door_sec); } }            # DR red
+        if (special == 31)  { door_open_stay(door_sec); }                                                     # D1 open & stay
+        if (special == 32)  { if ((player_keys & KEY_CARD_BLUE)   != 0) { door_open_stay(door_sec); } }       # D1 blue open-stay
+        if (special == 33)  { if ((player_keys & KEY_CARD_RED)    != 0) { door_open_stay(door_sec); } }       # D1 red open-stay
+        if (special == 34)  { if ((player_keys & KEY_CARD_YELLOW) != 0) { door_open_stay(door_sec); } }       # D1 yellow open-stay
+        if (special == 117) { door_open(door_sec); }                                                          # DR blazing
+        if (special == 118) { door_open_stay(door_sec); }                                                     # D1 blazing open-stay
     }
 
     # Exit switches (if/else — see above)
     if (special == 11) { level_exit_normal(); return 0; }
     if (special == 51) { level_exit_secret(); return 0; }
 
-    # Tag-based specials: activate matching tagged sectors (if/else — see above)
+    # Tag-based SWITCH specials (S1/SR push-use): act on the TAGGED sectors, not
+    # the switch line's back sector (audit G-2). Flat if statements — a switch may
+    # legitimately drive several tagged sectors, so every match fires per sector.
     var tag = load64(map_linedefs + best_line * MAP_LINEDEF_SIZE + 32);
     if (tag > 0) {
         for (var si = 0; si < map_num_sectors; si += 1) {
             var stag = load64(map_sectors + si * MAP_SECTOR_SIZE + 48);
             if (stag == tag) {
-                if (special == 23) { lift_activate(si); }
-                else { if (special == 38) { lift_activate(si); }
-                else { if (special == 70) { lift_activate(si); }
-                else { if (special == 71) { lift_activate(si); }
-                else { if (special == 102) { lift_activate(si); }
-                else { if (special == 103) { door_open_stay(si); } } } } } }   # S1 open & stay
+                # Doors + lifts
+                if (special == 29)  { door_open(si); }        # S1 door open-wait-close
+                if (special == 63)  { door_open(si); }        # SR door open-wait-close
+                if (special == 103) { door_open_stay(si); }   # S1 door open & stay
+                if (special == 21)  { lift_activate(si); }    # S1 lift
+                if (special == 62)  { lift_activate(si); }    # SR lift
+                if (special == 122) { lift_activate(si); }    # S1 lift (blazing)
+                # One-way floor-lower switches — motion fix (were lift_activate =
+                # lower-wait-RAISE, which re-sealed the path; now lower-and-latch).
+                if (special == 23)  { floor_lower_to_lowest(si); }    # S1 lower to lowest neighbor
+                if (special == 71)  { floor_lower_to_highest8(si); }  # S1 lower to highest+8 (turbo)
+                if (special == 70)  { floor_lower_to_highest8(si); }  # SR lower to highest+8 (turbo)
+                if (special == 102) { floor_lower_to_highest(si); }   # S1 lower to highest neighbor
+                # (38 was here but it is W1 walk-only — moved to doors_walk_trigger.)
             }
         }
     }
@@ -436,14 +528,20 @@ fn doors_walk_trigger(old_x, old_y, new_x, new_y): i64 {
         # if/else, NOT switch: this is a hot per-tick fn with sparse/out-of-order
         # labels (2..124) — the cycc return-smash class that crashed thing_animate
         # and doors_use twice. Defensive rewrite per the established pattern (G-7).
+        # W1/WR walk triggers. 90 (WR door) + 121 (W1 fast lift) added — they were
+        # wrongly in doors_use (walk specials aren't use-activatable) and 90/121
+        # were handled by NO path, so the 20 WR doors in E1M3/4/5/7/9 never fired.
+        # 70 removed — it is an SR *switch*, handled in doors_use's tag loop (it was
+        # spuriously walk-activatable here). (audit G-2)
         var is_walk = 0;
         if (special == 2)   { is_walk = 1; }
         if (special == 4)   { is_walk = 1; }
         if (special == 10)  { is_walk = 1; }
         if (special == 38)  { is_walk = 1; }
         if (special == 52)  { is_walk = 1; }
-        if (special == 70)  { is_walk = 1; }
         if (special == 88)  { is_walk = 1; }
+        if (special == 90)  { is_walk = 1; }
+        if (special == 121) { is_walk = 1; }
         if (special == 124) { is_walk = 1; }
         if (is_walk == 0) { continue; }
 
@@ -496,13 +594,15 @@ fn doors_walk_trigger(old_x, old_y, new_x, new_y): i64 {
             for (var si = 0; si < map_num_sectors; si += 1) {
                 var stag = load64(map_sectors + si * MAP_SECTOR_SIZE + 48);
                 if (stag == tag) {
-                    # if/else ladder, NOT switch (return-smash-safe)
-                    if (special == 2) { door_open_stay(si); }        # W1 open & stay
-                    else { if (special == 4) { door_open(si); }      # W1 open wait close
-                    else { if (special == 10) { lift_activate(si); }
-                    else { if (special == 38) { lift_activate(si); }
-                    else { if (special == 70) { lift_activate(si); }
-                    else { if (special == 88) { lift_activate(si); } } } } } }
+                    # Flat if statements (return-smash-safe). Act on the tagged
+                    # sectors with the vanilla motion.
+                    if (special == 2)   { door_open_stay(si); }          # W1 door open & stay
+                    if (special == 4)   { door_open(si); }               # W1 door open-wait-close
+                    if (special == 90)  { door_open(si); }               # WR door open-wait-close
+                    if (special == 10)  { lift_activate(si); }           # W1 lift
+                    if (special == 88)  { lift_activate(si); }           # WR lift
+                    if (special == 121) { lift_activate(si); }           # W1 lift (blazing)
+                    if (special == 38)  { floor_lower_to_lowest(si); }   # W1 lower to lowest (one-way, motion fix)
                 }
             }
         }

@@ -22,6 +22,15 @@ crash), **P-6** (compositor-dim overflow), **M-2** (env-path stack smash), **R-2
 **R-6/M-3/M-4** (TEXTURE1/STBAR alloc guards), **G-7** (sparse hot-path switches → if/else). See
 CHANGELOG `[0.33.4]`. The rows below marked "slotted v0.33.4" are now **FIXED@0.33.4**.
 
+**Shipped in 0.33.5** (the second fix-slot patch): **G-2** (switch doors/lifts → tagged sectors; the
+progression blocker — plus the one-sided-switch-line inert case, the newly-added D1 keyed open-stay
+doors 32/33/34, the walk-special relocation, and a one-way `DS_FLOOR_LOWER` motion for 23/38/70/71/102),
+**R-1** (both-end render-clip clamp — A/B PPM byte-identical, review-confirmed), **G-1** (weapon-switch
+refire-cadence gate), **G-3** (intermission/death min-display + sustained-release), **G-4** (armor
+class), **G-6** (melee sight re-check), **G-8** (open-stay door sound spam), **G-12** (sergeant SFX). See
+CHANGELOG `[0.33.5]`. **G-5** (escape-rule zero-band) and pre-existing door/lift fidelity items surfaced
+by the G-2 review (door-opens-to-highest-ceiling, blazing/turbo speed, W1 one-shot latch) deferred → roadmap 0.33.7.
+
 **Shipped in 0.33.3** (this document's release):
 - **Toolchain pin `6.4.43 → 6.4.55`** (latest; true-pin build via `~/.cyrius/versions/6.4.55/bin/cyrius`).
 - **vani vendor `1.1.0 → 1.1.1`** (dist byte-identical except the version header — provenance refresh).

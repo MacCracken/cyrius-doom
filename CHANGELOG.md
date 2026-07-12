@@ -7,6 +7,77 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.33.5] - 2026-07-12 — gameplay-fidelity patch (switch/lift dispatch + render clamp + polish)
+
+The second patch off the [2026-07-12 consolidated audit](docs/audit/2026-07-12-consolidated-audit.md),
+driven by a design pass (authoritative DOOM linedef-type semantics + vanilla R_RenderSegLoop clamp
+spec) and an adversarial diff review. The headline is a progression-blocker: **switch-operated doors
+and lifts acted on the wrong sector** (or none), so remote switches did nothing.
+
+### Fixed
+
+- **Switch-operated doors/lifts dispatched on the wrong sector — a progression blocker** (audit G-2,
+  the largest fix). `doors_use` routed the S1/SR switch specials (29/63 doors, 21/62/122 lifts) to the
+  **back sector of the switch line** instead of the **tagged** sectors. Worse, many switch lines are
+  one-sided (a switch texture on a solid wall), so `door_sec = -1` and the whole block was skipped —
+  the switch was **completely inert** (verified: E1M2 line with special 62 tag 10, `back_sec = -1`, did
+  nothing; type 62 is used 35× across the shareware episode). Now every S1/SR switch acts on its tagged
+  sectors. The back-sector block keeps only the manual DR/D1 doors (which correctly ignore the tag), and
+  **gained the D1 keyed open-stay doors 32/33/34** (blue/red/yellow), which the shareware maps use 13×
+  but doom didn't handle at all — those doors were stuck closed. The walk specials (90/10/88/121) that
+  were wrongly use-activatable moved out of `doors_use`; **90 (WR door) + 121 (W1 lift) were added to
+  `doors_walk_trigger`** — 90 (used 20× in E1M3/4/5/7/9) had no working path before.
+- **Floor-lower specials re-sealed the path** (audit G-2, motion fix). Specials 23/38/70/71/102 ("lower
+  floor to …") were routed to `lift_activate` = lower-**wait-raise**, so a floor that should permanently
+  drop to open a route rose back up after ~3 s (or could crush). New one-way `DS_FLOOR_LOWER` thinker
+  (+ `find_highest_neighbor_floor` + `floor_lower_to_{lowest,highest,highest8}`) lowers and **latches**.
+  Present in E1M5/E1M7.
+- **Far flats/textures overpainting nearer geometry through a portal** (audit R-1). The seg loop clamped
+  wall/plane/sky sections to the clip window on only one end; vanilla R_RenderSegLoop bounds every section
+  by **both** `ceilingclip` and `floorclip`. A raised-sill or low portal let a far low ceiling / far high
+  floor project past the window and, since the plane pass runs after all walls, overpaint. Added the
+  missing far-end clamps (`ceil_screen ≤ cb+1`, `floor_screen ≥ ct-1`, `upper_y2 ≤ cb`, `lower_y1 ≥ ct`).
+  **A/B PPM diff: all 9 shareware maps byte-identical** (the clamps are dormant at spawn views —
+  adversarial review confirmed they're correct AND safe, never producing an OOB or inverted draw).
+- **Weapon-switch collapsed the refire cadence** (audit G-1). Switching weapons ran `render_set_weapon`,
+  which resets `weapon_fire_frame`/`weapon_fire_timer` to 0 — re-opening the fire gate. Tapping a weapon
+  key mid-refire fired the rocket/shotgun every ~3 ticks instead of every 20/18 (a multi-× DPS exploit,
+  the class 0.30.0 closed for the fire key). Weapon switching is now deferred while a fire animation is
+  in flight (`weapon_fire_frame != 0`).
+- **Intermission / death screen self-dismissed on a held key** (audit G-3). The single-poll release gate
+  armed on the tty-autorepeat gap (`input_flags` pulses 0 between bytes) and the next byte dismissed the
+  screen in ~28 ms. Replaced with a **minimum display time (~1 s) + sustained-release counter**: the
+  minimum lets any fresh-press key-repeat *initial delay* pass before arming, so a held key (in steady
+  autorepeat by then) can't false-arm regardless of the OS repeat-delay setting — hardened past a naive
+  N-tick threshold after the adversarial review flagged its dependence on that uncontrolled parameter.
+- **Blue armor degraded to green absorption below 100** (audit G-4). Absorption was inferred from the live
+  count (`> 100` = ½) rather than the pickup type, so a depleting blue set silently dropped to ⅓ once it
+  fell below 100. Now a persistent `player_armor_class` (green 1, blue 2), set at pickup and cleared at 0.
+- **Melee monsters hit through thin walls** (audit G-6). The melee-release branch had no sight re-check
+  (only the ranged branch did), so a player ducking behind a wall during the wind-up still took the hit.
+  Gated on `thing_check_sight` like the ranged branch (vanilla P_CheckMeleeRange includes P_CheckSight).
+- **Repeated use on an already-open stay-door replayed the sound + spawned a dead thinker** (audit G-8).
+  `door_start` now early-returns (before allocating a slot — no leak) when the sector is already at/above
+  the open target, so held use on an open door no longer spams `DSDOROPN` / steals mixer voices.
+- **Sergeants used the pistol sound** (audit G-12). Shotgun sergeants (`TTYPE_SHOTGUY`) now play `DSSHOTGN`.
+
+### Verification
+
+- Tests **164/244** (+9 WAD-free: armor-class absorption — G-4; +8 WAD-gated: one-way floor-lower motion +
+  already-open-door no-op — G-2/G-8). fuzz `fuzz_wad`/`fuzz_fixed`/`fuzz_weapon`/`fuzz_mus` =
+  **1000/50000/2000/1000 clean**; all 9 maps + 5 menus render at 192,015 B; **R-1 A/B PPM diff byte-identical
+  on all 9 maps**; clean-from-scratch resolve + `CYRIUS_DCE=1` build (523 fns / 98,164 B NOPed); deps 36/0;
+  `render_frame` **2.347 ms** (variance — R-1's per-column branches are negligible). Binary 439,208 →
+  **443,320 B** (+4,112 for the floor-motion infrastructure + dispatch; `doom_agnos` 425,608 →
+  **425,624 B**). **AGNOS QEMU doom-smoke + in-game sendkey + aethersafha compositor-present — all PASS on
+  the final 0.33.5 binary.** Built on the **true pinned 6.4.55** (toolchain symlink-swapped from the
+  drifted local 6.4.58; pin unchanged — a fix-only patch). Adversarial diff review: doors + render verdicts
+  clean (pre-existing INFO items → roadmap); the one MED it surfaced (G-3 threshold) was hardened before
+  cutting.
+- **Deferred → roadmap** (pre-existing, surfaced by the G-2 review): doors open to the *highest* neighbor
+  ceiling (vanilla: lowest); blazing/turbo specials run at base speed (no fast variant); W1/S1 one-shot
+  specials lack a per-linedef used-latch (re-fire on re-cross).
+
 ## [0.33.4] - 2026-07-12 — security + safety quick-wins (first audit-slot patch)
 
 The first patch off the [2026-07-12 consolidated audit](docs/audit/2026-07-12-consolidated-audit.md) —

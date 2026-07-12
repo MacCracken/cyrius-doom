@@ -703,8 +703,13 @@ fn thing_ai_tick(idx): i64 {
                 # Was `3 + tick_get_count() % 22` — a deterministic function of
                 # the game clock (the time-correlation class purged from player
                 # weapons in 0.30.0); p_random makes it a real random roll.
-                var dmg = (p_random() % 8 + 1) * 3;
-                player_take_damage(dmg);
+                # Sight-gated like the ranged branch (vanilla P_CheckMeleeRange
+                # includes P_CheckSight): the player ducking behind a thin wall
+                # during the wind-up must not eat the hit (audit G-6).
+                if (thing_check_sight(tx, ty, player_x, player_y) == 1) {
+                    var dmg = (p_random() % 8 + 1) * 3;
+                    player_take_damage(dmg);
+                }
             } else {
                 # Ranged release (0.33.1): re-aim at the player's CURRENT
                 # position; LOS re-checked so the shot doesn't cross a wall
@@ -814,10 +819,12 @@ fn things_check_pickups(): i64 {
             picked = 1;
         }
 
-        # Armor has conditional logic (don't pick up if already at max tier)
-        if (ttype == TTYPE_ARMOR_BONUS) { player_armor += 1; picked = 1; }
-        if (ttype == TTYPE_ARMOR_GREEN && player_armor < 100) { player_armor = 100; picked = 1; }
-        if (ttype == TTYPE_ARMOR_BLUE && player_armor < 200) { player_armor = 200; picked = 1; }
+        # Armor has conditional logic (don't pick up if already at max tier).
+        # Track the class so absorption stays faithful as the count drops (G-4):
+        # green=1 (1/3), blue=2 (1/2); a bonus with no armor yet counts as green.
+        if (ttype == TTYPE_ARMOR_BONUS) { player_armor += 1; if (player_armor_class == 0) { player_armor_class = 1; } picked = 1; }
+        if (ttype == TTYPE_ARMOR_GREEN && player_armor < 100) { player_armor = 100; player_armor_class = 1; picked = 1; }
+        if (ttype == TTYPE_ARMOR_BLUE && player_armor < 200) { player_armor = 200; player_armor_class = 2; picked = 1; }
 
         # Clamp health + armor (soulsphere/potion/bonus can exceed 100, cap 200)
         if (player_health > 200) { player_health = 200; }
@@ -1047,8 +1054,9 @@ fn thing_hitscan_player(idx): i64 {
     var threshold = 176 - fixed_to_int(dist) / 16;
     if (threshold < 32) { threshold = 32; }
     var pellets = 1;
-    if (thing_type(idx) == TTYPE_SHOTGUY) { pellets = 3; }
-    audio_play_at("DSPISTOL", thing_x(idx), thing_y(idx));
+    var snd = "DSPISTOL";
+    if (thing_type(idx) == TTYPE_SHOTGUY) { pellets = 3; snd = "DSSHOTGN"; }   # sergeant = shotgun (G-12)
+    audio_play_at(snd, thing_x(idx), thing_y(idx));
     for (var p = 0; p < pellets; p += 1) {
         if (p_random() < threshold) {
             # Vanilla trooper/sergeant bullet: (P_Random()%5 + 1) * 3.

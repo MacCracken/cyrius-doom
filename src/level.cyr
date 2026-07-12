@@ -275,7 +275,23 @@ fn level_intermission(): i64 {
     # always exited with a key held (walk-over exit, or E on a switch), and
     # input_flags is level-triggered, so this used to flash past in ~28 ms.
     # Require keys to release first, then a new press (audit F-U3).
-    var wi_released = 0;
+    # Dismiss only on a fresh press after a sustained release, and never before a
+    # MINIMUM display time (audit G-3, hardened after adversarial review):
+    #   * The old single-poll `input_flags==0` gate self-dismissed on the Linux tty
+    #     path, where key_state is cleared every poll so a HELD key's autorepeat
+    #     makes input_flags pulse 0 between bytes.
+    #   * A plain N-consecutive-zero-ticks counter is defeated by the OS key-repeat
+    #     INITIAL delay (250-660 ms): a freshly pressed-and-held key goes byte →
+    #     long silent gap → repeat, and that gap can exceed any fixed threshold,
+    #     re-arming while the key is still held.
+    # Fix: ignore input for WI_MIN_TICKS (~1 s) first. That guarantees readability
+    # AND lets any fresh-press initial-delay gap pass — by the time arming starts a
+    # held key is in STEADY autorepeat (short ~1-2-tick gaps that never reach the
+    # threshold), so only a genuine release arms, then a press dismisses. Robust for
+    # every repeat-delay setting and for the persistent-hold Wayland/setu paths.
+    var wi_min = 35;
+    var wi_relcount = 0;
+    var wi_armed = 0;
     var waiting = 1;
     while (waiting == 1) {
         tick_begin();
@@ -285,8 +301,12 @@ fn level_intermission(): i64 {
         # stale-content echo and the exit-switch beep can hang (audit F-U7).
         audio_tick();
         sound_tick();
-        if (input_flags == 0) { wi_released = 1; }
-        if (wi_released == 1 && input_flags != 0) { waiting = 0; }
+        if (wi_min > 0) { wi_min -= 1; }
+        else {
+            if (input_flags == 0) { wi_relcount += 1; } else { wi_relcount = 0; }
+            if (wi_relcount >= 8) { wi_armed = 1; }
+            if (wi_armed == 1 && input_flags != 0) { waiting = 0; }
+        }
         if (input_quit == 1) { waiting = 0; }
         tick_wait();
     }

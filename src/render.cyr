@@ -1121,9 +1121,17 @@ fn render_seg(seg_idx): i64 {
         var floor_screen = HALF_HEIGHT - fixed_to_int(
         fixed_div(fixed_mul((floor_h << 16) - eye_h, PROJ_DIST), depth));
 
-        # Clamp to clip region
+        # Clamp to clip region — BOTH ends (audit R-1). Vanilla R_RenderSegLoop
+        # bounds every section by both ceilingclip AND floorclip; clamping only the
+        # facing side let a far low ceiling (ceil_screen past cb) or a far high floor
+        # (floor_screen above ct) project into the window and, since the plane pass
+        # runs after all walls, OVERPAINT nearer geometry. The far-end clamps below
+        # never fire for a same-sector projection (ceil_screen < HALF_HEIGHT <
+        # floor_screen always), so this is a strict correction of the far-portal case.
         if (ceil_screen < ct) { ceil_screen = ct; }
+        if (ceil_screen > cb + 1) { ceil_screen = cb + 1; }   # ceiling span [ct, ceil_screen-1] must not pass cb
         if (floor_screen > cb) { floor_screen = cb; }
+        if (floor_screen < ct - 1) { floor_screen = ct - 1; } # floor span [floor_screen+1, cb] must not pass ct
 
         # Absolute clamp to the row-loop bounds BEFORE the vp_* loops below
         # index vp_ceil_*/vp_floor_* (each alloc(200*8)). The relative clamps
@@ -1208,6 +1216,16 @@ fn render_seg(seg_idx): i64 {
                 if (gap_start < ceil_screen) { gap_start = ceil_screen; }
                 if (gap_start < lower_y1) { lower_y1 = gap_start; }
             }
+
+            # Bound the two-sided section extents to the clip window (audit R-1).
+            # In the OPEN case upper_y2/lower_y1 come straight from the back
+            # projection with no clamp, so a raised-sill / low portal projects the
+            # upper wall past cb or the lower wall past ct → overpaint. Applied
+            # after the closed-gap extension (idempotent there, since gap_* are
+            # already inside [ct,cb]) and BEFORE the lower-wall texture-V re-anchor
+            # at line ~1261, which reads the final lower_y1 and auto-compensates V.
+            if (upper_y2 > cb) { upper_y2 = cb; }
+            if (lower_y1 < ct) { lower_y1 = ct; }
 
             # Upper wall
             if (back_ceil_screen > ceil_screen) {

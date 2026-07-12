@@ -591,6 +591,33 @@ fn main() {
     assert_eq(player_ammo_bullets, 200, "bullets capped at 200 (195+50 clamped)");
 
     # ============================================================
+    test_group("armor: class fixes absorption fraction (G-4)");
+    # ============================================================
+    # Blue armor keeps 1/2 absorption for its whole life; the old count-based test
+    # (player_armor>100) silently degraded a depleting blue set to green 1/3 <100.
+    thing_count = 0;
+    store64(pk, 0); store64(pk + 8, 0);
+    store64(pk + 32, TTYPE_ARMOR_BLUE); store64(pk + 104, TF_ACTIVE | TF_PICKUP);
+    thing_count = 1;
+    player_armor = 0; player_armor_class = 0; player_health = 100;
+    things_check_pickups();
+    assert_eq(player_armor, 200, "blue armor pickup sets armor 200");
+    assert_eq(player_armor_class, 2, "blue armor pickup sets class 2");
+    player_armor = 90;                      # drained below 100 — count-based would flip to 1/3
+    player_take_damage(30);                 # class 2 → absorb 15
+    assert_eq(player_armor, 75, "blue absorbs 1/2 below 100 (90-15)");
+    assert_eq(player_health, 85, "blue: only 15 of 30 reached health");
+    player_armor = 60; player_armor_class = 1; player_health = 100;
+    player_take_damage(30);                 # class 1 (green) → absorb 10
+    assert_eq(player_armor, 50, "green absorbs 1/3 (60-10)");
+    assert_eq(player_health, 80, "green: 20 of 30 reached health");
+    player_armor = 5; player_armor_class = 2; player_health = 100;
+    player_take_damage(40);                 # absorb min(20,5)=5, armor→0, class cleared
+    assert_eq(player_armor, 0, "armor depletes to 0");
+    assert_eq(player_armor_class, 0, "class cleared when armor hits 0");
+    assert_eq(player_health, 65, "depleting armor still absorbs its remaining 5 (100-35)");
+
+    # ============================================================
     test_group("collision: player vs solid things");
     # ============================================================
     # A solid thing (radius 10) 30u east; player radius 16 -> combined 26u.
@@ -1137,6 +1164,41 @@ fn main() {
         player_x = 1420 << 16;
         for (var dt = 0; dt < 600; dt += 1) { doors_tick(); }
         assert_eq(load64(map_sectors + 4 * MAP_SECTOR_SIZE + 8), 0, "door fully closes once the doorway is clear");
+
+        # ============================================================
+        test_group("floor: one-way lower latches, never raises (G-2)");
+        # ============================================================
+        # The floor-mover specials (23/38/70/71/102) used to route to lift_activate
+        # (lower-wait-RAISE), re-sealing the path. DS_FLOOR_LOWER lowers and latches.
+        doors_init();
+        var f0 = load64(map_sectors + 4 * MAP_SECTOR_SIZE);          # sector 4 floor (offset 0)
+        floor_lower_start(4, f0 - 64);
+        assert_eq(door_count, 1, "floor-lower spawns a thinker");
+        for (var dt = 0; dt < 200; dt += 1) { doors_tick(); }
+        assert_eq(load64(map_sectors + 4 * MAP_SECTOR_SIZE), f0 - 64, "floor lowered to target");
+        assert_eq(door_find_sector(4), 0 - 1, "one-way lower FREED its thinker (no wait/raise)");
+        for (var dt = 0; dt < 300; dt += 1) { doors_tick(); }
+        assert_eq(load64(map_sectors + 4 * MAP_SECTOR_SIZE), f0 - 64, "floor STAYS down (a lift would have raised)");
+        # Lower-only: target at/above the current floor does nothing (no slot).
+        doors_init();
+        floor_lower_start(4, load64(map_sectors + 4 * MAP_SECTOR_SIZE) + 32);
+        assert_eq(door_count, 0, "floor-lower with target above floor is a no-op");
+        # Neighbor-floor helpers: highest-neighbor >= lowest (which includes self).
+        assert(find_highest_neighbor_floor(4) >= find_lowest_neighbor_floor(4), "highest neighbor floor >= lowest");
+
+        # ============================================================
+        test_group("door: already-open stay door does not re-spawn/re-sound (G-8)");
+        # ============================================================
+        doors_init();
+        # Ceiling raised above every neighbor → target (highest_neighbor-4) <= ceiling
+        # → the already-open guard fires, no thinker, no DSDOROPN replay on held use.
+        store64(map_sectors + 4 * MAP_SECTOR_SIZE + 8, 30000);
+        door_open_stay(4);
+        assert_eq(door_count, 0, "already-open door spawns no thinker (G-8)");
+        # A genuinely closed door still opens.
+        store64(map_sectors + 4 * MAP_SECTOR_SIZE + 8, 0);
+        door_open_stay(4);
+        assert_eq(door_count, 1, "closed door still spawns a thinker");
 
         wad_close();
     } else {
