@@ -18,10 +18,35 @@ enum WinAbi {
     WIN_EV_CLOSE  = 4;
     WIN_EV_FRAME  = 8;
     WIN_CAP_SHM   = 0;     # win_present_begin returns a CPU pixel buffer
+    # Floor for the window/buffer size. doom always blits a fixed 320x200 frame
+    # (SCREEN_WIDTH/HEIGHT, defined in framebuf.cyr which compiles AFTER this file),
+    # so the shm buffer must never be smaller — else framebuf_present_wayland's
+    # 320-wide rows overrun a narrower pitch and, past the mmap end, SIGSEGV
+    # (audit M-1: drag-resize below 320x200, or a tiling-WM small configure).
+    WIN_MIN_W     = 320;
+    WIN_MIN_H     = 200;
+    # Upper bound on any compositor-supplied dimension (audit P-6): shm buffer size
+    # is w*4*h*2 — a hostile ~2^31 dim wraps mod 2^64 to a small positive, giving an
+    # undersized mmap that a larger blit overruns. 16384 is far above any real
+    # display and keeps w*4*h*2 well inside i64.
+    WIN_MAX_W     = 16384;
+    WIN_MAX_H     = 16384;
 }
 
 var win_w = 0;
 var win_h = 0;
+
+# Clamp a compositor-supplied (w, h) to [WIN_MIN, WIN_MAX] on both axes. Floors to
+# the 320x200 blit size (so the shm buffer is never smaller than what
+# framebuf_present_wayland writes — M-1) and caps to WIN_MAX (so the buffer size
+# math can't integer-overflow — P-6). Returns the clamped pair.
+fn win__clamp_size(w, h): i64 {
+    if (w < WIN_MIN_W) { w = WIN_MIN_W; }
+    if (h < WIN_MIN_H) { h = WIN_MIN_H; }
+    if (w > WIN_MAX_W) { w = WIN_MAX_W; }
+    if (h > WIN_MAX_H) { h = WIN_MAX_H; }
+    return (w, h);
+}
 
 # Connect, bind globals, create the xdg-shell window, wait the first configure,
 # allocate the present buffer. (w_hint, h_hint) = fallback size if the compositor
@@ -50,6 +75,9 @@ fn win_open(title, w_hint, h_hint): i64 {
     wl__req1(wl_xsurf_oid, OP_XDGSURF_GET_TOPLEVEL, wl_top_oid);
     wl__set_string(wl_top_oid, OP_TOPLEVEL_SET_TITLE, title);
     wl__set_string(wl_top_oid, OP_TOPLEVEL_SET_APPID, "cyrius-doom");
+    # Ask the compositor not to shrink us below the 320x200 blit floor (advisory —
+    # a tiling WM can ignore it, so win_open/win_resize_apply also hard-clamp below).
+    wl__req2(wl_top_oid, OP_TOPLEVEL_SET_MIN_SIZE, WIN_MIN_W, WIN_MIN_H);
     wl__req0(wl_surf_oid, OP_SURFACE_COMMIT);          # map (no buffer) -> ask configure
 
     while (wl_configured == 0) {
@@ -59,6 +87,8 @@ fn win_open(title, w_hint, h_hint): i64 {
     win_w = wl_cfg_w; win_h = wl_cfg_h;
     if (win_w <= 0) { win_w = w_hint; }
     if (win_h <= 0) { win_h = h_hint; }
+    var ow, oh = win__clamp_size(win_w, win_h);        # floor to blit size + cap (M-1/P-6)
+    win_w = ow; win_h = oh;
     if (shm_create(win_w, win_h) == 0) { return 0; }
     # F2: prove the shm fd actually reached the compositor. A wl_shm.create_pool
     # whose SCM_RIGHTS fd went missing triggers wl_display.error (-> wl_closed);
@@ -107,9 +137,13 @@ fn win_poll_events(win): i64 {
     if (wl_closed == 1) { m = m | WIN_EV_CLOSE; }
     if (wl_frame_done == 1) { m = m | WIN_EV_FRAME; }
     if (wl_key_pending() == 1) { m = m | WIN_EV_KEY; }
+    # Compare the CLAMPED target against the current buffer size, not the raw
+    # configure — else a compositor that persistently sends a sub-320x200 (or huge)
+    # size we clamp away would report RESIZE every frame → shm rebuild churn.
     if (wl_cfg_w > 0) { if (wl_cfg_h > 0) {
-        if (wl_cfg_w != win_w) { m = m | WIN_EV_RESIZE; }
-        if (wl_cfg_h != win_h) { m = m | WIN_EV_RESIZE; }
+        var cw, ch = win__clamp_size(wl_cfg_w, wl_cfg_h);
+        if (cw != win_w) { m = m | WIN_EV_RESIZE; }
+        if (ch != win_h) { m = m | WIN_EV_RESIZE; }
     } }
     return m;
 }
@@ -121,12 +155,18 @@ fn win_poll_events(win): i64 {
 # geometry) BEFORE the first repaint — shm_resize rebuilds the wl_buffers but does
 # NOT re-fill, so stale bar pixels would smear otherwise. Returns 0, or -1 on refit fail.
 fn win_resize_apply(win): i64 {
+    # Clamp the adopted size to [320x200, WIN_MAX] (M-1 floor + P-6 cap): the
+    # compositor (esp. a tiling WM, which ignores set_min_size) can hand us a
+    # smaller-than-blit or overflow-huge configure, and either would let
+    # framebuf_present_wayland's fixed 320-wide rows overrun the buffer. The buffer
+    # is >= the blit; the compositor clips it to the actual window.
+    var nw, nh = win__clamp_size(wl_cfg_w, wl_cfg_h);
     # Commit win_w/win_h only AFTER the buffer refit succeeds — else a failed
     # shm_resize (OOM mid-drag) leaves win_w/win_h ahead of a torn-down buffer,
     # and the next present would scale against a size with no backing store.
-    if (shm_resize(wl_cfg_w, wl_cfg_h) == 0) { return 0 - 1; }
-    win_w = wl_cfg_w;
-    win_h = wl_cfg_h;
+    if (shm_resize(nw, nh) == 0) { return 0 - 1; }
+    win_w = nw;
+    win_h = nh;
     return 0;
 }
 

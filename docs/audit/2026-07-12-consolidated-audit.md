@@ -17,6 +17,11 @@
 
 ## 0. Scope of this cut (v0.33.3)
 
+**Shipped in 0.33.4** (the first fix-slot patch off this audit): **M-1** (Wayland resize-below-320×200
+crash), **P-6** (compositor-dim overflow), **M-2** (env-path stack smash), **R-2** (dead death-face),
+**R-6/M-3/M-4** (TEXTURE1/STBAR alloc guards), **G-7** (sparse hot-path switches → if/else). See
+CHANGELOG `[0.33.4]`. The rows below marked "slotted v0.33.4" are now **FIXED@0.33.4**.
+
 **Shipped in 0.33.3** (this document's release):
 - **Toolchain pin `6.4.43 → 6.4.55`** (latest; true-pin build via `~/.cyrius/versions/6.4.55/bin/cyrius`).
 - **vani vendor `1.1.0 → 1.1.1`** (dist byte-identical except the version header — provenance refresh).

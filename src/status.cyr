@@ -27,7 +27,12 @@ var st_patch_buf = 0;
 var st_name_scratch = 0;
 
 fn st_name_buf(): i64 {
-    if (st_name_scratch == 0) { st_name_scratch = alloc(8); }
+    # 9 bytes, not 8: the face lumps ("STFDEAD0" etc.) are EXACTLY 8 chars, so the
+    # NUL terminator needs a 9th byte. An alloc(8) left the name un-terminated →
+    # wad_name_eq's strlen over-read into the adjacent face_patch_buf (nonzero after
+    # the first draw) → every lump rejected → STFDEAD0 never resolves → blank death
+    # face. Same over-read class as the 0.29.4 PNAMES bug (audit R-2).
+    if (st_name_scratch == 0) { st_name_scratch = alloc(9); }
     return st_name_scratch;
 }
 
@@ -36,23 +41,35 @@ fn status_init_font(): i64 {
     st_nums = alloc(10 * 8);
     st_ynums = alloc(10 * 8);
 
+    # STBAR / STARMS backgrounds: cap the lump size (shareware STBAR is 13 KB,
+    # STARMS 1.6 KB — 64 KB is generous headroom) and guard the alloc. A malformed
+    # WAD declaring a multi-GB size would otherwise alloc→0 → wad_read_lump_into's
+    # memset(0, 0, sz) null-writes → boot crash (audit R-6/M-3/M-4; mirrors the
+    # pn_data==0 / TEXTURE1 guards).
     var stbar_lump = wad_find_lump("STBAR");
     if (stbar_lump >= 0) {
         var sz = wad_lump_size(stbar_lump);
-        stbar_bg = alloc(sz);
-        stbar_bg_size = sz;
-        wad_read_lump_into(stbar_lump, stbar_bg, sz);
+        if (sz >= 8 && sz <= 65536) {
+            stbar_bg = alloc(sz);
+            if (stbar_bg != 0) { stbar_bg_size = sz; wad_read_lump_into(stbar_lump, stbar_bg, sz); }
+            else { stbar_bg = 0; }
+        }
     }
 
     var arms_lump = wad_find_lump("STARMS");
     if (arms_lump >= 0) {
         var sz = wad_lump_size(arms_lump);
-        stbar_arms_bg = alloc(sz);
-        stbar_arms_size = sz;
-        wad_read_lump_into(arms_lump, stbar_arms_bg, sz);
+        if (sz >= 8 && sz <= 65536) {
+            stbar_arms_bg = alloc(sz);
+            if (stbar_arms_bg != 0) { stbar_arms_size = sz; wad_read_lump_into(arms_lump, stbar_arms_bg, sz); }
+            else { stbar_arms_bg = 0; }
+        }
     }
 
-    var numname = alloc(8);
+    # 9 bytes: "STYSNUM"+digit is exactly 8 chars, so the NUL needs a 9th byte
+    # (else strlen over-reads the next bump-alloc; worked before only because fresh
+    # bump space was zero — audit R-2 sibling).
+    var numname = alloc(9);
     for (var i = 0; i < 10; i += 1) {
         memcpy(numname, "STTNUM", 6);
         store8(numname + 6, 48 + i);
@@ -63,6 +80,7 @@ fn status_init_font(): i64 {
     for (var i = 0; i < 10; i += 1) {
         memcpy(numname, "STYSNUM", 7);
         store8(numname + 7, 48 + i);
+        store8(numname + 8, 0);
         store64(st_ynums + i * 8, wad_find_lump(numname));
     }
 
@@ -222,6 +240,7 @@ fn status_draw_face(px, py): i64 {
     var hl = status_face_color();
     if (player_health <= 0) {
         memcpy(face_name, "STFDEAD0", 8);
+        store8(face_name + 8, 0);                  # NUL the 8-char name (R-2)
     } else {
         memcpy(face_name, "STFST", 5);
         store8(face_name + 5, 48 + hl);

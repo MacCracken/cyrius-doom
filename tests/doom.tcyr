@@ -35,6 +35,10 @@ include "src/doors.cyr"
 # music.cyr needs only SND_DMX_RATE from audio.cyr (not otherwise included here).
 enum MusRateStub { SND_DMX_RATE = 11025; }
 include "src/music.cyr"
+# status.cyr included for the R-2 name-scratch regression (face/HUD-number lump
+# lookup through the NUL-terminated 9-byte scratch). Self-contained: uses only
+# wad_*/framebuf_*/player_* symbols already included above.
+include "src/status.cyr"
 
 # Hermetic no-op stubs for cross-module side-effects the combat path calls.
 # sound.cyr / level.cyr / tick.cyr / doors.cyr aren't included here (they pull
@@ -736,6 +740,23 @@ fn main() {
     assert_eq(wl__parse(), 0 - 1, "size<8 message aborts parse (returns -1)");
 
     # ============================================================
+    # window: compositor-size clamp (v0.33.4, M-1/P-6, headless)
+    # framebuf_present_wayland blits a fixed 320x200 frame, so the shm buffer must
+    # never be smaller (M-1 crash) nor overflow-huge (P-6). win__clamp_size floors
+    # to 320x200 and caps to WIN_MAX on both axes.
+    # ============================================================
+    test_group("window: compositor size clamp (M-1/P-6)");
+    var c1w, c1h = win__clamp_size(300, 150);
+    assert_eq(c1w, 320, "sub-min width floored to 320 (M-1)");
+    assert_eq(c1h, 200, "sub-min height floored to 200 (M-1)");
+    var c2w, c2h = win__clamp_size(640, 400);
+    assert_eq(c2w, 640, "in-range width kept");
+    assert_eq(c2h, 400, "in-range height kept");
+    var c3w, c3h = win__clamp_size(2000000000, 2000000000);
+    assert_eq(c3w, 16384, "overflow-huge width capped to WIN_MAX (P-6)");
+    assert_eq(c3h, 16384, "overflow-huge height capped to WIN_MAX (P-6)");
+
+    # ============================================================
     # WAD tests require DOOM1.WAD — skip if not available
     # ============================================================
 
@@ -832,6 +853,22 @@ fn main() {
 
         var door3 = texture_find("DOOR3");
         assert(door3 >= 0, "DOOR3 found");
+
+        # ============================================================
+        test_group("status: name-scratch lump lookup (R-2)");
+        # ============================================================
+        # The death-face name "STFDEAD0" is EXACTLY 8 chars; st_name_buf must be 9
+        # bytes so the NUL fits and wad_name_eq's strlen doesn't over-read the
+        # adjacent face_patch_buf (which rejected every lump → blank death face).
+        status_init_font();
+        var fnb = st_name_buf();
+        memcpy(fnb, "STFDEAD0", 8);
+        store8(fnb + 8, 0);
+        assert(wad_find_lump(fnb) >= 0, "STFDEAD0 death face resolves (R-2)");
+        # STYSNUM digit names are also 8 chars ("STYSNUM"+digit) — the alloc(9)+NUL
+        # fix in status_init_font; both endpoints must have resolved.
+        assert(load64(st_ynums + 0) >= 0, "STYSNUM0 resolved (R-2 sibling)");
+        assert(load64(st_ynums + 9 * 8) >= 0, "STYSNUM9 resolved (R-2 sibling)");
 
         # ============================================================
         test_group("COLORMAP");

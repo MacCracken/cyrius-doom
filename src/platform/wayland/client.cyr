@@ -28,6 +28,7 @@ enum WlAbi {
     OP_XDG_GET_SURFACE = 2;  OP_XDG_PONG = 3;
     OP_XDGSURF_GET_TOPLEVEL = 1; OP_XDGSURF_ACK = 4;
     OP_TOPLEVEL_SET_TITLE = 2;   OP_TOPLEVEL_SET_APPID = 3;
+    OP_TOPLEVEL_SET_MIN_SIZE = 8;   # xdg_toplevel.set_min_size(width, height)
     OP_SURFACE_ATTACH = 1;   OP_SURFACE_FRAME = 3;  OP_SURFACE_COMMIT = 6;  OP_SURFACE_DAMAGE_BUFFER = 9;
     # ---- event opcodes ----
     EV_DISPLAY_ERROR  = 0;   EV_DISPLAY_DELETE = 1;
@@ -138,22 +139,39 @@ fn wl__streq(ptr, len, lit): i64 {
 }
 
 # ---- connection ----
-fn wl__copy_cstr(dst, off, src): i64 {
+# sockaddr_un.sun_path is 108 bytes incl the NUL, so the socket path must be <= 107
+# chars. getenv strings are attacker-controlled length (audit M-2): an unbounded
+# copy overflowed both path[128] and addr[120]. WL_PATH_MAX bounds every copy; an
+# over-long env fails closed (-> fb0 fallback), not a stack smash.
+var WL_PATH_MAX = 107;
+
+# Copy the NUL-terminated `src` into dst+off, refusing to write at or past `cap`
+# total bytes in dst. Returns the new offset, or -1 if `src` did not fit.
+fn wl__copy_cstr(dst, off, src, cap): i64 {
     var i = 0;
-    while (load8(src + i) != 0) { store8(dst + off + i, load8(src + i)); i = i + 1; }
+    while (load8(src + i) != 0) {
+        if (off + i >= cap) { return 0 - 1; }
+        store8(dst + off + i, load8(src + i));
+        i = i + 1;
+    }
     return off + i;
 }
 fn wl__sock_path(buf): i64 {
     var wd = getenv("WAYLAND_DISPLAY");
-    if (wd != 0) { if (load8(wd) == 0x2F) {
-        var n = wl__copy_cstr(buf, 0, wd); store8(buf + n, 0); return n;
+    if (wd != 0) { if (load8(wd) == 0x2F) {                 # absolute path -> use directly
+        var n = wl__copy_cstr(buf, 0, wd, WL_PATH_MAX);
+        if (n < 0) { return 0 - 1; }
+        store8(buf + n, 0); return n;
     } }
     var rt = getenv("XDG_RUNTIME_DIR");
     if (rt == 0) { return 0 - 1; }
-    var n = wl__copy_cstr(buf, 0, rt);
+    var n = wl__copy_cstr(buf, 0, rt, WL_PATH_MAX);
+    if (n < 0) { return 0 - 1; }
+    if (n + 1 >= WL_PATH_MAX) { return 0 - 1; }             # no room for '/' + name
     store8(buf + n, 0x2F); n = n + 1;
-    if (wd != 0) { n = wl__copy_cstr(buf, n, wd); }
-    else { n = wl__copy_cstr(buf, n, "wayland-0"); }
+    if (wd != 0) { n = wl__copy_cstr(buf, n, wd, WL_PATH_MAX); }
+    else { n = wl__copy_cstr(buf, n, "wayland-0", WL_PATH_MAX); }
+    if (n < 0) { return 0 - 1; }
     store8(buf + n, 0);
     return n;
 }
@@ -166,12 +184,12 @@ fn wl_connect(): i64 {
     if (wl_rbuf == 0) { wl_rbuf = alloc(WL_RBUF_CAP + 64); }
     if (wl_sbuf == 0) { wl_sbuf = alloc(512); }
     if (wl_kq == 0)   { wl_kq = alloc(768); }
-    var path[128];             # `var x[N]` = N BYTES in Cyrius; a wl socket path is < 120 chars
+    var path[128];             # `var x[N]` = N BYTES in Cyrius; wl__sock_path bounds to WL_PATH_MAX (107)
     var plen = wl__sock_path(&path);
-    if (plen < 0) { return 0 - 1; }
+    if (plen < 0) { return 0 - 1; }   # missing/over-long env -> caller falls back to fb0
     var fd = sys_socket(WL_AF_UNIX, WL_SOCK_STREAM, 0);
     if (fd < 0) { return 0 - 1; }
-    var addr[120];             # sockaddr_un: family(2) + sun_path(<=108) + NUL
+    var addr[120];             # sockaddr_un: family(2) + sun_path(<=108) + NUL; plen <= 107 fits
     store8(&addr, WL_AF_UNIX); store8(&addr + 1, 0);
     var i = 0;
     while (i < plen) { store8(&addr + 2 + i, load8(&path + i)); i = i + 1; }
@@ -241,6 +259,13 @@ fn wl__req1(target, op, arg): i64 {
     return wl__send(12);
 }
 fn wl__req0(target, op): i64 { wire_hdr_put(wl_sbuf, target, op, 8); return wl__send(8); }
+# two-arg request (two int32s, e.g. xdg_toplevel.set_min_size width/height)
+fn wl__req2(target, op, a, b): i64 {
+    wire_hdr_put(wl_sbuf, target, op, 16);
+    store32(wl_sbuf + 8, a);
+    store32(wl_sbuf + 12, b);
+    return wl__send(16);
+}
 fn wl__set_string(target, op, s): i64 {
     var off = wire_put_str(wl_sbuf, 8, s, strlen(s));
     wire_hdr_put(wl_sbuf, target, op, off);

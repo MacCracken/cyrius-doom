@@ -57,7 +57,11 @@ fn shm_create(w, h): i64 {
     var stride = w * 4;
     var bsize = stride * h;
     if (bsize <= 0) { return 0; }
+    # Overflow guard (P-6): bsize<=0 catches a sign flip but not a wrap to a small
+    # positive. Verify bsize/h == stride (no wrap) and psize didn't wrap under bsize.
+    if (h != 0) { if (bsize / h != stride) { return 0; } }
     var psize = bsize * 2;
+    if (psize < bsize) { return 0; }
     var fd = syscall(SYS_MEMFD_CREATE, "doom-wl", MFD_CLOEXEC);
     if (fd < 0) { return 0; }
     if (syscall(SYS_FTRUNCATE, fd, psize) < 0) { sys_close(fd); return 0; }

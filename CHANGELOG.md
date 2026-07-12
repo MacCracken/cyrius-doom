@@ -7,6 +7,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.33.4] - 2026-07-12 — security + safety quick-wins (first audit-slot patch)
+
+The first patch off the [2026-07-12 consolidated audit](docs/audit/2026-07-12-consolidated-audit.md) —
+six small, high-confidence fixes. No render-path or gameplay-logic changes; the two HIGH items
+are user-reachable crashes on the desktop-window backend, the rest are malicious-WAD hardening
+and a deterministic HUD bug.
+
+### Fixed
+
+- **Wayland window crash when resized below 320×200** (audit M-1, HIGH). `framebuf_present_wayland`
+  blits a fixed 320×200 frame, but drag-resize (bite-4, live since 0.33.0) adopted any compositor
+  configure `> 0`, so a sub-320×200 window overran the shm pitch and — on the far double-buffer —
+  ran past the mmap end → SIGSEGV. Now `win_open`/`win_resize_apply` clamp the adopted size through
+  a shared `win__clamp_size` (floor 320×200), and `win_open` sends `xdg_toplevel.set_min_size(320,200)`
+  so compliant compositors don't try. `win_poll_events` compares the *clamped* target, so a
+  compositor that keeps sending a sub-min size no longer churns shm rebuilds.
+- **Compositor-dimension integer overflow** (audit P-6). The shm buffer size is `w*4*h*2`; a hostile
+  or buggy compositor dimension near 2³¹ wraps to a small positive → undersized mmap vs a larger
+  blit. `win__clamp_size` caps both axes to 16384, and `shm_create` gained an explicit overflow
+  guard (`bsize/h == stride`, `psize >= bsize`).
+- **Unbounded env-path copy → stack smash** (audit M-2). `wl__sock_path` copied `WAYLAND_DISPLAY` /
+  `XDG_RUNTIME_DIR` (arbitrary length) into a 128-byte stack buffer and then a 120-byte `sockaddr_un`
+  with no bound. `wl__copy_cstr` now takes a capacity and refuses to write past it; an over-long env
+  fails closed (`wl_connect` → −1 → the fb0/ppm fallback), capped at the 107-char `sun_path` limit.
+- **Dead death-face** (audit R-2). The face-name scratch was `alloc(8)`, but the face lumps
+  ("STFDEAD0" etc.) are exactly 8 chars — so no NUL fit, and `wad_name_eq`'s `strlen` over-read the
+  adjacent `face_patch_buf` (nonzero after the first draw) → every lump rejected → `STFDEAD0` never
+  resolved → the death face rendered as a blank cutout (same over-read class as the 0.29.4 PNAMES
+  bug). Now `alloc(9)` + an explicit NUL; the sibling `STYSNUM` HUD-digit names (also 8 chars) got
+  the same fix in `status_init_font`.
+- **Unguarded/uncapped lump allocations** (audit R-6/M-3/M-4). `texture_init`'s `TEXTURE1` alloc and
+  `status_init_font`'s `STBAR`/`STARMS` allocs took a WAD-controlled size (up to ~4.29 GB via a
+  `read_le32` directory field) with no null guard and no cap — a malformed lump → `alloc`→0 →
+  `wad_read_lump_into`'s `memset(0,0,sz)` null-write crash at load. Now capped (TEXTURE1 ≤ 16 MB,
+  STBAR/STARMS ≤ 64 KB — far above real IWADs) and null-guarded, mirroring the existing PNAMES guard.
+
+### Changed
+
+- **Defensive rewrite of the remaining sparse hot-path `switch`es as if/else** (audit G-7). The
+  `doors_walk_trigger` walk-type / exit / tag-dispatch switches and the `things_check_pickups`
+  pickup dispatch had sparse/out-of-order labels (2..2049) in per-tick functions with post-switch
+  work — the exact cycc codegen shape that smashed the enclosing return address in `thing_animate`
+  and `doors_use` (both previously rewritten). Converted to if/else ladders per the established
+  pattern. Behavior is identical; the dense `thing_category` switches (2001-2006 etc., each case
+  returns) are left as intentional jump-table candidates.
+
+### Verification
+
+- Tests **155/155** WAD-free (+6: `win__clamp_size` floor/cap) + **227/227** full (+3 WAD-gated:
+  `STFDEAD0` + `STYSNUM0/9` resolution — R-2; `status.cyr` added to the harness). fuzz
+  `fuzz_wad`/`fuzz_fixed`/`fuzz_weapon`/`fuzz_mus` = **1000/50000/2000/1000 clean**; all 9 maps + 5
+  menus render at 192,015 B; clean-from-scratch resolve + `CYRIUS_DCE=1` build (523 fns / 98,164 B
+  NOPed); `render_frame` **2.425 ms** (variance); deps 36/0. Binary 439,192 → **439,208 B** (+16;
+  `doom_agnos` 425,640 → **425,608 B**). **AGNOS QEMU on the final 0.33.4 binary: doom-smoke +
+  in-game sendkey + aethersafha compositor-present — all PASS** (the M-1/P-6/M-2 Wayland fixes are
+  Linux-only `#ifndef CYRIUS_TARGET_AGNOS`; the R-2/R-6/G-7 fixes are on the shared path and covered
+  by the agnos harnesses). Built with the versioned `~/.cyrius/versions/6.4.55/bin/cyrius` (pin
+  unchanged from 0.33.3 — a fix-only patch).
+
 ## [0.33.3] - 2026-07-12 — audit round: toolchain/dep refresh + setu present-leak fix + roadmap reorg
 
 A consolidation cut. Bumped the toolchain and dependencies to latest, ran a five-agent audit

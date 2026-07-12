@@ -769,36 +769,36 @@ fn things_check_pickups(): i64 {
         var ttype = thing_type(i);
         var picked = 0;
 
-        # Unified pickup dispatch. Cases grouped by value for jump-table
-        # potential per cluster (keys 5-13, weapons/items 2001-2049).
-        # Armor has conditional logic — stays outside the switch.
-        switch (ttype) {
-            # Keys (5-13)
-            case 5:  { player_keys |= KEY_CARD_BLUE; picked = 1; }    # BLUE
-            case 6:  { player_keys |= KEY_CARD_YELLOW; picked = 1; }  # YELLOW
-            case 13: { player_keys |= KEY_CARD_RED; picked = 1; }     # RED
-            # Cellpack (oddly numbered)
-            case 17: { player_ammo_cells += 100; picked = 1; }
-            # Weapons (2001-2006): bitmask 1<<N for weapon N
-            case 2001: { player_ammo_shells += 8;  player_weapons |= 8;   picked = 1; }  # SHOTGUN
-            case 2002: { player_ammo_bullets += 20; player_weapons |= 16; picked = 1; }  # CHAINGUN
-            case 2003: { player_ammo_rockets += 2; player_weapons |= 32; picked = 1; }  # LAUNCHER
-            case 2004: { player_ammo_cells += 40; player_weapons |= 128; picked = 1; }  # PLASMA
-            case 2005: { player_weapons |= 64; picked = 1; }                            # CHAINSAW
-            case 2006: { player_ammo_cells += 40; player_weapons |= 256; picked = 1; }  # BFG
-            # Ammo + health + armor cluster (2007-2019)
-            case 2007: { player_ammo_bullets += 10; picked = 1; }  # CLIP
-            case 2008: { player_ammo_shells += 4;  picked = 1; }   # SHELLS
-            case 2010: { player_ammo_rockets += 1; picked = 1; }   # ROCKET
-            # STIMPACK/MEDIKIT handled outside the switch (cap 100, skip at full)
-            case 2013: { player_health += 100; picked = 1; }       # SOULSPHERE (max 200)
-            case 2014: { player_health += 1; picked = 1; }         # HEALTH_POTION (max 200)
-            # Ammo boxes (2046-2049)
-            case 2046: { player_ammo_rockets += 5; picked = 1; }
-            case 2047: { player_ammo_cells += 20; picked = 1; }
-            case 2048: { player_ammo_bullets += 50; picked = 1; }
-            case 2049: { player_ammo_shells += 20; picked = 1; }
-        }
+        # Unified pickup dispatch. if/else ladder, NOT switch: sparse/out-of-order
+        # labels (5..2049) in a hot per-tick fn with post-dispatch work below — the
+        # cycc return-smash class that crashed thing_animate/doors_use twice.
+        # Defensive rewrite per the established pattern (G-7).
+        # Keys (5-13)
+        if (ttype == 5)  { player_keys |= KEY_CARD_BLUE; picked = 1; }         # BLUE
+        else { if (ttype == 6)  { player_keys |= KEY_CARD_YELLOW; picked = 1; }  # YELLOW
+        else { if (ttype == 13) { player_keys |= KEY_CARD_RED; picked = 1; }     # RED
+        # Cellpack (oddly numbered)
+        else { if (ttype == 17) { player_ammo_cells += 100; picked = 1; }
+        # Weapons (2001-2006): bitmask 1<<N for weapon N
+        else { if (ttype == 2001) { player_ammo_shells += 8;  player_weapons |= 8;   picked = 1; }  # SHOTGUN
+        else { if (ttype == 2002) { player_ammo_bullets += 20; player_weapons |= 16; picked = 1; }  # CHAINGUN
+        else { if (ttype == 2003) { player_ammo_rockets += 2; player_weapons |= 32; picked = 1; }  # LAUNCHER
+        else { if (ttype == 2004) { player_ammo_cells += 40; player_weapons |= 128; picked = 1; }  # PLASMA
+        else { if (ttype == 2005) { player_weapons |= 64; picked = 1; }                            # CHAINSAW
+        else { if (ttype == 2006) { player_ammo_cells += 40; player_weapons |= 256; picked = 1; }  # BFG
+        # Ammo + health + armor cluster (2007-2019)
+        else { if (ttype == 2007) { player_ammo_bullets += 10; picked = 1; }  # CLIP
+        else { if (ttype == 2008) { player_ammo_shells += 4;  picked = 1; }   # SHELLS
+        else { if (ttype == 2010) { player_ammo_rockets += 1; picked = 1; }   # ROCKET
+        # STIMPACK/MEDIKIT handled outside the ladder (cap 100, skip at full)
+        else { if (ttype == 2013) { player_health += 100; picked = 1; }       # SOULSPHERE (max 200)
+        else { if (ttype == 2014) { player_health += 1; picked = 1; }         # HEALTH_POTION (max 200)
+        # Ammo boxes (2046-2049)
+        else { if (ttype == 2046) { player_ammo_rockets += 5; picked = 1; }
+        else { if (ttype == 2047) { player_ammo_cells += 20; picked = 1; }
+        else { if (ttype == 2048) { player_ammo_bullets += 50; picked = 1; }
+        else { if (ttype == 2049) { player_ammo_shells += 20; picked = 1; }
+        } } } } } } } } } } } } } } } } } }
 
         # Stimpack/medikit heal to a MAX of 100 (DOOM maxhealth) and are NOT
         # picked up at full health — previously they added into the shared 200

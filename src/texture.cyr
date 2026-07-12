@@ -109,7 +109,12 @@ fn texture_init(): i64 {
 
     var t1_size = wad_lump_size(t1_idx);
     if (t1_size < 4) { return 0; }
+    # Cap + null-guard the alloc: shareware TEXTURE1 is 9 KB, a full IWAD ~90 KB;
+    # 16 MB is far above any real IWAD and bounds a malformed multi-GB size claim
+    # (alloc→0 → wad_read_lump_into's memset(0,0,sz) would null-write; audit R-6/M-3).
+    if (t1_size > 16777216) { return 0; }
     var t1_data = alloc(t1_size);
+    if (t1_data == 0) { return 0; }
     wad_read_lump_into(t1_idx, t1_data, t1_size);
     # Upper bound for patch-ref reads in texture_get_column (malformed-WAD
     # hardening — completes the C2 patch attack surface). (0.28.0 F19)

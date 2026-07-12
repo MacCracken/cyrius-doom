@@ -433,17 +433,18 @@ fn doors_walk_trigger(old_x, old_y, new_x, new_y): i64 {
         var special = load64(map_linedefs + i * MAP_LINEDEF_SIZE + 24);
         if (special == 0) { continue; }
 
+        # if/else, NOT switch: this is a hot per-tick fn with sparse/out-of-order
+        # labels (2..124) — the cycc return-smash class that crashed thing_animate
+        # and doors_use twice. Defensive rewrite per the established pattern (G-7).
         var is_walk = 0;
-        switch (special) {
-            case 2: { is_walk = 1; }
-            case 4: { is_walk = 1; }
-            case 10: { is_walk = 1; }
-            case 38: { is_walk = 1; }
-            case 52: { is_walk = 1; }
-            case 70: { is_walk = 1; }
-            case 88: { is_walk = 1; }
-            case 124: { is_walk = 1; }
-        }
+        if (special == 2)   { is_walk = 1; }
+        if (special == 4)   { is_walk = 1; }
+        if (special == 10)  { is_walk = 1; }
+        if (special == 38)  { is_walk = 1; }
+        if (special == 52)  { is_walk = 1; }
+        if (special == 70)  { is_walk = 1; }
+        if (special == 88)  { is_walk = 1; }
+        if (special == 124) { is_walk = 1; }
         if (is_walk == 0) { continue; }
 
         var v1 = map_linedef_v1(i);
@@ -486,25 +487,22 @@ fn doors_walk_trigger(old_x, old_y, new_x, new_y): i64 {
         var wlen2 = ldx8 * ldx8 + ldy8 * ldy8;
         if (wdot > wlen2) { continue; }
 
-        # Exit lines
-        switch (special) {
-            case 52: { level_exit_normal(); return 0; }
-            case 124: { level_exit_secret(); return 0; }
-        }
+        # Exit lines (if/else — return-smash-safe, see above)
+        if (special == 52)  { level_exit_normal(); return 0; }
+        if (special == 124) { level_exit_secret(); return 0; }
 
         var tag = load64(map_linedefs + i * MAP_LINEDEF_SIZE + 32);
         if (tag > 0) {
             for (var si = 0; si < map_num_sectors; si += 1) {
                 var stag = load64(map_sectors + si * MAP_SECTOR_SIZE + 48);
                 if (stag == tag) {
-                    switch (special) {
-                        case 2: { door_open_stay(si); }   # W1 open & stay
-                        case 4: { door_open(si); }        # W1 open wait close
-                        case 10: { lift_activate(si); }
-                        case 38: { lift_activate(si); }
-                        case 70: { lift_activate(si); }
-                        case 88: { lift_activate(si); }
-                    }
+                    # if/else ladder, NOT switch (return-smash-safe)
+                    if (special == 2) { door_open_stay(si); }        # W1 open & stay
+                    else { if (special == 4) { door_open(si); }      # W1 open wait close
+                    else { if (special == 10) { lift_activate(si); }
+                    else { if (special == 38) { lift_activate(si); }
+                    else { if (special == 70) { lift_activate(si); }
+                    else { if (special == 88) { lift_activate(si); } } } } } }
                 }
             }
         }
