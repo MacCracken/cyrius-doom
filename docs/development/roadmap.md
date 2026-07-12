@@ -12,6 +12,39 @@
 
 > **Re-slotted at the 0.28.4 cut (2026-06-10):** v0.28.1–.3 shipped the AGNOS bring-up arc (target support → renders on AGNOS → keyboard input) and v0.28.4 shipped gameplay correctness — see `completed-phases.md` for all four. The Black Book parity / perf themes below therefore start at **v0.28.5**. F22 (perspective-correct U/depth) was pulled forward and shipped in 0.28.4, so it is off the v0.29.x list.
 
+> **Re-slotted at the 0.33.3 audit round (2026-07-12):** the consolidated audit
+> ([`docs/audit/2026-07-12-consolidated-audit.md`](../audit/2026-07-12-consolidated-audit.md)) —
+> five parallel review agents over the whole tree — classified every prior-audit finding and
+> surfaced a fresh set. **0.33.3 itself shipped**: toolchain 6.4.43→6.4.55, vani 1.1.0→1.1.1,
+> **setu 0.5.0→0.5.1 carrying the P-1 present-buffer leak fix** (was a system-wide agnos shm-slot
+> DoS within 0.5 s of play — patched upstream in setu, QEMU-verified) + the doom-side setu input
+> hardening (P-2 focus clear, P-3/P-5 stream reassembly, P-4 persistent poll scratch). The
+> remaining findings are slotted into the **new near-term patch band below (0.33.4–0.33.6)** plus
+> the pre-existing 0.28.x/0.34.x slots. **Codegen gate correction**: the cyrius perf/regalloc arc
+> ("O4") is **v6.5.x — Performance-Quality**, NOT v6.4.x (6.4.x is ABI/Language-Features); the
+> v0.29.x perf-pass gate below is re-pointed accordingly. cyrius **6.4.46 shipped `>>>`** (native
+> arithmetic right-shift) — an `asr()`-migration opportunity slotted at v0.34.x.
+
+### Near-term patch band (2026-07-12 audit → new slots)
+
+| Slot | Theme | Contents | Status |
+|---|---|---|---|
+| **v0.33.4** | **Security + safety quick-wins** (small, high-confidence) | **M-1** Wayland resize-below-320×200 crash (`set_min_size` + floor-clamp; HIGH, user-reachable) · **M-2** unbounded env-path copy → stack smash in `wl__sock_path` (cap to 107 B) · **P-6** compositor-dim integer-overflow clamp (same site) · **R-2** dead death-face (`alloc(9)`+NUL on the name scratches; ~2 lines, deterministic) · **R-6/M-3/M-4** null-guard + size-cap the TEXTURE1/STBAR lump allocs (mirror the PNAMES guard) · **G-7** rewrite the remaining sparse hot-path `switch`es (`doors_walk_trigger`, `things_check_pickups`) as if/else (defensive vs the cycc return-smash class) | queued |
+| **v0.33.5** | **Gameplay-fidelity patch** (conformant-play bugs) | **G-2** tagged use-specials dispatch on the wrong sector — remote switches never move the platform (progression blocker) · **R-1** one-end clip clamp → far flats/textures overpaint near geometry · **G-1** weapon-switch collapses rocket/shotgun refire cadence · **G-3** intermission/death screens self-dismiss on tty autorepeat · **G-4/G-5/G-6/G-8/G-12** LOW polish batch (armor-class, escape-rule zero-band, melee sight re-check, open-stay door sound spam, sergeant SFX) | queued |
+| **v0.33.6** | **bsp upstream + pin** | **RC-F2** vendored bsp `asr()` is round-toward-zero not floor (one-texel flat mis-wrap over negative world coords) — fix upstream in bsp, bump the pin, `rm -rf lib && cyrius deps` regen | queued (upstream bsp) |
+
+> **v0.28.11 gains** (pre-PWAD hardening, batched with the security-refresh sub-audit): the **BSP
+> node child-cycle gap** in `map_validate` (HIGH latent — hostile WAD → unbounded BSP recursion;
+> must land before PWAD), **R-3** zero-seg subsector / `map_point_sector` guard, **G-13** sector-0
+> degenerate-leaf fallback (return −1), **R-5** patch-dim/height-delta overflow clamps, **M-6/R-10**
+> finish F17 (clamp back-sector + masked `open_top/open_bot` — the frame-stall half F17 left open).
+>
+> **v0.34.x — deep renderer + game-state fidelity** (was folded under v0.29.x/unslotted): **F06 /
+> RC-W3** native-scale vertical texture mapping (unblocks **F-R3/F-R4/R-8** peg anchoring), **RC-S6**
+> real thing-z (render+physics together; unblocks **res-1** precise missile-vs-wall trace), **P4**
+> episode-complete screen (E1M8→text/bunny + `D_VICTOR`), and the opt-in **`asr()`→`>>>` migration**
+> (cyrius 6.4.46; ~95 sites; large mechanical change, own gate).
+
 | Slot | Theme | Status |
 |---|---|---|
 | ~~**v0.28.5**~~ | ~~Visplane pool rewrite (Black Book ch.9 / F08, subsumes F13)~~ **SHIPPED 0.32.0** (2026-07-08 — global `view_z` + real plane pool, −24% render_frame; the `test_each` refactor did NOT ride along, dropped from scope) | — |
@@ -29,7 +62,7 @@
 | **v0.28.8** | Structural perf — sidedef/sector index + thing-sector caches (F12 / F15) | queued, bench-gated |
 | **v0.28.9–.11** | Original Black Book sub-audits: BSP+collision (.9), game-state (.10), security-refresh (.11) | queued |
 | **v0.28.x** | yukti `sys_stat` dup-fn cleanup | gated on yukti rebundle (likely moot) |
-| **v0.29.x** | O4 micro-perf pass + deep renderer fidelity (F06 native-scale midtex) — **F22 perspective-correct U/depth shipped early in 0.28.4** | gated on Cyrius O4 regalloc (v6.4.x) |
+| **v0.29.x** | O4 micro-perf pass — **F22 perspective-correct U/depth shipped early in 0.28.4**; deep-renderer fidelity (F06 native-scale midtex) re-slotted to **v0.34.x** | gated on Cyrius regalloc/IR perf arc = **v6.5.x — Performance-Quality** (NOT v6.4.x, which is ABI/Language-Features; corrected 2026-07-12) |
 | **v1.0.0** | Ship: full E1 + multiple display backends + AGNOS integration | future |
 
 > **v0.28.0 shipped 2026-06-07** (graphics review/hardening/audit/performance) — moved to [`completed-phases.md`](completed-phases.md). At the user's direction this graphics pass *became* 0.28.0, and the previously-roadmapped Black Book audit + lingering 0.27.x housekeeping were pushed **behind** it (re-slotted below).
@@ -183,19 +216,26 @@ Partly discharged early by 0.28.0 (F01/F02/F03/F19 patch-decode propagation + F1
 
 ---
 
-## v0.29.x — Performance pass (held against Cyrius O4 regalloc)
+## v0.29.x — Performance pass (held against the Cyrius perf/regalloc arc = v6.5.x)
 
-Re-targeted from the original 0.27.0 thesis. Cyrius's compiler-optimization track has three phases that move cyrius-doom's hot paths. Hand-optimizing `fx_mul` / `asr` / column loops today would fight the codegen once O4's linear-scan register allocator lands and delivers its projected 2–3× on hot inner loops.
+Re-targeted from the original 0.27.0 thesis. Cyrius's compiler-optimization track moves
+cyrius-doom's hot paths. Hand-optimizing `fx_mul` / `asr` / column loops today would fight the
+codegen once the linear-scan register allocator lands and delivers its projected 2–3× on hot
+inner loops. **Gate corrected 2026-07-12**: the full IR/regalloc perf work is the cyrius **v6.5.x
+Performance-Quality** minor, not v6.4.x (6.4.x is the ABI/Language-Features minor — it shipped the
+async runtime, SIMD/f64 scalar returns, UEFI signing, and `>>>`, but the regalloc-substrate perf
+passes are explicitly v6.5.x per the cyrius roadmap "Deferral backlog — pinned order").
 
 | # | Item | Gated on | Detail |
 |---|------|----------|--------|
-| 1 | Wait for **Cyrius O2** (peephole: strength reduction, flag reuse, LEA combining, aarch64 `madd`/`msub`) | Upstream | Small runtime wins on math-dense loops. Free bump once shipped. |
-| 2 | Wait for **Cyrius O3** (IR-driven DCE + const prop + dead-store elim) | Upstream | Today we NOP ~293 KB of dead code (same file size). O3 strips it for real — binary genuinely shrinks toward the ~260 KB target. |
-| 3 | Wait for **Cyrius O4** (linear-scan regalloc, Poletto–Sarkar; v6.4.x per cyrius roadmap) | Upstream | The single biggest win. `render_frame` projection: 2.1 ms → ≤1.0 ms. Column renderer, BSP walk, patch cache all benefit. |
-| 4 | Re-bench hot paths on O2 / O3 / O4-enabled toolchain | Pending | `bench-history.csv` row per upstream phase landing, with A/B before/after to confirm the compiler wins stick. |
-| 5 | Revisit manual patterns only after O4 | Pending | Any remaining 5–10 % wins from column-loop restructure are worth chasing at that point; before then, no. |
-| 6 | Native-scale midtexture w/ peg anchoring | Needs an `rw_scale` path | F06 — deep renderer fidelity; the engine is uniformly stretch-to-section today, so there's no scale path to hook onto |
-| 7 | Perspective-correct U / depth across segs | ✅ **DONE — 0.28.4** | F22 — shipped: interpolate scale (∝ 1/z) for depth and u·scale for U, both ÷ the interpolated scale, in `render_seg` + `render_masked_segs`. Depth + U landed together (the "half-fix worse than none" concern is exactly why both, not just depth, were corrected in one pass). |
+| 1 | Cyrius peephole / strength-reduction wins | Upstream (partly landed across 6.3.x–6.4.x: redundant-reload elim, frame-trim) | Small runtime wins on math-dense loops — a free bump each time a pass lands. |
+| 2 | IR-driven DCE + const/dead-store elim (real binary shrink) | Upstream **v6.5.x** (IR substrate) | Today we NOP ~98 KB of dead code (same file size). Real DCE strips it — binary genuinely shrinks. |
+| 3 | Linear-scan regalloc (the single biggest win) | Upstream **v6.5.x — Performance-Quality** | `render_frame` projection: 2.1 ms → ≤1.0 ms. Column renderer, BSP walk, patch cache all benefit. |
+| 4 | Re-bench hot paths per upstream perf-phase landing | Pending | `bench-history.csv` row per phase, A/B before/after to confirm the compiler wins stick. |
+| 5 | Revisit manual patterns only after the regalloc lands | Pending | Any remaining 5–10 % wins from column-loop restructure are worth chasing then; before then, no. |
+| 6 | Native-scale midtexture w/ peg anchoring | Needs an `rw_scale` path → **re-slotted v0.34.x** | F06 — deep renderer fidelity; the engine is uniformly stretch-to-section today, so there's no scale path to hook onto (also unblocks F-R3/F-R4/R-8). |
+| 7 | Perspective-correct U / depth across segs | ✅ **DONE — 0.28.4** | F22 — shipped: interpolate scale (∝ 1/z) for depth and u·scale for U, both ÷ the interpolated scale, in `render_seg` + `render_masked_segs`. |
+| 8 | `asr()` → native `>>>` migration | cyrius 6.4.46 (`>>>` shipped) → **v0.34.x** | ~95 `asr()` call sites; native sign-preserving shift removes the helper-call overhead on every signed shift. Large mechanical change with its own build+test+fuzz gate — opt-in, not rushed. Until it lands, `asr()` stays the rule. |
 
 ---
 

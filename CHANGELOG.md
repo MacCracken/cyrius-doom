@@ -7,6 +7,77 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.33.3] - 2026-07-12 — audit round: toolchain/dep refresh + setu present-leak fix + roadmap reorg
+
+A consolidation cut. Bumped the toolchain and dependencies to latest, ran a five-agent audit
+over the whole tree, consolidated all seven prior audit docs into one open-findings ledger, and
+re-organized the findings onto the roadmap as new patch/minor slots. One live security defect —
+found by the audit and fixed **upstream in setu** this cut — plus the doom-side setu input
+hardening it enabled.
+
+### Fixed
+
+- **setu present-buffer leak (audit P-1, HIGH) — a system-wide present DoS on AGNOS.**
+  `setu_client_present` created a NEW kernel shared-memory buffer on **every** frame and never
+  freed any (`setu_buf_close` had zero callers; `SetuClient` had no field to cache an id). agnos
+  has only **16 system-wide shm slots**, so within ~0.5 s of 35 Hz play doom exhausted them —
+  every later present (doom's *and every other setu client's*) fell back to the inline-TCP path,
+  which is exactly the 2 KB-loopback-window stall the shared buffer exists to avoid, and the slots
+  were unreclaimable until reboot. On Linux it leaked one `/dev/shm/setu-buf-*` file per frame.
+  **Fixed at the source in setu 0.5.1** (cache one buffer id, rewrite it in place each present,
+  recreate on resize, free it in `setu_client_close`) and re-vendored here. QEMU-verified: the
+  aethersafha compositor-present smoke composites doom as a live window (258 colours, 923 K
+  non-black px) and the in-game harness runs clean.
+- **setu input state-machine hardening (audit P-2/P-3/P-4/P-5)** — the setu input path had not
+  caught up to the hardening the Wayland path already had. Now: **P-2** focus-loss clears every
+  key latch (`doom_setu_focus` from `SETU_INPUT_FOCUS`; else a held key whose release went to the
+  newly-focused window walked the player forever); **P-3** a non-key message no longer ends the
+  frame's input drain early; **P-4** the per-poll `setu_msg_new()` allocation (a continuous leak
+  on agnos's never-free allocator, ~12 KB/s idle) is now a persistent lazily-alloc'd scratch;
+  **P-5** setu 0.5.1's new `setu_client_poll_input` reassembles the TCP stream, so coalesced or
+  split frames no longer drop key releases (a dropped release = a stuck key). QEMU input smoke:
+  balanced 10 press / 10 release over setu.
+
+### Changed
+
+- **Toolchain pin `cyrius 6.4.43 → 6.4.55`** (latest release). Lock regenerated from scratch
+  (`rm -rf lib && cyrius deps`) — **36 entries, verifies 36/0** (was 34 on 6.4.43; the count
+  tracks the 6.4.55 stdlib snapshot). Builds ran the versioned `~/.cyrius/versions/6.4.55/bin/cyrius`
+  (true pin match). No source changes for the bump — codegen-clean across all 21 src modules.
+- **vani vendor `1.1.0 → 1.1.1`** (`vendor/vani-core.cyr` from vani 1.1.1's dist; byte-identical to
+  1.1.0 except the version header — a provenance refresh).
+- **setu vendor `0.5.0 → 0.5.1`** (`vendor/setu.cyr`) carrying the P-1 fix + `setu_client_poll_input`
+  (stream reassembly). The setu wire protocol is unchanged; `SetuClient` grew 24→56 bytes but is
+  opaque, so doom recompiles with only the call-site changes above.
+
+### Docs
+
+- **New consolidated audit** — [`docs/audit/2026-07-12-consolidated-audit.md`](docs/audit/2026-07-12-consolidated-audit.md):
+  the single open-findings ledger. Classifies every finding in all seven prior audit docs
+  (FIXED@version / OPEN+slot / REFUTED / N/A) and adds the 2026-07-12 round's findings
+  (P-1…P-8, R-1…R-10, G-1…G-13, M-1…M-10), each traced to a real call path with a confidence
+  mark. Ranked still-open master list at §3.
+- **Roadmap reorg** — new near-term patch band **v0.33.4** (security/safety quick-wins: M-1 resize
+  crash, M-2 env-path smash, R-2 dead death-face, R-6/M-3/M-4 lump-alloc guards, G-7 sparse-switch
+  defensive rewrite), **v0.33.5** (gameplay-fidelity: G-2 tagged-special dispatch, R-1 clip clamp,
+  G-1 refire cadence, G-3 screen self-dismiss + LOW polish), **v0.33.6** (bsp `asr()` floor fix +
+  pin bump). v0.28.11 gains the BSP node-cycle gap + pre-PWAD hardening; **v0.34.x** gains F06
+  native-scale V, real thing-z, the episode-complete screen, and the opt-in `asr()`→`>>>` migration.
+  **Codegen gate corrected**: the cyrius perf/regalloc arc ("O4") is **v6.5.x**, not v6.4.x — the
+  v0.29.x perf-pass gate is re-pointed. cyrius 6.4.46's native `>>>` noted as the `asr()` path.
+
+### Verification
+
+- Tests **149/149** WAD-free + **218/218** full (unchanged — no gameplay logic changed this cut);
+  fuzz `fuzz_wad`/`fuzz_fixed`/`fuzz_weapon`/`fuzz_mus` = **1000/50000/2000/1000 clean** on 6.4.55;
+  all 9 shareware maps + 5 menu PPMs render at **192,015 B**; clean-from-scratch resolve + `CYRIUS_DCE=1`
+  build passes (523 fns / 98,164 B NOPed; agnos 553 / 94,884 B); `render_frame` **2.306 ms** (variance
+  vs 0.33.1's 2.349; cycc 6.4.55). Binary 426,496 → **439,192 B** (`doom_agnos` 395,968 → **425,640 B** —
+  the agnos growth is the 0.33.2 setu backend + the 6.4.55 codegen tax; both were first captured in
+  state.md at this cut, since 0.33.2 shipped without a state refresh). **AGNOS QEMU on the final 0.33.3
+  binary: doom-smoke + in-game sendkey + aethersafha compositor-present + aethersafha input smoke — all
+  PASS.**
+
 ## [0.33.2] - 2026-07-10 — DOOM on the sovereign desktop (setu backend + held keys)
 
 ### Added

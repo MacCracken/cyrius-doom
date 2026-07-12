@@ -348,14 +348,21 @@ fn input_poll_setu(): i64 {
         else {
             if (r < 0) { input_quit = 1; guard = 128; } # compositor closed the window -> quit
             else {
-                #ifdef DOOM_SETU_KEYLOG
-                _dsetu_keylog(load64(&kr + 8));   # input-smoke diagnostic (press/release marker)
-                #endif
-                var kc = doom_hid_to_key(load64(&kr));
-                if (kc >= 0) { store64(key_state + kc * 8, load64(&kr + 8)); }   # make/break
+                if (r == 1) {                           # key event (r == 2 = non-key consumed:
+                    #ifdef DOOM_SETU_KEYLOG             # focus/pointer/configure — keep draining)
+                    _dsetu_keylog(load64(&kr + 8));     # input-smoke diagnostic (press/release)
+                    #endif
+                    var kc = doom_hid_to_key(load64(&kr));
+                    if (kc >= 0) { store64(key_state + kc * 8, load64(&kr + 8)); }   # make/break
+                }
                 guard = guard + 1;
             }
         }
+    }
+    # Focus loss clears every latch (else a held key whose release went to the newly-
+    # focused window walks you forever) — mirrors the Wayland path's wl_focus clear.
+    if (doom_setu_focus == 0) {
+        for (var ci = 0; ci < 256; ci += 1) { store64(key_state + ci * 8, 0); }
     }
     if (load64(key_state + KEY_W * 8) == 1) { input_flags |= INP_FORWARD; }
     if (load64(key_state + KEY_UP * 8) == 1) { input_flags |= INP_FORWARD; }

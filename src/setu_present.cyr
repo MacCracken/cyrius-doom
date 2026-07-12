@@ -16,6 +16,12 @@
 # vendor/setu.cyr (the setu_* client API) and before framebuf.cyr / input.cyr.
 
 var doom_setu_client = 0;      # *SetuClient (setu.cyr), 0 = not connected
+var doom_setu_msg = 0;         # persistent SetuMsg scratch (lazy) — the poll runs ≥35×/s and
+                               # agnos alloc() never frees, so a per-poll setu_msg_new() is a
+                               # continuous heap leak (audit 2026-07-12 P-4/M-5)
+var doom_setu_focus = 1;       # compositor focus (SETU_INPUT_FOCUS); input_poll_setu clears
+                               # all key latches when 0 — else a held key whose RELEASE went
+                               # to the newly-focused window walks the player forever (P-2)
 
 # Connect to the compositor (loopback:7700; the path arg is advisory). Returns 1 on
 # success — framebuf_init then sets present_mode = PM_SETU — or 0 when no compositor is
@@ -39,11 +45,15 @@ fn doom_setu_present_buf(pix, w, h): i64 {
     return setu_client_present(doom_setu_client, pix, w, h);
 }
 
-# Drain ONE pending setu key event into `out2`: out2[+0] = HID usage, out2[+8] = value
-# (1 = press / 0 = release — the make/break in the SETU_INPUT_KEY mods arg, delivered
-# because doom opted into FULL_KEYS). Returns 1 on a key event, 0 when nothing is pending
-# this poll, or -1 when the compositor closed the connection. input_poll_setu uses the
-# value as persistent make/break held state (hold-to-move), like doom's raw-scancode path.
+# Drain ONE pending setu event. Key events fill `out2`: out2[+0] = HID usage, out2[+8] =
+# value (1 = press / 0 = release — the make/break in the SETU_INPUT_KEY mods arg, delivered
+# because doom opted into FULL_KEYS). Returns 1 on a key event, 2 on a consumed NON-key
+# message (focus/pointer/configure — caller keeps draining; pre-0.5.1 these ended the drain
+# and stalled key delivery, P-3), 0 when nothing is pending this poll, or -1 when the
+# compositor closed the connection. Uses setu 0.5.1's setu_client_poll_input, which
+# REASSEMBLES the TCP stream — coalesced/split frames no longer drop key releases (P-5).
+# input_poll_setu uses the value as persistent make/break held state, like the raw-scancode
+# path, and reads doom_setu_focus to clear latches on focus loss (P-2).
 #ifdef DOOM_SETU_KEYLOG
 # Diagnostic (off by default): emit a marker per received key event so the input smoke
 # (agnos scripts/aethersafha-doom-input-smoke.sh) can confirm BOTH press and release reach
@@ -56,8 +66,9 @@ fn _dsetu_keylog(v): i64 {
 
 fn doom_setu_next_key(out2): i64 {
     if (doom_setu_client == 0) { return 0; }
-    var msg = setu_msg_new();
-    var r = setu_poll_input(setu_client_fd(doom_setu_client), msg);
+    if (doom_setu_msg == 0) { doom_setu_msg = setu_msg_new(); }
+    var msg = doom_setu_msg;
+    var r = setu_client_poll_input(doom_setu_client, msg);
     if (r < 0) { return 0 - 1; }                                # EOF / compositor gone
     if (r == 0) { return 0; }                                   # nothing this poll
     if (setu_msg_kind(msg) == SETU_INPUT_KEY) {
@@ -65,14 +76,16 @@ fn doom_setu_next_key(out2): i64 {
         store64(out2 + 8, setu_msg_arg(msg, 2));                # arg2 = value (1 press / 0 release)
         return 1;
     }
-    return 0;
+    if (setu_msg_kind(msg) == SETU_INPUT_FOCUS) {
+        doom_setu_focus = setu_msg_arg(msg, 1);                 # arg1 = focused (1/0)
+    }
+    return 2;                                                   # non-key consumed — keep draining
 }
 
 # Map a USB-HID usage (keyboard/keypad page 0x07) to DOOM's key_state index (the codes
 # in input.cyr's KeyCode enum: ASCII for letters/space/enter/tab/esc, 128-131 arrows,
-# 132 = fire/ctrl, 133 = shift). Unmapped usages return -1. Held-key note: aethersafha
-# sends key-DOWN only, so smooth held movement depends on OS key-repeat; a future
-# aethersafha key-UP (encode press/release in the unused mods arg) would make it exact.
+# 132 = fire/ctrl, 133 = shift). Unmapped usages return -1. Held keys are exact: doom
+# opts into FULL_KEYS (setu 0.5.0), so aethersafha delivers press AND release.
 fn doom_hid_to_key(u): i64 {
     if (u == 0x1A) { return 119; }   # w -> forward
     if (u == 0x04) { return 97; }    # a -> strafe left
