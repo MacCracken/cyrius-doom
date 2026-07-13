@@ -46,11 +46,22 @@
 > malformed-WAD visuals only); **bench min>max formatter** (in the cyrius **stdlib** `lib/bench.cyr`,
 > not doom source — a cyrius-repo item).
 >
-> **v0.34.x — deep renderer + game-state fidelity** (was folded under v0.29.x/unslotted): **F06 /
-> RC-W3** native-scale vertical texture mapping (unblocks **F-R3/F-R4/R-8** peg anchoring), **RC-S6**
-> real thing-z (render+physics together; unblocks **res-1** precise missile-vs-wall trace), **P4**
+> **v0.34.x — deep renderer + game-state fidelity** (was folded under v0.29.x/unslotted):
+> **~~F06 / RC-W3~~ native-scale vertical texture mapping SHIPPED 0.34.0** — all four wall sections
+> step V by `fixed_div(FIXED_ONE, col_scale)` = vanilla `dc_iscale`; tall walls tile, short walls clip,
+> fitted walls byte-identical; **also resolved ~~F-R3~~/~~F-R4~~** (`ML_DONTPEGBOTTOM` now wired on the
+> one-sided-mid path + the masked-mid `base+112` flag that was written-but-never-read). Remaining v0.34.x:
+> **RC-S6** real thing-z (render+physics together; unblocks **res-1** precise missile-vs-wall trace), **P4**
 > episode-complete screen (E1M8→text/bunny + `D_VICTOR`), and the opt-in **`asr()`→`>>>` migration**
-> (cyrius 6.4.46; ~95 sites; large mechanical change, own gate).
+> (cyrius 6.4.46; ~95 sites; large mechanical change, own gate). **New follow-ups from the 0.34.0 cut**:
+> (a) **LOW** — a crafted texture declaring height > 256 (`TEX_COL_MAX`) diverges the peg's `tex_h` from
+> the clamped column data `th` on a floor-pegged column → cosmetic blank column, no crash (real DOOM
+> textures ≤128; a one-line `tex_h` clamp closes it, byte-identical for legit content). (b) **agnos-side,
+> flagged to user** — the `doom-ingame-smoke.py` menu-drive no longer advances past TITLEPIC on current
+> agnos HEAD (klug/klub input-ring + `gpu_ring_kick()` boot WIP); doom `input.cyr`/`menu.cyr` unchanged
+> since v0.33.0. The direct-map-boot verification (99.4% pixel-diff vs Linux) is now the robust AGNOS
+> render gate; consider promoting a direct-map smoke variant so in-game render no longer depends on
+> keyboard input.
 
 | Slot | Theme | Status |
 |---|---|---|
@@ -101,8 +112,8 @@ The [July Fable full-project audit](july-fable-audit.md) drove the **v0.31.2 pla
 |---|------|--------------|
 | ~~F-R2~~ | ~~Sky pans ~4× too slow~~ **SHIPPED 0.31.3** — 4-wraps-per-turn (ANGLETOSKYSHIFT), visually verified on E1M1's outdoor courtyard | — |
 | ~~F-U8~~ | ~~OUT_RATE 48000 vs "jack takes only 44100"~~ **SHIPPED 0.31.3** — 48000→44100 negotiated fallback, upsampler reads the negotiated rate (math-verified drift-free); stale comments reconciled. Audible confirmation on the jack pending a user `--audio-test` (the agent context can't open `/dev/snd`). | — |
-| **F-R3** | One-sided walls ignore `ML_DONTPEGBOTTOM` (door-track textures slide with the door) | **Entangled with native-scale-V (F06):** the current stretch-to-fit renderer always fills ceiling→floor exactly, so there is no meaningful peg-top-vs-bottom distinction to implement until native-scale V lands. |
-| **F-R4** | Masked-seg `dont_peg_bottom` (+ `sd_xoff`) stored but never read in `render_masked_segs` | Same native-scale entanglement as F-R3; cosmetic dead store — wire it up with F-R3 or drop it. |
+| ~~**F-R3**~~ | ~~One-sided walls ignore `ML_DONTPEGBOTTOM`~~ **SHIPPED 0.34.0** (with F06 native-scale V): the one-sided-mid path now bottom-anchors `mid_ystart = (tex_h - (ceil_h - floor_h) + yoff) << 16` when the flag is set. | — |
+| ~~**F-R4**~~ | ~~Masked-seg `dont_peg_bottom` stored but never read~~ **SHIPPED 0.34.0** (with F06): the masked-mid path now reads the `base+112` flag and bottom-pegs `ty_pos = (tex_h - (open_ceil - open_floor) + yoff) << 16`. (`sd_xoff` residual — verify it's applied; drop this note if so.) | — |
 | **F-R5** | 24-bpp / 8-bpp `/dev/fb0` panels handled by the 32-bpp blit (1-byte row overrun on 24-bpp) | Needs real non-32-bpp framebuffer hardware to verify (this box is 32-bpp / the `--ppm`+bridge path doesn't use the fb blit). |
 | ~~**F-R6**~~ | ~~Palette index 0 treated as transparent everywhere~~ **RESOLVED 0.32.0** (all halves: psprite blitter draws every in-post pixel; sprite dense buffer + `texture_get_column` both gained fill masks — grates get true post-gap transparency, walls stop punching pinholes at dark texels, the see-through gun is solid). | — |
 | **F-U6** | AGNOS `E0`/`E1` scancode prefix is a per-call local → split extended-key across polls sticks/misfires | AGNOS-only; needs QEMU verification (not gated this cut per the reproduce-first/QEMU-verify process). |
@@ -244,7 +255,7 @@ passes are explicitly v6.5.x per the cyrius roadmap "Deferral backlog — pinned
 | 3 | Linear-scan regalloc (the single biggest win) | Upstream **v6.5.x — Performance-Quality** | `render_frame` projection: 2.1 ms → ≤1.0 ms. Column renderer, BSP walk, patch cache all benefit. |
 | 4 | Re-bench hot paths per upstream perf-phase landing | Pending | `bench-history.csv` row per phase, A/B before/after to confirm the compiler wins stick. |
 | 5 | Revisit manual patterns only after the regalloc lands | Pending | Any remaining 5–10 % wins from column-loop restructure are worth chasing then; before then, no. |
-| 6 | Native-scale midtexture w/ peg anchoring | Needs an `rw_scale` path → **re-slotted v0.34.x** | F06 — deep renderer fidelity; the engine is uniformly stretch-to-section today, so there's no scale path to hook onto (also unblocks F-R3/F-R4/R-8). |
+| 6 | ~~Native-scale midtexture w/ peg anchoring~~ | **SHIPPED 0.34.0** | F06/RC-W3 — all four wall sections now step V by `fixed_div(FIXED_ONE, col_scale)` = `dc_iscale`; peg anchoring wired (F-R3/F-R4). **R-8** peg-offset follow-up may still apply — re-check against the shipped code. |
 | 7 | Perspective-correct U / depth across segs | ✅ **DONE — 0.28.4** | F22 — shipped: interpolate scale (∝ 1/z) for depth and u·scale for U, both ÷ the interpolated scale, in `render_seg` + `render_masked_segs`. |
 | 8 | `asr()` → native `>>>` migration | cyrius 6.4.46 (`>>>` shipped) → **v0.34.x** | ~95 `asr()` call sites; native sign-preserving shift removes the helper-call overhead on every signed shift. Large mechanical change with its own build+test+fuzz gate — opt-in, not rushed. Until it lands, `asr()` stays the rule. |
 

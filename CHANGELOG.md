@@ -7,6 +7,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.34.0] - 2026-07-12 — native-scale vertical texture mapping (F06 / RC-W3)
+
+Replaces the engine's stretch-to-section vertical texture mapping with DOOM's vanilla depth-based
+mapping: **1 texel = 1 world unit**. Walls taller than their texture now TILE (repeat) it instead of
+showing one vertically-squashed copy; walls shorter show a clipped slice; fitted walls (section world
+height == texture height) are byte-identical to before. Design + 3-lens adversarial review; AGNOS
+in-game 3D verified via direct-map boot (the menu-drive harness is currently blocked by an agnos-side
+input regression — see below).
+
+### Changed
+
+- **Native-scale vertical texture mapping (F06 / RC-W3).** All four wall sections — upper, lower,
+  one-sided mid, and masked mid — now step the texture-V coordinate by `fixed_div(FIXED_ONE, col_scale)`
+  (= vanilla `dc_iscale` = `FRACUNIT / rw_scale`, depth-only) instead of
+  `fixed_div(tex_h, section_screen_height)`, which forced exactly one texture copy into each wall
+  section regardless of the wall's world height (the "squash"). `col_scale` is screen-pixels-per-world-
+  unit (from the projection `screen_y = HALF_HEIGHT - (h - eye) * col_scale`), so the native step
+  yields precisely the wall's world-height worth of texels at every depth. `render_draw_tex_column`
+  already tiled tall walls via `% th` (with a negative-fixup) and clips via the F-R6 fill mask; the
+  masked-mid loop clips (`src_y >= 0 && src_y < th`) since masked textures don't tile. **Verified**:
+  9-map Linux PPM A/B — 12-41% of wall bytes differ (exactly the un-fitted walls), fitted walls
+  byte-identical; visual A/B (E1M4 far tech-panel wall un-squashed to native proportions; E1M1/E1M8
+  coherent, no black holes / smear).
+
+### Fixed
+
+- **`ML_DONTPEGBOTTOM` on one-sided-mid and masked-mid walls (was silently ignored).** The one-sided
+  middle-texture path always top-pegged; it now bottom-anchors the texture to the section floor when
+  the flag is set (`mid_ystart = (tex_h - (ceil_h - floor_h) + yoff) << 16`, the vanilla bottom-peg).
+  The masked-mid path's `dont_peg_bottom` flag — stored in the masked-seg record at `base + 112` — was
+  written by the seg collector but **never read**; it now bottom-pegs identically
+  (`ty_pos = (tex_h - (open_ceil - open_floor) + yoff) << 16`, using the vanilla min-ceiling/max-floor
+  opening). Both formulas use the true world section height and are memory-safe (one-sided tiles via
+  `% th`; masked guards `src_y` on both ends, so the negative-start case when the opening exceeds the
+  texture height renders transparent, not OOB).
+
+Verification: 3-lens adversarial review (native-scale math / pegging formulas / edge-crash) confirmed
+correct + safe — the native step equals `dc_iscale` with no i64 overflow and no zero-underflow
+(`NEAR_CLIP` bounds `col_scale` so the step floor is 1), both pegging formulas match vanilla and are
+sign-correct, and `base + 112` is a valid in-bounds field of the 120-byte masked-seg record with no
+OOB / div-by-zero / DoS. **AGNOS in-game 3D render** (via direct-map boot — see the AGNOS note) is
+**99.4% byte-identical** to the Linux `--ppm` E1M1 spawn (HUD 100%, weapon 100%, scene 99.2% — the
+~0.8% scene delta is the animated former-human sprite at a different tick than Linux's tick-0 render),
+proving F06 is target-agnostic with no AGNOS codegen divergence.
+
+Bench: `render_frame` **2.391 ms** (E1M1, cycc 6.4.58 — variance-neutral vs 0.33.8's 2.492 ms; the
+native step drops two shifts). Binary **447,456 B** (unchanged); `doom_agnos` **433,872 B** (unchanged).
+Tests **168/264** (unchanged — a render-path change is verified by the byte-identical A/B + the AGNOS
+pixel-diff, not a unit assert). Fuzz ×5 clean. Built on true-pin **6.4.58** (symlink-swapped from the
+drifted local 6.4.60 for the gates).
+
+**AGNOS harness note (agnos-side, orthogonal to F06):** the `doom-ingame-smoke.py` HMP-sendkey menu
+drive no longer advances past TITLEPIC on current agnos HEAD — the screendump captures the title screen,
+and the flat-gate's `>= 8 colors/row` cannot distinguish title art (51-59) from a real floor (11-30), so
+it false-passes. doom's `input.cyr`/`menu.cyr` are byte-identical since v0.33.0; the changed variable is
+agnos's in-flight klug/klub input-ring + GPU-ring boot work. Worked around here with a direct-map boot
+(one-line SELFTEST-only kernel edit, reverted) that renders E1M1 without keyboard input; the 99.4%
+pixel-diff above is the decisive render check. Flagged for a separate agnos-side look.
+
+Known low-severity (deferred → consolidated audit): a crafted texture declaring a height > 256
+(`TEX_COL_MAX`) makes the peg's `tex_h` diverge from the clamped column data `th` on a floor-pegged
+column → a cosmetic blank column, no crash (real DOOM textures are ≤ 128 tall).
+
 ## [0.33.8] - 2026-07-12 — pre-PWAD security hardening (BSP cycle, subsector/render bounds, decoder fuzzer)
 
 Hardens the WAD/map parse + BSP walk surface against hostile/malformed WADs — the groundwork that

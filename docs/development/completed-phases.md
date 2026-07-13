@@ -4,6 +4,12 @@
 
 Each entry: one row, headline only. For the full changelog see [`CHANGELOG.md`](../../CHANGELOG.md).
 
+## v0.34.x — Deep renderer + game-state fidelity
+
+| Version | Shipped | Milestone |
+|---------|---------|-----------|
+| v0.34.0 | 2026-07-12 | **Native-scale vertical texture mapping (F06 / RC-W3).** Replaced stretch-to-section V mapping with DOOM's vanilla depth-based mapping — **1 texel = 1 world unit**. All four wall sections (upper, lower, one-sided-mid, masked-mid) now step texture-V by `fixed_div(FIXED_ONE, col_scale)` = vanilla `dc_iscale` = `FRACUNIT/rw_scale` (depth-only), instead of `tex_h/section_screen_height` which forced one texture copy into each section regardless of world height. **Tall walls tile** (`render_draw_tex_column`'s `% th`), **short walls clip**, **fitted walls byte-identical**. Also resolved **F-R3/F-R4**: `ML_DONTPEGBOTTOM` now bottom-anchors the one-sided-mid path (`mid_ystart = (tex_h - (ceil_h - floor_h) + yoff)`) and the masked-mid path (whose `dont_peg_bottom` flag at masked-record `base+112` was written but never read; `ty_pos = (tex_h - (open_ceil - open_floor) + yoff)`). Verified: 9-map Linux PPM A/B (12-41% of wall bytes differ = the un-fitted walls; E1M4 far tech-panel un-squashed; E1M1/E1M8 coherent, no black holes), 3-lens adversarial review (native step = `dc_iscale`, no i64 overflow / no zero-underflow; both pegging formulas sign-correct + memory-safe; `base+112` in-bounds → no OOB/div-0/DoS), and **AGNOS in-game 3D 99.4% byte-identical to Linux `--ppm`** (HUD 100% / weapon 100% / scene 99.2% — ~0.8% delta = animated sprite) via **direct-map boot** (the `doom-ingame-smoke.py` menu-drive is blocked by an agnos-side klug/klub input-ring regression — doom input unchanged since v0.33.0; flagged separately). Tests 168/264 (unchanged — render change verified by byte A/B + pixel-diff); fuzz ×5 clean; binary 447,456 B (unchanged; agnos 433,872 B); `render_frame` 2.391 ms (variance-neutral — native step drops two shifts). True-pin 6.4.58. Deferred (LOW): crafted >256-tall texture blanks a floor-pegged column (cosmetic, no crash). |
+
 ## v0.33.x — Desktop rendering (native Wayland window) + field patch
 
 | Version | Shipped | Milestone |

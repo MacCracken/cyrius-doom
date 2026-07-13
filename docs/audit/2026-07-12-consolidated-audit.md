@@ -98,7 +98,7 @@ conformant-input correctness bug or a security hole reachable only via hostile a
 | **R-5** | LOW | sprite/render/fixed | i64 overflow cluster at WAD-controlled extremes (giant patch width × point-blank scale; ±32k sector-height delta × near-clip scale). Garbage visuals, not memory-unsafe. | **OPEN — v0.28.11** (clamp patch dims + height deltas). |
 | **R-6 / M-3 / M-4** | MED | `texture.cyr:112`, `status.cyr:41-52` | Lump-sized `alloc()` with no null guard + no size cap (TEXTURE1, STBAR bg/arms) — sibling PNAMES path has the guard. Multi-GB lump → `alloc`→0 → `memset(0,0,sz)` null-write crash at load. Malicious-WAD boot DoS. | **OPEN — slotted v0.33.4** (cheap: mirror the `pn_data==0` guard + cap). |
 | **R-7** | INFO | `wad.cyr:16` `WAD_MAX_LUMPS=2048` | Full IWAD (~2306 lumps) silently truncates the directory → 0 flats load + maps exceed MAP_MAX. Companion to FLAT_MAX=64. | **OPEN — full-IWAD theme** (with FLAT_MAX; warn-on-clamp). |
-| **R-8** | INFO | `render.cyr:598/1492` | Masked-seg stores `dont_peg_bottom`/`sd_xoff` never read — load-bearing the day F06 native-scale lands. | **OPEN — rides F06 (v0.29.x/v0.34.x)** = F-R4. |
+| **R-8** | INFO | `render.cyr:598/1492` | Masked-seg stores `dont_peg_bottom`/`sd_xoff` never read — load-bearing the day F06 native-scale lands. | **CLOSED v0.34.0** (with F06 = F-R4): the masked-mid path now reads `dont_peg_bottom` at `base+112` and bottom-pegs. (`sd_xoff` — verify it's applied; drop if so.) |
 | **R-9** | INFO | `status.cyr:106` vs others | Post-walk caps inconsistent (64 HUD/menu vs 128 weapon/sprite vs 256 texture). | **OPEN — trivial** (unify on 256). |
 | **R-10 / M-6** | LOW | `render.cyr` back-sector projections | Bare logical `>>` on sector light (safe today — light stored unsigned) + F17's absolute clamp covers the **front** projection only; back-sector + masked `open_top/open_bot` unclamped → a crafted extreme-height sector stalls a frame for minutes (`continue` per row from −2³⁰). No OOB. | **OPEN — v0.28.11** (finish F17: clamp back-sector + masked loop entry; add `asr()`/invariant comment). |
 
@@ -206,7 +206,7 @@ and code-verified this round; `OPEN` = still present (with the slot it's now ass
     clamp / frame-stall → **v0.28.11**
 
 **MED — engine-fidelity (larger)**
-11. **F06 / RC-W3 native-scale vertical texture mapping** (unblocks F-R3/F-R4/R-8) → **v0.34.x**
+11. ~~**F06 / RC-W3 native-scale vertical texture mapping** (unblocks F-R3/F-R4/R-8)~~ → **SHIPPED v0.34.0** — native V-step `fixed_div(FIXED_ONE, col_scale)` = `dc_iscale` on all four wall sections; **F-R3/F-R4 resolved** (`ML_DONTPEGBOTTOM` wired on one-sided-mid + the masked-mid `base+112` flag); **R-8 closed** (the masked dead-store is now read). 9-map A/B (fitted byte-identical), 3-lens adversarial review, AGNOS direct-map 99.4% pixel-diff. **New LOW residual (F06-1)**: a crafted texture with declared height > 256 (`TEX_COL_MAX`) diverges the peg's `tex_h` from the clamped column data `th` on a floor-pegged column → cosmetic blank column, no crash (real DOOM textures ≤128); a one-line `tex_h` clamp closes it, byte-identical for legit content.
 12. **RC-S6 real thing-z** (render + physics together; unblocks precise missile trace res-1) → **v0.34.x**
 13. **RC-G1 monster-vs-closing-door obstruction** (rides F15 thing-sector cache) → **v0.28.8**
 14. **P4 episode-complete screen** (E1M8→text/bunny, + `D_VICTOR`) → **v0.34.x**
