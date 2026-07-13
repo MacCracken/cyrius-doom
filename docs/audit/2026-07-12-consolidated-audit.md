@@ -22,6 +22,19 @@ crash), **P-6** (compositor-dim overflow), **M-2** (env-path stack smash), **R-2
 **R-6/M-3/M-4** (TEXTURE1/STBAR alloc guards), **G-7** (sparse hot-path switches → if/else). See
 CHANGELOG `[0.33.4]`. The rows below marked "slotted v0.33.4" are now **FIXED@0.33.4**.
 
+**Shipped in 0.33.7** (door/lift fidelity follow-ups from the G-2 review): **G-5** (drop-off escape-rule
+zero-band — an on-line cross-product endpoint now counts as crossing so the ML_BLOCKING/one-sided veto
+applies), plus the two pre-existing door-fidelity items the G-2 review surfaced — doors open to the
+**lowest** neighbor ceiling (vanilla `P_FindLowestCeilingSurrounding`, not the highest) and the
+**W1/S1/D1 one-shot latch** (once-only specials fire once per level; keyed D1 doors key-gated, tag-loop
+latch restricted to the S1 switch subset per a further adversarial review). Blazing/turbo speed deferred
+→ roadmap v0.34.x (registered-WAD-only). See CHANGELOG `[0.33.7]`.
+
+**Shipped in 0.33.6** (+ toolchain 6.4.55→6.4.58): **RC-F2** (bsp `asr()` floor-vs-round-toward-zero)
+— fixed upstream in bsp 1.2.1 (floor semantics; doom shares bsp's `asr` engine-wide, positive-case
+byte-identical, 9-map PPM A/B byte-identical). doom `[deps.bsp]` 1.2.0→1.2.1 (published, commit-pin
+`211b6c41…`); lock regenerated 36/0 on true-pin 6.4.58. See CHANGELOG `[0.33.6]`.
+
 **Shipped in 0.33.5** (the second fix-slot patch): **G-2** (switch doors/lifts → tagged sectors; the
 progression blocker — plus the one-sided-switch-line inert case, the newly-added D1 keyed open-stay
 doors 32/33/34, the walk-special relocation, and a one-way `DS_FLOOR_LOWER` motion for 23/38/70/71/102),

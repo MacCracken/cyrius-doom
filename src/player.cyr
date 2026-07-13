@@ -282,6 +282,14 @@ fn move_check_linedef(cx, cy, cfloor, nx, ny, radius, i, allow_drop): i64 {
                 var crossing = 0;
                 if (side_c > 0 && side_n < 0) { crossing = 1; }
                 if (side_c < 0 && side_n > 0) { crossing = 1; }
+                # Zero-band guard (audit G-5): the asr(,8)+fixed_mul truncation
+                # quantizes the side value to exactly 0 within ~0.01-0.13 map units
+                # of the line (band widens for short lines). A 0 on either endpoint
+                # used to read as "same side" → escape → the veto below was skipped,
+                # so a move could TUNNEL through a one-sided/blocking line near its
+                # endpoints. Treat an on-line endpoint as crossing so the veto applies.
+                if (side_c == 0) { crossing = 1; }
+                if (side_n == 0) { crossing = 1; }
                 # Same-side move while already inside the radius: always
                 # legal — it's the only way back out. Crossing falls through
                 # to the normal veto checks below.

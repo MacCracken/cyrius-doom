@@ -5,7 +5,7 @@ description = "DOOM in Cyrius — clean-room, direct framebuffer, no libc, just 
 license = "GPL-3.0-only"
 repository = "https://github.com/MacCracken/cyrius-doom"
 language = "cyrius"
-cyrius = "6.4.55"
+cyrius = "6.4.58"
 
 [build]
 src = "src/main.cyr"
@@ -48,5 +48,5 @@ stdlib = ["string", "alloc", "fmt", "vec", "str", "io", "fs", "args", "syscalls"
 # `lib/bsp.cyr` to the tag below.
 [deps.bsp]
 git = "https://github.com/MacCracken/bsp.git"
-tag = "1.2.0"
+tag = "1.2.1"
 modules = ["dist/bsp.cyr"]

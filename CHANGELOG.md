@@ -7,6 +7,100 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.33.7] - 2026-07-12 — door/lift fidelity follow-ups
+
+Three vanilla-fidelity fixes surfaced by the 0.33.5 G-2 adversarial review, each pre-existing.
+Design + an adversarial diff review (which caught one malformed-WAD progression-blocker edge in the
+new latch, fixed before cutting). No render-path change — the 9-map spawn renders are unchanged.
+
+### Fixed
+
+- **Doors opened to the *highest* neighbor ceiling instead of the lowest** (item 1). `door_start`
+  used `find_highest_neighbor_ceil`; vanilla `P_FindLowestCeilingSurrounding` opens a door to the
+  **lowest** surrounding ceiling − 4 (a door bordering rooms of different ceiling heights rises only
+  as high as its lowest neighbor). Added `find_lowest_neighbor_ceil` (excludes self, min over
+  two-sided neighbors) and switched the target; removed the now-dead `find_highest_neighbor_ceil`.
+  Single-neighbor doors are unchanged (highest == lowest).
+- **W1/S1/D1 "once" specials re-fired on re-cross / re-use** (item 3). Vanilla fires a once-only
+  linedef exactly once per level (the engine zeroes `line->special`); doom re-read the special every
+  time, so re-crossing a W1 line or re-pressing an S1/D1 switch re-triggered it (a W1 lift re-riding,
+  etc.). Added a per-linedef `linedef_used` latch (allocated `MAP_MAX_LINEDEFS`, cleared each map in
+  `doors_init`) + a `special_is_once` classifier; the once-types (D1 31/32/33/34/118, W1 2/4/10/38/121,
+  S1 29/103/21/122/23/71/102) latch after firing, the repeatable DR/SR/WR forms never do. **Keyed D1
+  doors (32/33/34) latch only when the key is present** so a keyless attempt stays retriable, and the
+  tag-loop latch is restricted to the S1 switch subset (`special_is_switch_once`) — a malformed WAD
+  that tags a keyed D1 door can't latch it keyless and lock the player out (adversarial-review fix).
+- **Collision escape-rule zero-band let a move tunnel a line near its endpoints** (audit G-5). The
+  drop-off same-side escape rule (0.33.1) set `crossing` only on a strict cross-product sign flip;
+  the `asr(,8)`+`fixed_mul` truncation quantizes the side value to exactly 0 within ~0.01–0.13 map
+  units of a line, and a 0 read as "same side" → the move escaped the ML_BLOCKING/one-sided veto.
+  Now an on-line (`side==0`) endpoint counts as crossing, so the veto applies. Player-only; the
+  sub-pixel band matches vanilla's tall-step/one-sided blocking (review-confirmed no re-wedge).
+
+### Deferred → roadmap
+
+- **Blazing/turbo door-lift speed** (117/118 doors, 122 lift, 70/71 turbo floor run at base
+  DOOR_SPEED/LIFT_SPEED). Registered-WAD-only fidelity (none appear in shareware; type 70 already
+  runs at ~turbo speed) and needs an invasive thinker-layout change to carry a per-thinker speed —
+  deferred to a registered-WAD slot where it can be play-verified.
+
+### Verification
+
+- Tests **164/260** (+16 WAD-gated: door-target = lowest neighbor ceiling; `special_is_once` /
+  `special_is_switch_once` classification; the `linedef_used` latch mark/check/clear). fuzz
+  `fuzz_wad`/`fuzz_fixed`/`fuzz_weapon`/`fuzz_mus` = **1000/50000/2000/1000 clean**; 9 maps + 5 menus
+  render at 192,015 B (no render-path change); clean-from-scratch resolve + `CYRIUS_DCE=1` build
+  (530 fns / 99,379 B NOPed); deps 36/0; `render_frame` **2.556 ms** (variance — doors/collision are
+  off the render path). Binary 443,336 → **447,440 B** (+4,104 for the latch infrastructure +
+  helpers; `doom_agnos` 429,752 → **429,760 B**). **AGNOS QEMU doom-smoke + in-game — PASS on the
+  final 0.33.7 binary** (serial `cyrius-doom v0.33.7`; one flaky in-game screendump race re-ran
+  clean with correct E1M1 map stats + textured flats). Built on true-pin **6.4.58** (symlink-swapped
+  from the drifted local 6.4.59). Adversarial review: item 1 + G-5 verdicts clean (INFO-only, all
+  confirmed vanilla-matching); the item-3 latch's malformed-WAD edge was hardened before cutting.
+
+## [0.33.6] - 2026-07-12 — bsp `asr()` floor fix (RC-F2) + toolchain 6.4.55 → 6.4.58
+
+The third patch off the [2026-07-12 consolidated audit](docs/audit/2026-07-12-consolidated-audit.md):
+a one-function correctness fix in the `bsp` dependency, plus the toolchain refresh to the latest cyrius.
+**doom shares bsp's `asr()`** (included first from `lib/bsp.cyr`, used at all 95 signed-shift sites), so
+the fix is an engine-wide fixed-point change — verified to be a strict correction with no regression.
+bsp 1.2.1 is now published; doom's `[deps.bsp]` resolves it and the lock is regenerated (**36 verified,
+0 failed**, bsp commit-pin `211b6c41…`).
+
+### Fixed
+
+- **`asr()` rounded negatives toward zero instead of flooring** (audit RC-F2). bsp's `asr(val, bits)`
+  negative path returned `-((-val) >> bits)` — round-toward-**zero** (e.g. `asr(-3, 1)` → `-1`) rather
+  than the arithmetic (sign-preserving) shift C's signed `>>` performs and DOOM's fixed-point + coord
+  math assume (`-2`). Every `fx_to_int` / `fx_mul` on a negative operand inherited the truncation, which
+  mis-wrapped flats by one texel over **negative world coordinates** and doubled the texel band
+  straddling a world axis. Fixed upstream in **bsp 1.2.1** to floor: negative `val` →
+  `-((|val| + 2^bits - 1) >> bits)`. Positive values are unchanged, so the all-positive call sites (the
+  common case) are byte-identical — which is why the **9-map PPM A/B is byte-identical at spawn views**
+  (the mis-wrap is a subtle negative-coord effect the spawn viewpoints don't exercise; the audit's
+  evidence came from staged viewpoints). bsp suite **94 → 103** (+9 `asr`/`fx_to_int` floor asserts);
+  its geometry tests (point-side, blockmap, frustum, traverse) unchanged and green.
+
+### Changed
+
+- **`[deps.bsp]` tag 1.2.0 → 1.2.1** (`cyrius.cyml`) — carries the RC-F2 asr fix.
+- **Toolchain pin `cyrius 6.4.55 → 6.4.58`** (latest release). Lock regenerated from scratch
+  (`rm -rf lib && cyrius deps`) — **36 deps, 1 commit-pinned (bsp 1.2.1), verifies 36/0**. Builds ran
+  the true-pin toolchain (local cycc == pin == 6.4.58, no drift). 6.4.58 codegen differs from 6.4.55:
+  the plain binary grows +16 B and the AGNOS binary +4,128 B (codegen tax, not a source change).
+
+### Verification
+
+- doom tests **164/244** (unchanged — asr floor is logic-equivalent for the positive-only assertions;
+  the negative-shift call paths in collision/combat/atan2 stay green); fuzz `fuzz_wad`/`fuzz_fixed`/
+  `fuzz_weapon`/`fuzz_mus` = **1000/50000/2000/1000 clean** (fuzz_fixed exercises asr heavily); all 9
+  maps **byte-identical** old-trunc vs new-floor asr (the asr A/B, isolating the fix under one
+  compiler), + 5 menus at 192,015 B; clean-from-scratch resolve + `CYRIUS_DCE=1` build (530 fns /
+  99,379 B NOPed); deps **36/0**; `render_frame` **2.457 ms** (variance). Binary 443,320 →
+  **443,336 B** (`doom_agnos` 425,624 → **429,752 B** — the 6.4.58 codegen delta). **AGNOS QEMU
+  doom-smoke + in-game sendkey + aethersafha compositor-present — all PASS on the final 6.4.58 0.33.6
+  binary** (serial `cyrius-doom v0.33.6`, 258-colour composited window).
+
 ## [0.33.5] - 2026-07-12 — gameplay-fidelity patch (switch/lift dispatch + render clamp + polish)
 
 The second patch off the [2026-07-12 consolidated audit](docs/audit/2026-07-12-consolidated-audit.md),

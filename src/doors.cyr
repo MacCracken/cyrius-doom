@@ -41,11 +41,66 @@ enum DoorState {
 var door_thinkers = 0;
 var door_count = 0;
 
+# Per-linedef one-shot latch (0.33.7 item 3). Vanilla W1/S1/D1 "once" specials fire
+# EXACTLY once per level (the engine zeroes line->special after activating); doom
+# read the special fresh every time, so re-crossing a W1 line or re-using an S1/D1
+# switch re-fired it. This byte array (1 = already fired) latches them; repeatable
+# DR/SR/WR specials are never marked. Sized to MAP_MAX_LINEDEFS, cleared per map.
+var linedef_used = 0;
+
 fn doors_init(): i64 {
     # Lazy-init guard (RC-G7): re-alloc'd on every map load, leaking the
     # previous thinker array on the never-free bump allocator.
     if (door_thinkers == 0) { door_thinkers = alloc(DOOR_MAX * DOOR_ENTRY_SIZE); }
+    if (linedef_used == 0) { linedef_used = alloc(MAP_MAX_LINEDEFS); }
+    var i = 0;
+    while (i < MAP_MAX_LINEDEFS) { store8(linedef_used + i, 0); i += 1; }
     door_count = 0;
+    return 0;
+}
+
+fn door_line_used(idx): i64 { return load8(linedef_used + idx); }
+fn door_mark_used(idx): i64 { store8(linedef_used + idx, 1); return 0; }
+
+# 1 if `special` is a W1/S1/D1 "once" trigger (latches after firing); 0 for the
+# repeatable DR/SR/WR forms. Flat if statements, NOT a switch (return-smash-safe).
+# Once: D1 doors 31/32/33/34/118; W1 walk 2/4/10/38/121; S1 switch 29/103/21/122/23/71/102.
+# Repeatable (0): DR 1/26/27/28/117; SR 63/62/70; WR 88/90. Exits (11/51/52/124) are
+# self-terminating (the level ends) — not latched here.
+fn special_is_once(special): i64 {
+    if (special == 31)  { return 1; }
+    if (special == 32)  { return 1; }
+    if (special == 33)  { return 1; }
+    if (special == 34)  { return 1; }
+    if (special == 118) { return 1; }
+    if (special == 2)   { return 1; }
+    if (special == 4)   { return 1; }
+    if (special == 10)  { return 1; }
+    if (special == 38)  { return 1; }
+    if (special == 121) { return 1; }
+    if (special == 29)  { return 1; }
+    if (special == 103) { return 1; }
+    if (special == 21)  { return 1; }
+    if (special == 122) { return 1; }
+    if (special == 23)  { return 1; }
+    if (special == 71)  { return 1; }
+    if (special == 102) { return 1; }
+    return 0;
+}
+
+# 1 if `special` is an S1 push-use "once" switch that dispatches via the tag loop
+# (a SUBSET of special_is_once). Used to latch ONLY the switch once-types after the
+# tag sweep — the manual D1 doors (31/32/33/34/118) are latched inline, key-gated,
+# so a malformed WAD that tags a keyed D1 door can't latch it keyless via the tag
+# path and lock the player out (adversarial review, 0.33.7).
+fn special_is_switch_once(special): i64 {
+    if (special == 29)  { return 1; }
+    if (special == 103) { return 1; }
+    if (special == 21)  { return 1; }
+    if (special == 122) { return 1; }
+    if (special == 23)  { return 1; }
+    if (special == 71)  { return 1; }
+    if (special == 102) { return 1; }
     return 0;
 }
 
@@ -84,9 +139,15 @@ fn door_alloc_slot(): i64 {
     return idx;
 }
 
-# Find the highest ceiling of sectors neighboring a given sector
-fn find_highest_neighbor_ceil(sector_idx): i64 {
-    var best = map_sector_ceilh(sector_idx);
+# Find the LOWEST ceiling of sectors NEIGHBORING a given sector (excludes the
+# sector's own ceiling — vanilla P_FindLowestCeilingSurrounding). A normal door
+# opens to this − 4: a door sector bordering rooms of DIFFERENT ceiling heights
+# rises only as high as its LOWEST neighbor, not the highest (audit 0.33.7 item 1;
+# the old find_highest overshot on multi-neighbor door sectors). Falls back to the
+# sector's own ceiling if it has no two-sided neighbors.
+fn find_lowest_neighbor_ceil(sector_idx): i64 {
+    var best = 0;
+    var found = 0;
     for (var i = 0; i < map_num_linedefs; i += 1) {
         var rs = map_linedef_side_right(i);
         var ls = map_linedef_side_left(i);
@@ -96,13 +157,14 @@ fn find_highest_neighbor_ceil(sector_idx): i64 {
         var ls_sec = map_sidedef_sector(ls);
         if (rs_sec == sector_idx) {
             var ch = map_sector_ceilh(ls_sec);
-            if (ch > best) { best = ch; }
+            if (found == 0 || ch < best) { best = ch; found = 1; }
         }
         if (ls_sec == sector_idx) {
             var ch = map_sector_ceilh(rs_sec);
-            if (ch > best) { best = ch; }
+            if (found == 0 || ch < best) { best = ch; found = 1; }
         }
     }
+    if (found == 0) { return map_sector_ceilh(sector_idx); }
     return best;
 }
 
@@ -201,7 +263,7 @@ fn door_start(sector_idx, open_state): i64 {
     if (door_find_sector(sector_idx) >= 0) { return 0; }
 
     var ceil_h = map_sector_ceilh(sector_idx);
-    var target = find_highest_neighbor_ceil(sector_idx) - 4;
+    var target = find_lowest_neighbor_ceil(sector_idx) - 4;   # vanilla: LOWEST neighbor ceiling (item 1)
     # A sector with no higher neighbor would "open" to its own ceiling − 4,
     # DIPPING the ceiling for the wait period (RC-G8/L7). Never open downward.
     if (target < ceil_h) { target = ceil_h; }
@@ -458,6 +520,10 @@ fn doors_use(): i64 {
 
     var special = load64(map_linedefs + best_line * MAP_LINEDEF_SIZE + 24);
 
+    # One-shot latch (0.33.7 item 3): an S1/D1 "once" switch/door already used stays
+    # used — don't re-fire on a second press. Repeatable DR/SR forms fall through.
+    if (special_is_once(special) == 1) { if (door_line_used(best_line) == 1) { return 0; } }
+
     var rs = map_linedef_side_right(best_line);
     var ls = map_linedef_side_left(best_line);
 
@@ -478,12 +544,14 @@ fn doors_use(): i64 {
         if (special == 26)  { if ((player_keys & KEY_CARD_BLUE)   != 0) { door_open(door_sec); } }            # DR blue
         if (special == 27)  { if ((player_keys & KEY_CARD_YELLOW) != 0) { door_open(door_sec); } }            # DR yellow
         if (special == 28)  { if ((player_keys & KEY_CARD_RED)    != 0) { door_open(door_sec); } }            # DR red
-        if (special == 31)  { door_open_stay(door_sec); }                                                     # D1 open & stay
-        if (special == 32)  { if ((player_keys & KEY_CARD_BLUE)   != 0) { door_open_stay(door_sec); } }       # D1 blue open-stay
-        if (special == 33)  { if ((player_keys & KEY_CARD_RED)    != 0) { door_open_stay(door_sec); } }       # D1 red open-stay
-        if (special == 34)  { if ((player_keys & KEY_CARD_YELLOW) != 0) { door_open_stay(door_sec); } }       # D1 yellow open-stay
-        if (special == 117) { door_open(door_sec); }                                                          # DR blazing
-        if (special == 118) { door_open_stay(door_sec); }                                                     # D1 blazing open-stay
+        # D1 (once) doors mark the line used INLINE — for the keyed ones only when
+        # the key is present, so a keyless attempt stays retriable (item 3).
+        if (special == 31)  { door_open_stay(door_sec); door_mark_used(best_line); }                          # D1 open & stay
+        if (special == 32)  { if ((player_keys & KEY_CARD_BLUE)   != 0) { door_open_stay(door_sec); door_mark_used(best_line); } }   # D1 blue
+        if (special == 33)  { if ((player_keys & KEY_CARD_RED)    != 0) { door_open_stay(door_sec); door_mark_used(best_line); } }   # D1 red
+        if (special == 34)  { if ((player_keys & KEY_CARD_YELLOW) != 0) { door_open_stay(door_sec); door_mark_used(best_line); } }   # D1 yellow
+        if (special == 117) { door_open(door_sec); }                                                          # DR blazing (repeatable)
+        if (special == 118) { door_open_stay(door_sec); door_mark_used(best_line); }                          # D1 blazing open-stay
     }
 
     # Exit switches (if/else — see above)
@@ -514,6 +582,12 @@ fn doors_use(): i64 {
                 # (38 was here but it is W1 walk-only — moved to doors_walk_trigger.)
             }
         }
+        # Latch the S1 "once" SWITCHES after the sweep (item 3). Restricted to the
+        # switch subset (not special_is_once) so a malformed WAD that tags a keyed
+        # D1 door can't latch it keyless here → unopenable; the manual D1 doors are
+        # latched inline, key-gated (adversarial review). Repeatable SR (63/62/70)
+        # aren't once → never latched.
+        if (special_is_switch_once(special) == 1) { door_mark_used(best_line); }
     }
 
     return 0;
@@ -544,6 +618,12 @@ fn doors_walk_trigger(old_x, old_y, new_x, new_y): i64 {
         if (special == 121) { is_walk = 1; }
         if (special == 124) { is_walk = 1; }
         if (is_walk == 0) { continue; }
+
+        # One-shot latch (0.33.7 item 3): a W1 "once" walk line already crossed
+        # stays used — don't re-fire on a re-cross (a W1 lift re-riding, etc.).
+        # Repeatable WR forms (88/90) fall through. Checked before the geometry so
+        # a spent once-line costs nothing.
+        if (special_is_once(special) == 1) { if (door_line_used(i) == 1) { continue; } }
 
         var v1 = map_linedef_v1(i);
         var v2 = map_linedef_v2(i);
@@ -606,6 +686,9 @@ fn doors_walk_trigger(old_x, old_y, new_x, new_y): i64 {
                 }
             }
         }
+        # Latch the W1 "once" walk lines after firing (item 3). Repeatable WR
+        # (88/90) aren't once; exits (52/124) already returned above.
+        if (special_is_once(special) == 1) { door_mark_used(i); }
     }
     return 0;
 }

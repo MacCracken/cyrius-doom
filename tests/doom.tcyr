@@ -1200,6 +1200,42 @@ fn main() {
         door_open_stay(4);
         assert_eq(door_count, 1, "closed door still spawns a thinker");
 
+        # ============================================================
+        test_group("door: opens to LOWEST neighbor ceiling (0.33.7 item 1)");
+        # ============================================================
+        # Vanilla P_FindLowestCeilingSurrounding: a door rises to the lowest
+        # neighbor ceiling − 4, not the highest (find_highest overshot).
+        doors_init();
+        store64(map_sectors + 4 * MAP_SECTOR_SIZE + 8, 0);   # close it
+        door_open(4);
+        assert_eq(door_count, 1, "door opens");
+        assert_eq(door_target(0), find_lowest_neighbor_ceil(4) - 4, "door target = lowest neighbor ceil − 4");
+
+        # ============================================================
+        test_group("linedef one-shot latch (0.33.7 item 3)");
+        # ============================================================
+        # special_is_once classifies W1/S1/D1 as once, DR/SR/WR as repeatable.
+        assert_eq(special_is_once(31), 1, "31 D1 door = once");
+        assert_eq(special_is_once(1), 0, "1 DR door = repeatable");
+        assert_eq(special_is_once(29), 1, "29 S1 switch = once");
+        assert_eq(special_is_once(63), 0, "63 SR switch = repeatable");
+        assert_eq(special_is_once(10), 1, "10 W1 lift = once");
+        assert_eq(special_is_once(88), 0, "88 WR lift = repeatable");
+        assert_eq(special_is_once(32), 1, "32 D1 keyed = once");
+        assert_eq(special_is_once(90), 0, "90 WR door = repeatable");
+        # The tag-loop latch is restricted to the switch subset so a malformed WAD
+        # that tags a keyed D1 door can't latch it keyless → unopenable.
+        assert_eq(special_is_switch_once(29), 1, "29 S1 switch is a switch-once");
+        assert_eq(special_is_switch_once(32), 0, "32 D1 keyed NOT a switch-once (stays key-retriable)");
+        assert_eq(special_is_switch_once(63), 0, "63 SR switch is repeatable, not once");
+        # The used-flag array marks/checks per linedef and clears on doors_init.
+        doors_init();
+        assert_eq(door_line_used(7), 0, "line 7 unused after doors_init");
+        door_mark_used(7);
+        assert_eq(door_line_used(7), 1, "line 7 latches used");
+        doors_init();
+        assert_eq(door_line_used(7), 0, "doors_init clears the latch (per-level)");
+
         wad_close();
     } else {
         syscall(1, 1, "(WAD tests skipped — pass WAD path as arg)\n", 44);
