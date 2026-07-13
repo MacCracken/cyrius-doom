@@ -62,7 +62,8 @@ drifted local 6.4.60 for the gates).
 drive no longer advances past TITLEPIC on current agnos HEAD — the screendump captures the title screen,
 and the flat-gate's `>= 8 colors/row` cannot distinguish title art (51-59) from a real floor (11-30), so
 it false-passes. doom's `input.cyr`/`menu.cyr` are byte-identical since v0.33.0; the changed variable is
-agnos's in-flight klug/klub input-ring + GPU-ring boot work. Worked around here with a direct-map boot
+agnos-side (cause unidentified — `klug` is the kernel log ring, not input; the direct-map boot proves
+render/present/game-loop all work, so it is specifically keyboard-into-menu delivery). Worked around here with a direct-map boot
 (one-line SELFTEST-only kernel edit, reverted) that renders E1M1 without keyboard input; the 99.4%
 pixel-diff above is the decisive render check. Flagged for a separate agnos-side look.
 

@@ -58,7 +58,7 @@
 > the clamped column data `th` on a floor-pegged column → cosmetic blank column, no crash (real DOOM
 > textures ≤128; a one-line `tex_h` clamp closes it, byte-identical for legit content). (b) **agnos-side,
 > flagged to user** — the `doom-ingame-smoke.py` menu-drive no longer advances past TITLEPIC on current
-> agnos HEAD (klug/klub input-ring + `gpu_ring_kick()` boot WIP); doom `input.cyr`/`menu.cyr` unchanged
+> agnos HEAD (keyboard-into-menu delivery stuck; cause unidentified — `klug` is the kernel LOG ring, not input); doom `input.cyr`/`menu.cyr` unchanged
 > since v0.33.0. The direct-map-boot verification (99.4% pixel-diff vs Linux) is now the robust AGNOS
 > render gate; consider promoting a direct-map smoke variant so in-game render no longer depends on
 > keyboard input.
