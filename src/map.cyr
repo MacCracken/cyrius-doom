@@ -341,6 +341,54 @@ fn map_load(map_name): i64 {
 # Map validation: bounds-check all cross-references (CVE hardening)
 # ================================================================
 
+# BSP acyclicity check (0.33.8, pre-PWAD). map_validate range-checks node child
+# INDICES but not the tree STRUCTURE: a hostile WAD whose nodes form a cycle passes
+# the range check, then every BSP walk loops forever — map_point_sector's `while
+# (bsp_is_subsector...)` descent (below) never reaches a leaf, and the recursive
+# render/collision walks overflow the stack. A valid DOOM BSP is a strict binary
+# TREE rooted at the last node: each node/leaf is referenced by exactly one parent.
+# Iterative DFS from the root, marking each node the FIRST time it is referenced —
+# a second reference (cycle OR shared subtree, both invalid in DOOM) is rejected.
+# Marking on PUSH bounds the stack to map_num_nodes (each node pushed at most once).
+var bsp_visited = 0;      # scratch byte array (MAP_MAX_NODES)
+var bsp_dfs_stack = 0;    # scratch i64 stack (MAP_MAX_NODES)
+
+fn map_validate_bsp_acyclic(): i64 {
+    if (map_num_nodes == 0) { return 0; }                 # seg-only map / no BSP → nothing to walk
+    if (bsp_visited == 0)   { bsp_visited = alloc(MAP_MAX_NODES); }
+    if (bsp_dfs_stack == 0) { bsp_dfs_stack = alloc(MAP_MAX_NODES * 8); }
+    var i = 0;
+    while (i < map_num_nodes) { store8(bsp_visited + i, 0); i += 1; }
+    var root = map_num_nodes - 1;
+    store8(bsp_visited + root, 1);
+    store64(bsp_dfs_stack, root);
+    var sp = 1;
+    while (sp > 0) {
+        sp -= 1;
+        var n = load64(bsp_dfs_stack + sp * 8);
+        var base = map_nodes + n * MAP_NODE_SIZE;
+        var right = load64(base + 96);
+        var left = load64(base + 104);
+        # A child with the 0x8000 flag is a subsector (leaf) — not walked. A node
+        # child (flag clear) must be in range, not already referenced, and pushed.
+        if ((right & 0x8000) == 0) {
+            if (right >= map_num_nodes) { return -1; }
+            if (load8(bsp_visited + right) != 0) { return -1; }   # cycle / shared node
+            if (sp >= MAP_MAX_NODES) { return -1; }
+            store8(bsp_visited + right, 1);
+            store64(bsp_dfs_stack + sp * 8, right); sp += 1;
+        }
+        if ((left & 0x8000) == 0) {
+            if (left >= map_num_nodes) { return -1; }
+            if (load8(bsp_visited + left) != 0) { return -1; }
+            if (sp >= MAP_MAX_NODES) { return -1; }
+            store8(bsp_visited + left, 1);
+            store64(bsp_dfs_stack + sp * 8, left); sp += 1;
+        }
+    }
+    return 0;
+}
+
 fn map_validate(): i64 {
     # Validate linedef vertex indices and sidedef references
     for (var i = 0; i < map_num_linedefs; i += 1) {
@@ -372,11 +420,14 @@ fn map_validate(): i64 {
         if (ld >= map_num_linedefs) { return -1; }
     }
 
-    # Validate subsector seg ranges
+    # Validate subsector seg ranges. Vanilla requires every subsector to have at
+    # least ONE seg; count==0 (0.33.8, R-3) would leave map_point_sector reading
+    # first_seg == map_num_segs (one past the array). Reject it at load.
     for (var i = 0; i < map_num_ssectors; i += 1) {
         var base = map_ssectors + i * MAP_SSECTOR_SIZE;
         var count = load64(base);
         var first = load64(base + 8);
+        if (count == 0) { return -1; }
         if (first + count > map_num_segs) { return -1; }
     }
 
@@ -397,6 +448,10 @@ fn map_validate(): i64 {
             if (left >= map_num_nodes) { return -1; }
         }
     }
+
+    # Node index range is checked above; the TREE STRUCTURE (no cycles / shared
+    # subtrees) is validated separately so no BSP walk can loop/overflow (0.33.8 HIGH).
+    if (map_validate_bsp_acyclic() != 0) { return -1; }
 
     return 0;
 }
@@ -457,7 +512,13 @@ fn map_print_stats(): i64 {
 fn map_point_sector(px, py): i64 {
     if (map_num_nodes == 0) { return 0; }
     var node_idx = map_num_nodes - 1;
+    # The descent is bounded by map_num_nodes: a well-formed BSP tree resolves in
+    # <= depth steps, and map_validate_bsp_acyclic already rejects cycles at load.
+    # The cap is belt-and-suspenders so a cycle can never HANG this loop (0.33.8).
+    var guard = 0;
     while (bsp_is_subsector(node_idx) == 0) {
+        guard += 1;
+        if (guard > map_num_nodes) { return 0; }
         if (bsp_point_on_side(map_nodes, node_idx, px, py) == 0) {
             node_idx = bsp_node_child_r(map_nodes, node_idx);
         } else {
@@ -465,12 +526,20 @@ fn map_point_sector(px, py): i64 {
         }
     }
     var ss_idx = bsp_subsector_idx(node_idx);
+    if (ss_idx >= map_num_ssectors) { return 0; }                # bound the leaf
     var first_seg = map_ssector_first(ss_idx);
+    if (first_seg >= map_num_segs) { return 0; }                 # R-3 defense-in-depth
     var line_idx = map_seg_linedef(first_seg);
+    if (line_idx < 0 || line_idx >= map_num_linedefs) { return 0; }
     var sidedef_idx = map_linedef_side_right(line_idx);
     if (map_seg_side(first_seg) == 1) {
         sidedef_idx = map_linedef_side_left(line_idx);
     }
+    # Degenerate leaf (no sidedef) falls back to sector 0 — a valid sector, so
+    # every caller's `map_sector_floorh(result)` stays in bounds. This only fires
+    # on data that slipped map_validate; the "wrong sector" refinement (return -1 +
+    # caller no-floor-context handling, audit G-13) is deferred — it needs a caller
+    # sweep and is moot now that validation rejects the malformed maps that reach it.
     if (sidedef_idx < 0) { return 0; }
     return map_sidedef_sector(sidedef_idx);
 }

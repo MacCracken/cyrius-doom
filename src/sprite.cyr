@@ -409,7 +409,13 @@ fn sprite_render_all(): i64 {
         var thing_light = 160;
         if (map_num_nodes > 0) {
             var nw = map_num_nodes - 1;
+            # Iteration cap = self-defense against a node cycle (validation rejects
+            # them at load; a valid descent is <= tree-depth steps). 0.33.8 pre-PWAD.
+            # On break nw is a node index (< 0x8000); ssi below is bounds-checked.
+            var nwg = 0;
             while (bsp_is_subsector(nw) == 0) {
+                nwg += 1;
+                if (nwg > map_num_nodes) { break; }
                 if (bsp_point_on_side(map_nodes, nw, tx, ty) == 0) { nw = bsp_node_child_r(map_nodes, nw); }
                 else { nw = bsp_node_child_l(map_nodes, nw); }
             }

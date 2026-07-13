@@ -7,6 +7,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.33.8] - 2026-07-12 — pre-PWAD security hardening (BSP cycle, subsector/render bounds, decoder fuzzer)
+
+Hardens the WAD/map parse + BSP walk surface against hostile/malformed WADs — the groundwork that
+must land before PWAD (custom-WAD) support, since untrusted WADs then become loadable. Design +
+adversarial review (which proved the first decoder fuzzer had zero coverage and caught it before cutting).
+
+### Fixed
+
+- **HIGH — hostile BSP node cycle → unbounded walk (hang / stack overflow).** `map_validate`
+  range-checked node child *indices* but not the tree *structure*: a WAD whose BSP nodes form a cycle
+  passed, then every BSP walk looped forever — `map_point_sector`'s descent never reached a leaf and the
+  recursive render/collision walks overflowed. New `map_validate_bsp_acyclic()` does an iterative DFS
+  from the root, marking each node the first time it is referenced and rejecting a second reference
+  (cycle *or* shared subtree — both invalid in a DOOM binary tree); marking on push bounds the scratch
+  stack to the node count. Rejected at load, so no walk ever runs on a cyclic map. All 9 shareware maps
+  still validate + render.
+- **Zero-seg subsector over-read (R-3).** `map_validate` admitted a `count==0` subsector, leaving
+  `map_point_sector` to read `first_seg == map_num_segs` (one past the segs array). Now rejected at load
+  (vanilla requires ≥1 seg); `map_point_sector` also gained a descent iteration cap and `ss_idx`/
+  `first_seg`/`line_idx` bounds as defense-in-depth (returns sector 0 — a valid sector — for any leaf
+  that slips through, so every caller's `map_sector_floorh` stays in bounds).
+- **Render-loop frame-stall DoS (R-10).** A crafted extreme-height sector projected a masked-seg /
+  wall-column span from `≈ -2³⁰`, and the row loop did ~10⁹ `continue`s before reaching row 0 (a
+  minutes-long frozen frame; no OOB). R-1 (0.33.5) clamped the main seg loop; the masked-seg pass and
+  the shared `render_draw_tex_column` were the residual — both now skip to the first drawable row up
+  front (advancing the texture-V by the same per-row step). **Byte-identical output on all 9 maps
+  (A/B PPM diff)** — bounded work, same pixels.
+- **Render/sprite BSP descents self-protect** against a cycle (defense-in-depth from the review):
+  `render_update_view_z` and the sprite floor-height walk gained the same iteration cap as
+  `map_point_sector`, so the render path no longer depends solely on load-time validation.
+
+### Added
+
+- **`fuzz/fuzz_texture.cyr`** — a structured-fuzz harness for the TEXTURE1/PNAMES composite decoder
+  (F19 patch-ref bound, F-S1 height clamp, F-S5 post loop, the 0.29.4 PNAMES strlen-safe copy). Emits a
+  walkable PWAD (valid PNAMES + TEXTURE1 + patch structure) with fuzzed leaf fields, so the parse
+  reaches the texture-definition body + patch/post decoder rather than being rejected at the
+  offset-directory guard. **Coverage-verified** (instrumented probe: the post decoder is reached ~146×
+  per 1000 iters — the initial version was rewritten after the review proved it had *zero* decoder
+  coverage). The fuzz suite is now **×5** (wad/fixed/weapon/mus/texture).
+
+### Deferred → roadmap
+
+- **CVE re-walk** confirmed C3 (BLOCKMAP bounds) + H1 (WAD short-read zero-fill) remain fixed@0.24.0
+  (per the consolidated audit's still-open sweep). **Bench formatter** (min > max on sub-ms averages)
+  is in the cyrius **stdlib** `lib/bench.cyr`, not doom source — deferred as a cyrius-stdlib item.
+
+### Verification
+
+- Tests **168/264** (+4 WAD-free: BSP cycle-reject — valid tree accepted, cycle/self-loop/out-of-range
+  rejected). fuzz **1000/50000/2000/1000/1000 clean** (incl. the new `fuzz_texture`); 9 maps + 5 menus at
+  192,015 B; **R-10 A/B PPM byte-identical on all 9 maps**; clean-from-scratch resolve + `CYRIUS_DCE=1`
+  build (530 fns / 99,379 B NOPed); deps 36/0; `render_frame` **2.492 ms** (variance — the validation is
+  load-time, the render clamps are byte-identical). Binary 447,440 → **447,456 B** (`doom_agnos` 429,760
+  → **433,872 B** — a 6.4.58 target-codegen delta on the added validation). **AGNOS QEMU doom-smoke PASS**
+  (deterministic); **in-game PASS on a clean-frame capture** (healthy 51-59 flat signature) — the
+  harness's known screendump-timing flake intermittently caught a wall-facing frame; the render
+  correctness is established by the byte-identical Linux A/B + 264/264 tests (all 0.33.8 changes are
+  target-agnostic). Built on true-pin **6.4.58** (symlink-swapped from the drifted local 6.4.60).
+
 ## [0.33.7] - 2026-07-12 — door/lift fidelity follow-ups
 
 Three vanilla-fidelity fixes surfaced by the 0.33.5 G-2 adversarial review, each pre-existing.

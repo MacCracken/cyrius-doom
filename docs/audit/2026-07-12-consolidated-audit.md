@@ -22,6 +22,17 @@ crash), **P-6** (compositor-dim overflow), **M-2** (env-path stack smash), **R-2
 **R-6/M-3/M-4** (TEXTURE1/STBAR alloc guards), **G-7** (sparse hot-path switches → if/else). See
 CHANGELOG `[0.33.4]`. The rows below marked "slotted v0.33.4" are now **FIXED@0.33.4**.
 
+**Shipped in 0.33.8** (pre-PWAD security hardening, the v0.28.11 slot): the latent **HIGH — BSP node
+child-cycle gap** in `map_validate` (a hostile cycle would hang/overflow every BSP walk) → new
+`map_validate_bsp_acyclic` rejects cycles + shared subtrees at load; **R-3** (zero-seg subsector reject
++ `map_point_sector` bounds); **R-10/M-6** (masked-seg + `render_draw_tex_column` render-loop clamps —
+the F17 frame-stall residual; byte-identical A/B); render/sprite BSP descents self-protect (review
+defense-in-depth); **fuzz-corpus refresh** (`fuzz/fuzz_texture.cyr`, structured TEXTURE1/PNAMES decoder
+fuzzer — rewritten + coverage-verified after the review proved the first version had zero coverage);
+**CVE re-walk** (C3/H1 confirmed still-fixed@0.24.0). Deferred: **G-13** sector-0-vs-−1 refinement (0.33.8
+returns a safe sector 0); **R-5** patch-dim overflow clamps (LOW); bench formatter (cyrius stdlib). See
+CHANGELOG `[0.33.8]`.
+
 **Shipped in 0.33.7** (door/lift fidelity follow-ups from the G-2 review): **G-5** (drop-off escape-rule
 zero-band — an on-line cross-product endpoint now counts as crossing so the ML_BLOCKING/one-sided veto
 applies), plus the two pre-existing door-fidelity items the G-2 review surfaced — doors open to the

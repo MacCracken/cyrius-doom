@@ -720,7 +720,14 @@ fn render_draw_tex_column(x, y1, y2, tex_idx, tex_col, tex_y_start, tex_y_step, 
     var th = texture_get_column(tex_idx, tex_col, tex_col_buf);
     if (th <= 0) { return 0; }
 
+    # Clamp the row span to the screen (0.33.8, pre-PWAD R-10 defense-in-depth):
+    # framebuf_pixel already drops out-of-range writes, so an unclamped y1 ≈ -2³⁰
+    # from a crafted extreme-height sector drew nothing but still ITERATED ~10⁹
+    # times (a frame-stall DoS). Skipping the off-screen rows up front — advancing
+    # tex_y by the same per-row step — is byte-identical output, bounded work.
     var tex_y = tex_y_start;
+    if (y1 < 0) { tex_y += tex_y_step * (0 - y1); y1 = 0; }
+    if (y2 > SCREEN_HEIGHT - 1) { y2 = SCREEN_HEIGHT - 1; }
     for (var y = y1; y <= y2; y += 1) {
         var ty = fixed_to_int(tex_y) % th;
         if (ty < 0) { ty += th; }
@@ -770,7 +777,13 @@ fn render_update_view_z(): i64 {
     view_z = VIEW_HEIGHT;
     if (map_num_nodes <= 0) { return 0; }
     var nw = map_num_nodes - 1;
+    # Iteration cap = self-defense against a node cycle (map_validate_bsp_acyclic
+    # rejects them at load, so this never fires on a validated map; a valid descent
+    # is at most tree-depth <= map_num_nodes steps). 0.33.8 pre-PWAD defense-in-depth.
+    var g = 0;
     while (bsp_is_subsector(nw) == 0) {
+        g += 1;
+        if (g > map_num_nodes) { return 0; }
         if (bsp_point_on_side(map_nodes, nw, view_x, view_y) == 0) { nw = bsp_node_child_r(map_nodes, nw); }
         else { nw = bsp_node_child_l(map_nodes, nw); }
     }
@@ -1583,11 +1596,20 @@ fn render_masked_one(mi): i64 {
         var ty_step = fixed_div(th << 16, wh << 16);
         var ty_pos = myoff << 16;
 
-        for (var row = open_top; row < open_bot; row += 1) {
-            if (row < 0) { ty_pos += ty_step; continue; }
-            if (row >= SCREEN_HEIGHT) { break; }
-            if (row < band_t) { ty_pos += ty_step; continue; }
-            if (row > band_b) { break; }
+        # Clamp the masked span to the visible band up front (0.33.8, pre-PWAD
+        # R-10): an unclamped open_top ≈ -2³⁰ from a crafted extreme-height sector
+        # iterated ~10⁹ times doing `continue` before reaching row 0 (a frame-stall
+        # DoS). Skip straight to the first drawable row, advancing ty_pos by the same
+        # per-row step — byte-identical output, bounded work (R-1 did this for the
+        # main seg loop; the masked pass was the residual).
+        var mtop = open_top;
+        if (mtop < band_t) { mtop = band_t; }
+        if (mtop < 0) { mtop = 0; }
+        if (mtop > open_top) { ty_pos += ty_step * (mtop - open_top); }
+        var mbot = open_bot;
+        if (mbot > band_b + 1) { mbot = band_b + 1; }
+        if (mbot > SCREEN_HEIGHT) { mbot = SCREEN_HEIGHT; }
+        for (var row = mtop; row < mbot; row += 1) {
             var src_y = fixed_to_int(ty_pos);
             if (src_y >= 0) {
                 if (src_y < th) {

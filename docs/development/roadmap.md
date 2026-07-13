@@ -35,11 +35,16 @@
 | ~~**v0.33.7**~~ | ~~Door/lift fidelity follow-ups~~ **SHIPPED 2026-07-12** — item 1 (doors open to LOWEST neighbor ceiling − 4, vanilla `P_FindLowestCeilingSurrounding`; `find_lowest_neighbor_ceil` replaces `find_highest_neighbor_ceil`), item 3 (W1/S1/D1 one-shot latch: per-linedef `linedef_used` + `special_is_once`; keyed D1 key-gated + tag-loop latch restricted to the S1 switch subset `special_is_switch_once` — a review-caught malformed-WAD keyless-latch progression-blocker, hardened), item 4/G-5 (escape-rule zero-band → on-line endpoint counts as crossing). +16 WAD-gated asserts; design + adversarial-review workflows; AGNOS QEMU PASS; true-pin 6.4.58. **Item 2 (blazing/turbo speed) DEFERRED → v0.34.x** (below). | — |
 | **v0.34.x** | **Blazing/turbo door-lift speed** (deferred from 0.33.7 item 2; registered-WAD fidelity) | 117/118 blazing doors, 122 blazing lift, 70/71 turbo floor-lower run at base DOOR_SPEED/LIFT_SPEED — needs a per-thinker speed field (thinker-layout change) + fast-speed constants. None appear in shareware (type 70 already runs at ~turbo), so it's unverifiable until a registered WAD path exists — do it there so it can be play-verified. | deferred (registered-WAD) |
 
-> **v0.28.11 gains** (pre-PWAD hardening, batched with the security-refresh sub-audit): the **BSP
-> node child-cycle gap** in `map_validate` (HIGH latent — hostile WAD → unbounded BSP recursion;
-> must land before PWAD), **R-3** zero-seg subsector / `map_point_sector` guard, **G-13** sector-0
-> degenerate-leaf fallback (return −1), **R-5** patch-dim/height-delta overflow clamps, **M-6/R-10**
-> finish F17 (clamp back-sector + masked `open_top/open_bot` — the frame-stall half F17 left open).
+> **v0.28.11 (pre-PWAD hardening) — mostly SHIPPED as v0.33.8** (2026-07-12): ✅ the **BSP node-cycle
+> gap** (HIGH — `map_validate_bsp_acyclic`), ✅ **R-3** zero-seg subsector reject + `map_point_sector`
+> guards, ✅ **M-6/R-10** finish F17 (masked-seg + `render_draw_tex_column` loop clamps — the
+> frame-stall half; byte-identical A/B), ✅ **Fuzz-corpus refresh** (`fuzz/fuzz_texture.cyr`, structured
+> TEXTURE1/PNAMES decoder fuzzer), ✅ **CVE re-walk** (C3/H1 confirmed still-fixed@0.24.0). **Residual →
+> future**: **G-13** sector-0 degenerate-leaf → −1 + caller no-floor-context handling (0.33.8 returns
+> sector 0, a safe valid sector, since validation now rejects the malformed maps that reach it — the
+> correctness refinement needs a caller sweep); **R-5** patch-dim/height-delta overflow clamps (LOW,
+> malformed-WAD visuals only); **bench min>max formatter** (in the cyrius **stdlib** `lib/bench.cyr`,
+> not doom source — a cyrius-repo item).
 >
 > **v0.34.x — deep renderer + game-state fidelity** (was folded under v0.29.x/unslotted): **F06 /
 > RC-W3** native-scale vertical texture mapping (unblocks **F-R3/F-R4/R-8** peg anchoring), **RC-S6**
@@ -198,15 +203,19 @@ Bonus fix (RC-W9, found during implementation): seg scale/U interpolation endpoi
 | 2 | Episode-end intermission | Unofficial Specs §1.10 | E1M8 boss kill → text → bunny scroll |
 | 3 | Visplane budget under stress | Unofficial Specs §10.4 | E1M9 + max things: no overflow (bounded by the F08 pool) |
 
-### v0.28.11 — Security audit refresh
+### ~~v0.28.11 — Security audit refresh~~ SHIPPED as v0.33.8 (2026-07-12)
 
-Partly discharged early by 0.28.0 (F01/F02/F03/F19 patch-decode propagation + F17 OOB-write fix). Remaining:
+Partly discharged early by 0.28.0 (F01/F02/F03/F19 patch-decode propagation + F17 OOB-write fix); the pre-PWAD remainder shipped as **v0.33.8**.
 
-| # | Item | Detail |
-|---|------|--------|
-| 1 | Re-walk the 2026-04-13 CVE checklist | confirm C3 (BLOCKMAP) + H1 (WAD lump size) under current code |
-| 2 | Fuzz-corpus refresh | add patch / TEXTURE1 / ADT-discriminator mutators to exercise the F01/F02/F03/F19 decoders directly |
-| 3 | Bench formatter fix | `benches/doom.bcyr` sub-ms avg formatter (prints min > max) |
+| # | Item | Disposition |
+|---|------|-------------|
+| 0 | **BSP node-cycle gap** (HIGH — hostile cycle → unbounded BSP walk) | ✅ **0.33.8** — `map_validate_bsp_acyclic` (iterative DFS from root, rejects cycles/shared-subtrees at load) |
+| 0b | **R-3** zero-seg subsector / `map_point_sector` over-read | ✅ **0.33.8** — count==0 reject + descent cap + ss/seg/line bounds |
+| 0c | **M-6/R-10** frame-stall (unclamped masked/back-sector render loops) | ✅ **0.33.8** — masked-seg + `render_draw_tex_column` clamped up-front (byte-identical A/B) |
+| 1 | Re-walk the 2026-04-13 CVE checklist | ✅ **0.33.8** — C3 (BLOCKMAP) + H1 (WAD short-read zero-fill) confirmed still-fixed@0.24.0 (consolidated-audit sweep) |
+| 2 | Fuzz-corpus refresh (patch / TEXTURE1 decoders) | ✅ **0.33.8** — `fuzz/fuzz_texture.cyr` (structured TEXTURE1/PNAMES decoder fuzzer, coverage-verified) |
+| 3 | Bench formatter fix (`min > max` on sub-ms averages) | **deferred** — the formatter is in the cyrius **stdlib** `lib/bench.cyr` (not doom source); a cyrius-repo item |
+| 4 | **G-13** sector-0 degenerate-leaf → −1 + caller handling | **deferred** — 0.33.8 returns a safe sector 0; the correctness refinement needs a caller sweep (moot now validation rejects the malformed maps) |
 
 ### Gated / watch (carried forward)
 

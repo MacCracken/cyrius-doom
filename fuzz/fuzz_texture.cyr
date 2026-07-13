@@ -1,0 +1,178 @@
+# Fuzz: TEXTURE1 / PNAMES composite decoder (pre-PWAD, 0.33.8).
+#
+# texture_init parses PNAMES (patch-name table) + TEXTURE1 (texture definitions:
+# numtex + offset directory + per-texture headers + patch references), and
+# texture_get_column composites a wall column from the referenced patches (column
+# directory + post runs). A malformed / hostile texture — over-claimed counts,
+# offsets past the lump, out-of-range patch indices, over-claimed post lengths,
+# missing 0xFF terminators — must NOT read past the lump or crash. This drives the
+# REAL decoders (no logic copy) with a STRUCTURED-fuzz PWAD: a walkable container
+# (valid PNAMES/TEXTURE1/patch structure + directory) with FUZZED LEAF fields, so
+# the parse reaches the texture-definition body + patch/post decoder (0.28.0 F19 +
+# 0.29.4 PNAMES-strlen + F-S1 height-clamp + F-S5 post-loop) rather than being
+# rejected at the offset-directory guard. Companion to fuzz_weapon (F01 psprite).
+# Must complete all iterations. Run: cyrius build fuzz/fuzz_texture.cyr build/fuzz_texture && ./build/fuzz_texture
+
+include "lib/string.cyr"
+include "lib/alloc.cyr"
+include "lib/vec.cyr"
+include "lib/str.cyr"
+include "lib/fmt.cyr"
+include "lib/io.cyr"
+include "lib/args.cyr"
+include "lib/assert.cyr"
+include "lib/sakshi.cyr"
+
+include "lib/bsp.cyr"
+include "src/fixed.cyr"
+include "src/tables.cyr"
+include "src/wad.cyr"
+include "src/platform/wayland/wire.cyr"
+include "src/platform/wayland/client.cyr"
+include "src/platform/wayland/shm.cyr"
+include "src/platform/window.cyr"
+include "src/framebuf.cyr"
+include "src/map.cyr"
+include "src/texture.cyr"
+
+var _fz_state = 0x243F6A8885A308D3;
+
+fn _fz_rand(): i64 {
+    _fz_state = _fz_state * 6364136223846793005 + 1442695040888963407;
+    return _fz_state;
+}
+fn _fz_byte(): i64 {
+    var r = _fz_rand();
+    if (r < 0) { r = 0 - r; }
+    return r % 256;
+}
+fn _fz_st32(buf, v): i64 {
+    store8(buf, v & 255); store8(buf + 1, asr(v, 8) & 255);
+    store8(buf + 2, asr(v, 16) & 255); store8(buf + 3, asr(v, 24) & 255);
+    return 0;
+}
+fn _fz_st16(buf, v): i64 {
+    store8(buf, v & 255); store8(buf + 1, asr(v, 8) & 255);
+    return 0;
+}
+fn _fz_name(d, a, b, c, e, f, g, h, i): i64 {
+    store8(d, a); store8(d + 1, b); store8(d + 2, c); store8(d + 3, e);
+    store8(d + 4, f); store8(d + 5, g); store8(d + 6, h); store8(d + 7, i);
+    return 0;
+}
+
+fn main() {
+    alloc_init();
+    args_init();
+    tables_init();
+    framebuf_init();
+
+    var iters = 1000;
+    if (argc() > 1) { iters = str_to_int(str_from(argv(1))); }
+    if (argc() > 2) { _fz_state = str_to_int(str_from(argv(2))); }
+
+    var tmppath = "/tmp/fuzz_texture.wad";
+    var buf = alloc(16384);
+    var col_dst = alloc(256);            # TEX_COL_MAX — texture_get_column's dest
+
+    for (var i = 0; i < iters; i = i + 1) {
+        # --- PNAMES: count=1, name "WALL01" so patch_lumps[0] resolves to the patch.
+        var off_pn = 12;
+        _fz_st32(buf + off_pn, 1);
+        _fz_name(buf + off_pn + 4, 87, 65, 76, 76, 48, 49, 0, 0);   # "WALL01"
+        var pn_sz = 12;
+
+        # --- WALL01 patch: valid header + column-offset table, ONE fuzzed post per
+        #     column. Occasionally corrupt a byte to exercise the post-decode bounds.
+        var off_pt = off_pn + pn_sz;
+        var pw = 1 + (_fz_byte() % 16);        # 1..16 columns
+        var ph = 1 + (_fz_byte() % 64);
+        var post_off = 8 + pw * 4;
+        var plen = _fz_byte() % 12;            # fuzzed post length
+        _fz_st16(buf + off_pt, pw);
+        _fz_st16(buf + off_pt + 2, ph);
+        _fz_st16(buf + off_pt + 4, 0);         # left offset
+        _fz_st16(buf + off_pt + 6, 0);         # top offset
+        for (var c = 0; c < pw; c = c + 1) { _fz_st32(buf + off_pt + 8 + c * 4, post_off); }
+        store8(buf + off_pt + post_off, _fz_byte() % ph);    # topdelta
+        store8(buf + off_pt + post_off + 1, plen);           # length
+        store8(buf + off_pt + post_off + 2, 0);              # pad
+        for (var k = 0; k < plen; k = k + 1) { store8(buf + off_pt + post_off + 3 + k, _fz_byte()); }
+        store8(buf + off_pt + post_off + 3 + plen, 0);       # pad
+        store8(buf + off_pt + post_off + 4 + plen, 255);     # 0xFF terminator
+        var pt_sz = post_off + 5 + plen;
+        # Structural fuzz: sometimes corrupt a patch byte (short post / bad offset).
+        if (_fz_byte() < 40) { store8(buf + off_pt + (_fz_byte() % pt_sz), _fz_byte()); }
+
+        # --- TEXTURE1: numtex=1, offset[0]=8, one maptexture with FUZZED leaves.
+        var off_t1 = off_pt + pt_sz;
+        var pc = 1 + (_fz_byte() % 3);         # patchcount 1..3
+        _fz_st32(buf + off_t1, 1);             # numtex
+        _fz_st32(buf + off_t1 + 4, 8);         # offset[0] -> maptexture at t1+8
+        var tex = buf + off_t1 + 8;
+        _fz_name(tex, 87, 84, 69, 88, 48, 49, 0, 0);   # "WTEX01"
+        _fz_st32(tex + 8, 0);                  # masked
+        _fz_st16(tex + 12, 1 + _fz_byte() % 64);       # width (nonzero -> tw!=0, column loop runs)
+        _fz_st16(tex + 14, 1 + _fz_byte() % 200);      # height (F-S1 clamp path)
+        _fz_st32(tex + 16, 0);                 # columndirectory
+        _fz_st16(tex + 20, pc);                # patchcount
+        for (var p = 0; p < pc; p = p + 1) {
+            var pref = tex + 22 + p * 10;
+            _fz_st16(pref, _fz_byte() % 64);   # originx (fuzzed)
+            _fz_st16(pref + 2, _fz_byte() % 64);   # originy
+            _fz_st16(pref + 4, 0);             # patch idx 0 = WALL01 ...
+            if (_fz_byte() < 40) { _fz_st16(pref + 4, _fz_byte()); }   # ... but sometimes out-of-range
+            _fz_st16(pref + 6, 0); _fz_st16(pref + 8, 0);
+        }
+        var t1_sz = 8 + 22 + pc * 10;
+        # Structural fuzz: sometimes claim a bogus texture offset (F19 guard path).
+        if (_fz_byte() < 32) { _fz_st32(buf + off_t1 + 4, _fz_rand() & 0x7FFFFFFF); }
+
+        # --- Directory: PNAMES, WALL01, TEXTURE1 (three 16-byte entries).
+        var off_dir = off_t1 + t1_sz;
+        var d0 = buf + off_dir;
+        _fz_st32(d0, off_pn); _fz_st32(d0 + 4, pn_sz);
+        _fz_name(d0 + 8, 80, 78, 65, 77, 69, 83, 0, 0);          # "PNAMES"
+        var d1 = d0 + 16;
+        _fz_st32(d1, off_pt); _fz_st32(d1 + 4, pt_sz);
+        _fz_name(d1 + 8, 87, 65, 76, 76, 48, 49, 0, 0);          # "WALL01"
+        var d2 = d0 + 32;
+        _fz_st32(d2, off_t1); _fz_st32(d2 + 4, t1_sz);
+        _fz_name(d2 + 8, 84, 69, 88, 84, 85, 82, 69, 49);        # "TEXTURE1"
+
+        # Header: PWAD, numlumps=3, infotableofs.
+        store8(buf, 80); store8(buf + 1, 87); store8(buf + 2, 65); store8(buf + 3, 68);
+        _fz_st32(buf + 4, 3);
+        _fz_st32(buf + 8, off_dir);
+
+        var total = off_dir + 48;
+        var fd = file_open(tmppath, 65, 0x1A4);
+        if (fd >= 0) {
+            file_write(fd, buf, total);
+            file_close(fd);
+            if (is_ok(wad_open(tmppath)) == 1) {
+                texture_init();                # re-parses PNAMES + TEXTURE1 (self-resets counts)
+                var t = 0;
+                while (t < tex_count) {
+                    if (t >= 4) { t = tex_count; }
+                    else {
+                        var cl = _fz_rand();
+                        if (cl < 0) { cl = 0 - cl; }
+                        texture_get_column(t, cl % 256, col_dst);   # composite (patch + post decode)
+                        t = t + 1;
+                    }
+                }
+                wad_close();
+            }
+        }
+    }
+
+    syscall(87, tmppath);
+    syscall(1, 1, "fuzz_texture: ", 14);
+    fmt_int(iters);
+    syscall(1, 1, " iterations OK\n", 15);
+    return 0;
+}
+
+var r = main();
+syscall(60, r);
