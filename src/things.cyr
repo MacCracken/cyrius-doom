@@ -128,6 +128,13 @@ enum ThingFlags {
     TF_PICKUP = 8;
     TF_MISSILE = 16;
     TF_CORPSE = 32;
+    # EF-2: deaf/ambush (THINGS options bit 0x08). A deaf monster ignores the
+    # P_NoiseAlert sound flood and wakes ONLY on sight of the player (vanilla
+    # A_Look with MF_AMBUSH). Nearly every E1M1 monster carries this bit, so
+    # honoring it keeps them at their posts through gunfire instead of wandering
+    # off when the flood woke them (the "missing zombies at the armor stair"
+    # field report). Set at spawn from the map options word.
+    TF_AMBUSH = 64;
 }
 
 # Ranged-attack constants (0.33.1). Declared before thing_ai_tick — enum
@@ -284,6 +291,11 @@ fn things_spawn_from_map(): i64 {
 
         # Skip player starts
         if (ttype >= TTYPE_PLAYER1 && ttype <= TTYPE_PLAYER4) { continue; }
+        # EF-3: deathmatch starts (type 11) are spawn points, not map objects —
+        # vanilla P_SpawnMapThing spawns no mobj for them in single-player. We
+        # used to admit them as invisible inert decor (5 wasted slots on E1M1,
+        # inflating the spawn count 91->96). No deathmatch mode yet, so drop them.
+        if (ttype == 11) { continue; }
 
         # Skill + single-player filter (audit F-U2). The THINGS options word was
         # stored but never read, so every skill spawned the same set and
@@ -316,7 +328,11 @@ fn things_spawn_from_map(): i64 {
         if (cat == CAT_MONSTER) {
             store64(base + 40, STATE_SPAWN);
             store64(base + 48, thing_default_health(ttype));
-            store64(base + 104, TF_ACTIVE | TF_SOLID | TF_SHOOTABLE);
+            var mflags = TF_ACTIVE | TF_SOLID | TF_SHOOTABLE;
+            # EF-2: carry the deaf/ambush bit (options 0x08) onto the monster so
+            # things_noise_alert can leave it asleep unless it sees the player.
+            if ((opts & 8) != 0) { mflags = mflags | TF_AMBUSH; }
+            store64(base + 104, mflags);
         } else {
             if (cat == CAT_ITEM) {
                 store64(base + 40, STATE_ITEM);
@@ -472,9 +488,16 @@ fn thing_animate(idx): i64 {
         if (thing_category(idx) == CAT_MONSTER) {
             var f1 = (asr(tick_get_count(), 3) + idx) & 1;
             thing_set_frame(idx, f1);
-        } else {
-            thing_set_frame(idx, 0);
         }
+        # EF-1: non-monster idle decor keeps its SPAWN frame — do NOT clobber it
+        # to 0. Decor is single-frame in this engine (no decor animates through
+        # thing_animate), and the spawn code deliberately sets corpse decor to
+        # its corpse frame (dead marine 15 = PLAY N/13, gibs 10/12 = PLAY W/22).
+        # The old `else { thing_set_frame(idx, 0); }` reset those to PLAY A (a
+        # STANDING marine) on tick 1 — a --ppm screenshot renders at tick 0 so
+        # it was invisible to every prior verification (the "greenshirts alive
+        # that should be dead" field report). Items live in STATE_ITEM (handled
+        # below); barrels spawn on frame 0 and are unaffected.
     } else {
         if (state == STATE_SEE || state == STATE_CHASE) {
             # SEE/CHASE walk cycle: alternate the two walk frames (A<->B) on a
@@ -1347,6 +1370,17 @@ fn things_noise_alert(sx, sy): i64 {
         if (thing_category(m) != CAT_MONSTER) { continue; }
         if ((thing_flags(m) & TF_SHOOTABLE) == 0) { continue; }
         if (thing_state(m) != STATE_SPAWN) { continue; }
+        # EF-2: a deaf/ambush monster ignores the sound flood (vanilla A_Look
+        # with MF_AMBUSH) — it only wakes if it can SEE the soundmaker. Without
+        # this every E1M1 monster (nearly all are deaf-flagged) woke on the first
+        # shot and wandered off its post. Sight is checked to the noise source
+        # (sx, sy) = the shooter's position (vanilla checks P_CheckSight to the
+        # target it just set to the soundmaker), keeping this self-contained. The
+        # per-tick STATE_SPAWN sight wake (thing_ai_tick) still wakes it when the
+        # player comes into view.
+        if ((thing_flags(m) & TF_AMBUSH) != 0) {
+            if (thing_check_sight(thing_x(m), thing_y(m), sx, sy) != 1) { continue; }
+        }
         var msec = map_point_sector(thing_x(m), thing_y(m));
         if (msec < 0) { continue; }
         if (msec >= map_num_sectors) { continue; }

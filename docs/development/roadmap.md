@@ -35,6 +35,33 @@
 | ~~**v0.33.7**~~ | ~~Door/lift fidelity follow-ups~~ **SHIPPED 2026-07-12** — item 1 (doors open to LOWEST neighbor ceiling − 4, vanilla `P_FindLowestCeilingSurrounding`; `find_lowest_neighbor_ceil` replaces `find_highest_neighbor_ceil`), item 3 (W1/S1/D1 one-shot latch: per-linedef `linedef_used` + `special_is_once`; keyed D1 key-gated + tag-loop latch restricted to the S1 switch subset `special_is_switch_once` — a review-caught malformed-WAD keyless-latch progression-blocker, hardened), item 4/G-5 (escape-rule zero-band → on-line endpoint counts as crossing). +16 WAD-gated asserts; design + adversarial-review workflows; AGNOS QEMU PASS; true-pin 6.4.58. **Item 2 (blazing/turbo speed) DEFERRED → v0.34.x** (below). | — |
 | **v0.34.x** | **Blazing/turbo door-lift speed** (deferred from 0.33.7 item 2; registered-WAD fidelity) | 117/118 blazing doors, 122 blazing lift, 70/71 turbo floor-lower run at base DOOR_SPEED/LIFT_SPEED — needs a per-thinker speed field (thinker-layout change) + fast-speed constants. None appear in shareware (type 70 already runs at ~turbo), so it's unverifiable until a registered WAD path exists — do it there so it can be play-verified. | deferred (registered-WAD) |
 
+### 0.34.x patch band (2026-07-17 audit → new slots)
+
+Driven by [`docs/audit/2026-07-17-texture-lock-perf-agnos-e1m1.md`](../audit/2026-07-17-texture-lock-perf-agnos-e1m1.md)
+(four-agent round: texture world-lock root cause, measured perf prototype ladder, AGNOS input
+diagnosis, E1M1 fidelity field reports). Finding IDs (TX/OP/AG/EF) reference that doc. Ordered:
+field-visible correctness first, then the render rewrite, then perf (whose gates the rewrite
+would otherwise invalidate mid-band).
+
+| Slot | Theme | Contents | Status |
+|---|---|---|---|
+| ~~**v0.34.1**~~ | ~~E1M1 fidelity + input robustness (field-report patch)~~ **SHIPPED 2026-07-17** — **EF-1** removed the `thing_animate` tick-1 frame clobber (corpse decor no longer resurrects to standing "greenshirt" marines; 8 E1M1 phantoms; WAD-gated tick-1 frame assert added). **EF-2** `TF_AMBUSH`=64 from THINGS bit 0x08; `things_noise_alert` skips deaf monsters unless they see the shooter (E1M1 monsters hold posts through gunfire — the "missing zombies at the armor stair"). **FOV gate on the sight wake DEFERRED** → below (pairs with P_NewChaseDir wander). **EF-3** deathmatch-start type 11 skipped in SP → vanilla 91 things (was 96). **EF-4** `tick_get_count` null-guard + new `--ppm-tick N` mode. **AG-2/F-U6** AGNOS raw-kbscan per-poll make-latch (fast tap registers — AGNOS "input stuck" root cause AG-1) + persistent 0xE0 prefix carry; adversarial review caught + fixed a Pause-key (0xE1) spurious-fire the latch introduced. +11 WAD-gated asserts; design + adversarial-review workflows; binary 447,456→451,600 B (agnos 433,904). **AGNOS QEMU held-key + bare-tap re-run = the outstanding gate (user's run).** | — |
+| **v0.34.2** | **Texture world-lock (TX-1..TX-4)** — the "changing view angle distorts texture" field report | Replace per-column endpoint-lerp U/scale with the validated per-column ray↔seg intersection on UNCLIPPED endpoints (V4 design — near-clip no longer poisons U/scale/V-step; 48-texel worst slide → noise floor, verified live in a staged build); V anchored at view center with peg-aware `v_mid` (TX-3, kills the ±1-texel shimmer + retires the closed-gap V re-anchor hack); exact seg texel length via integer sqrt at map load (TX-4, supersedes ledger R-4); masked entry carries raw endpoints (+4 fields). Gates: world-lock staged harness ≤ noise floor on all 3 scenarios, spawn A/B diffs confined to wall texel boundaries (~7%, floors/HUD byte-identical), full tests, bench row (+~2 `fixed_mul`/col), AGNOS QEMU pixel-diff. | queued — design validated |
+| **v0.34.3** | **Perf batch A — bench truth + caches** (measured −69% prototype) | **OP-0 FIRST**: bench never spawns things — true E1M1 frame is 4.09 ms, not 2.35; add spawned-things + `things_tick` + `status_render` bench rows so the rest is measured honestly. Then **OP-1** sprite lump memo (measured **−1.52 ms**), **OP-2** composited-texture cache (**−0.40 ms** + removes the pcache-overflow cliff; `anim_rotate_tex_3` invalidation hook = the SLADRIP-anim fix vehicle), **OP-3** plane-row/tex-column per-pixel hoists (**−0.92 ms**; mind the negated-V `+0xFFFF` bias), **OP-4** status_render lump/patch caching (~−170 µs), **OP-6** `wad_name_eq` packed-i64 compare, **OP-7**/F12 sidedef/flat index caches (~50 µs; prerequisite for SLADRIP). Byte-identical PPM gate per step; prototype ladder hit 1.28 ms with all tests green. | queued, bench-gated |
+| **v0.34.4** | **Perf batch B — scaling insurance** | **OP-5** `thing_check_sight` (41 µs × every idle monster × every tick — 8–15 ms/tick extrapolated on E1M7-class maps): REJECT lump as (sector,sector) LOS pre-test + per-linedef bboxes at load + staggered idle wake. **OP-9** clip-band incremental stepping. **OP-10** palette→XRGB LUT in the present blits. **OP-8** per-seg incremental stepping (only AFTER v0.34.2 — it restructures the same per-column math). | queued, bench-gated |
+| **v0.34.5+** | **Deep fidelity (pre-existing 0.34.x items)** | RC-S6 real thing-z (render+physics; unblocks res-1 precise missile trace), P4 episode-complete screen (E1M8 → text/bunny + `D_VICTOR`), F06-1 LOW `tex_h>256` peg clamp (ride any slot), opt-in `asr()`→`>>>` migration (~95 sites, own build+test+fuzz gate), **EF-2 follow-up**: front-180° FOV gate on the STATE_SPAWN→SEE sight wake (deferred from v0.34.1 — an all-monster change that pairs with **P_NewChaseDir wander** from the 0.33.1 follow-ups; monsters would then wake only to what's in front, matching vanilla A_Look). | queued |
+
+> **AGNOS noted issue — RESOLVED BY DIAGNOSIS (2026-07-17, AG-1)**: there is **no kernel
+> keyboard regression**. QEMU reproduction on agnos HEAD *and* the exact 07-12 kernel: held
+> keys PASS into real in-game 3D; bare `sendkey` taps fail because doom's AGNOS input drain
+> collapses a make+break pair arriving in one `kbscan` poll to zero edges, and the effective
+> poll period inflated over a month (doom render growth + kernel per-frame additions) onto the
+> ~100 ms tap margin. The prior "in-game PASS" era (06-12 → 07-12) was false passes ("map: V="
+> prints at boot; the ≥8-colors gate matches TITLEPIC). Agnos-side actions (no kernel fix):
+> keep the held-key harness + robust gates, add a first-key intermediate screendump, promote
+> `doom-directmap-smoke.sh` as the canonical render gate. Doom-side: **AG-2** (v0.34.1).
+> state.md's "cause unidentified, agnos-side" framing corrected 2026-07-17.
+
 > **v0.28.11 (pre-PWAD hardening) — mostly SHIPPED as v0.33.8** (2026-07-12): ✅ the **BSP node-cycle
 > gap** (HIGH — `map_validate_bsp_acyclic`), ✅ **R-3** zero-seg subsector reject + `map_point_sector`
 > guards, ✅ **M-6/R-10** finish F17 (masked-seg + `render_draw_tex_column` loop clamps — the
@@ -50,18 +77,13 @@
 > **~~F06 / RC-W3~~ native-scale vertical texture mapping SHIPPED 0.34.0** — all four wall sections
 > step V by `fixed_div(FIXED_ONE, col_scale)` = vanilla `dc_iscale`; tall walls tile, short walls clip,
 > fitted walls byte-identical; **also resolved ~~F-R3~~/~~F-R4~~** (`ML_DONTPEGBOTTOM` now wired on the
-> one-sided-mid path + the masked-mid `base+112` flag that was written-but-never-read). Remaining v0.34.x:
-> **RC-S6** real thing-z (render+physics together; unblocks **res-1** precise missile-vs-wall trace), **P4**
-> episode-complete screen (E1M8→text/bunny + `D_VICTOR`), and the opt-in **`asr()`→`>>>` migration**
-> (cyrius 6.4.46; ~95 sites; large mechanical change, own gate). **New follow-ups from the 0.34.0 cut**:
-> (a) **LOW** — a crafted texture declaring height > 256 (`TEX_COL_MAX`) diverges the peg's `tex_h` from
-> the clamped column data `th` on a floor-pegged column → cosmetic blank column, no crash (real DOOM
-> textures ≤128; a one-line `tex_h` clamp closes it, byte-identical for legit content). (b) **agnos-side,
-> flagged to user** — the `doom-ingame-smoke.py` menu-drive no longer advances past TITLEPIC on current
-> agnos HEAD (keyboard-into-menu delivery stuck; cause unidentified — `klug` is the kernel LOG ring, not input); doom `input.cyr`/`menu.cyr` unchanged
-> since v0.33.0. The direct-map-boot verification (99.4% pixel-diff vs Linux) is now the robust AGNOS
-> render gate; consider promoting a direct-map smoke variant so in-game render no longer depends on
-> keyboard input.
+> one-sided-mid path + the masked-mid `base+112` flag that was written-but-never-read). Remaining v0.34.x
+> items (**RC-S6** real thing-z, **P4** episode-complete screen, the opt-in **`asr()`→`>>>` migration**,
+> and the **F06-1 LOW** `tex_h>256` peg clamp from the 0.34.0 cut) are now slotted in the
+> **[0.34.x patch band](#034x-patch-band-2026-07-17-audit--new-slots)** above (v0.34.5+). The 0.34.0
+> cut's "(b) agnos-side keyboard-into-menu" flag is **resolved by diagnosis** — see the AG-1 note under
+> that band (no kernel regression; harness tap-cadence + doom's drain-collapse + a month of
+> false-passing gates).
 
 | Slot | Theme | Status |
 |---|---|---|
@@ -189,13 +211,13 @@ Bonus fix (RC-W9, found during implementation): seg scale/U interpolation endpoi
 | 4 | Half-pixel (`FRACUNIT/2`) yslope + column-center offsets | Black Book ch. 9 | rows nearest the horizon get up to 1.5× distance; low visual impact (2026-06-12 review) |
 | 5 | F_SKY1 **floors** treated as sky (vanilla: any plane with `picnum == skyflatnum`) | r_plane semantics | rare but legal in PWADs (2026-06-12 review) |
 
-### v0.28.8 — Structural performance (O4-independent, bench-gated)
+### v0.28.8 — Structural performance (O4-independent, bench-gated) — ABSORBED into the 0.34.x patch band (2026-07-17 audit)
 
 | # | Item | Detail |
 |---|------|--------|
-| 1 | Per-sidedef texture + per-sector flat index cache at map load | F12 — removes 3 `texture_find` + 2 `flat_find` linear scans per seg/frame |
-| 2 | Per-thing sector/floor-height cache | F15 — re-walk BSP only when the thing moves |
-| 3 | Automap line pre-clip | F26 — optional; negligible (overlay, not hot path) |
+| 1 | ~~Per-sidedef texture + per-sector flat index cache at map load~~ | F12 → **OP-7, slotted v0.34.3** (measured smaller than assumed: ~50 µs/frame; still do — prerequisite for the SLADRIP anim fix) |
+| 2 | ~~Per-thing sector/floor-height cache~~ | F15 → **reframed under OP-5, v0.34.4** (refuted as a raw perf item, ~5–10 µs/frame; its real value is as the sector resolver for the REJECT-lump LOS pre-test) |
+| 3 | ~~Automap line pre-clip~~ | F26 — **refuted 2026-07-17** (confirmed negligible; automap not in the play loop) — dropped |
 
 ### v0.28.9 — BSP + collision audit (original Black Book sub-phase)
 

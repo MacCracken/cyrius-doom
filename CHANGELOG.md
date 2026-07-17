@@ -7,6 +7,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.34.1] - 2026-07-17 — E1M1 fidelity + AGNOS input robustness (field-report patch)
+
+Four E1M1 gameplay-fidelity fixes from a field-review pass plus the AGNOS raw-keyboard robustness
+fix from the 2026-07-17 audit round. No render-path change (bench not gated). Design + adversarial
+review workflows; the review caught one AG-2 regression (Pause-key spurious fire), fixed here.
+See [`docs/audit/2026-07-17-texture-lock-perf-agnos-e1m1.md`](docs/audit/2026-07-17-texture-lock-perf-agnos-e1m1.md)
+§3 (AG-1/AG-2) and §4 (EF-1..4).
+
+### Fixed
+
+- **EF-1 — corpse decorations no longer "resurrect" into standing marines.** `thing_animate`
+  reset every non-monster idle (STATE_SPAWN) thing's frame to 0 on the first tick, clobbering the
+  corpse frames `things_spawn_from_map` set for dead-player (type 15 → PLAY N / frame 13) and
+  gib-marine (types 10/12 → PLAY W / frame 22) decor back to PLAY A — an upright green-armored
+  marine that stands there all level, unshootable and non-solid (the "greenshirt enemies that are
+  alive when they should be dead / won't die when shot" field report; E1M1 has 8 such phantoms).
+  `--ppm` renders at tick 0, before any `things_tick`, which is why every prior screenshot
+  verification missed it. Fixed by removing the non-monster reset (no decoration animates through
+  `thing_animate` in this engine, so the spawn frame is authoritative). WAD-gated regression:
+  corpse frames survive a `things_tick`.
+
+- **EF-2 — deaf/ambush monsters now hold their posts (honor THINGS options bit 0x08).** The
+  deaf/ambush bit was parsed (`map_thing_options`) but never consumed. New `TF_AMBUSH` flag set at
+  monster spawn from bit 0x08; `things_noise_alert` now skips ambush monsters unless they can see
+  the soundmaker (vanilla A_Look with MF_AMBUSH). Nearly every E1M1 monster is deaf-flagged (all 6
+  HMP, 28 of 29 UV), so before this the first shot's sound flood woke them all and they wandered
+  off their posts — the "missing three zombies at the armor staircase" field report (the courtyard
+  trio holds now; UV-only #12 included). The per-tick line-of-sight wake is unchanged, so a monster
+  still wakes when the player comes into view. The front-180° FOV gate on the sight wake is deferred
+  (pairs with P_NewChaseDir wander). Test updated: a spawn shot now wakes 0 of 6 HMP monsters (the
+  prior assertion of 5 encoded the pre-fix behavior — sound-flood *reach* mistaken for a wake), with
+  a discriminator confirming the flood still wakes a monster the player can see.
+
+- **EF-3 — deathmatch starts no longer spawn in single-player.** Type 11 (deathmatch start) is a
+  spawn point, not a map object; vanilla `P_SpawnMapThing` spawns no mobj for it in SP. We admitted
+  all 5 E1M1 DM starts as invisible inert decor, inflating the HMP spawn from vanilla's 91 to 96.
+  Now skipped in `things_spawn_from_map`. E1M1 HMP is the vanilla **91 things (6 monsters, 52 items,
+  33 decor)**; `--ppm` PPM byte-size (192,015 B) and the tick-0 image are unchanged (DM starts had
+  no sprite).
+
+- **EF-4 — `tick_get_count` null-deref guard + new `--ppm-tick N` mode.** `tick_get_count` did
+  `load64(tick_state)` with `tick_state` null until `tick_init`; any tick-then-screenshot path
+  SIGSEGV'd. Now returns 0 before init (the count is genuinely 0). New `--ppm-tick N` flag runs N
+  world ticks (via `tick_init` + `things_tick`) before the screenshot, so the PPM gate can catch
+  first-tick regressions like EF-1 (which the tick-0 shot is blind to). Off by default — the normal
+  `--ppm` tick-0 output is byte-identical.
+
+- **AG-2 / F-U6 — AGNOS raw-keyboard robustness (AGNOS-only).** The `kbscan#42` drain kept only the
+  final `key_state`, so a make+break of the same key within one drain (a fast tap, or QEMU bare
+  `sendkey`) netted to zero edges and vanished — the root cause of the AGNOS "menu-drive input
+  stuck" report (no kernel regression; the sound of the kernel keyboard path was fine — see the
+  audit §3). Now a per-poll `key_made` latch registers exactly one press for a same-drain tap, then
+  releases next poll (held keys unaffected). **F-U6**: the `0xE0` extended-scancode prefix is
+  persisted across polls, so an arrow / right-Ctrl whose prefix and scancode straddle two drains no
+  longer misfires. The adversarial review caught a regression the make-latch introduced: the Pause
+  key (`E1 1D 45 E1 9D C5`) carries an embedded `0x1D`/`0x9D` that decodes as Ctrl (= fire); the
+  latch turned its previously-harmless net-zero make+break into a one-poll spurious fire. Fixed by
+  recognizing `0xE1` as a prefix and swallowing its trailing bytes (persisted across drains).
+  Verified via Linux build + the full suite; behavioral confirmation is the QEMU held-key + bare-tap
+  harness (AGNOS input is `#ifdef`-compiled out on the Linux test path).
+
+### Changed
+
+- Tests: **275/275 full** (168 WAD-free unchanged + 107 WAD-gated, +11 for EF-1/EF-2/EF-3; the EF-2
+  group replaces the pre-fix noise-alert assertions). Binary `build/doom` 447,456 → **451,600 B**
+  (`build/doom_agnos` 433,872 → **433,904 B**). Toolchain pin unchanged at 6.4.58; deps 36/0; fuzz
+  ×5 clean. State/roadmap/completed-phases/doc-health synced.
+
 ## [0.34.0] - 2026-07-12 — native-scale vertical texture mapping (F06 / RC-W3)
 
 Replaces the engine's stretch-to-section vertical texture mapping with DOOM's vanilla depth-based

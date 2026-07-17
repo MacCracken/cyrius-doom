@@ -1021,24 +1021,31 @@ fn main() {
         thing_count = 0;
 
         # ============================================================
-        test_group("noise alert wakes sound-connected monsters (0.33.1)");
+        test_group("deaf/ambush monsters ignore the sound flood (EF-2)");
         # ============================================================
-        # Vanilla P_NoiseAlert: gunfire floods sound through open portals and
-        # stops at closed doors. E1M1's computer-room zombiemen are
-        # 2D-sight-blocked behind the barred window, so before this they
-        # ignored any amount of gunfire ("enemies not alive / shots don't
-        # register" field report). 5 of the 6 HMP monsters are in door-free
-        # sound range of the spawn; the southern-room imp (sector 74) is
-        # behind the closed staircase door and correctly sleeps through it
-        # (python BFS over the WAD's open portals confirms 74 unreachable).
+        # Vanilla A_Look: a deaf (MF_AMBUSH / THINGS bit 0x08) monster ignores
+        # the P_NoiseAlert sound flood and wakes ONLY when it sees the player.
+        # Nearly every E1M1 monster is deaf-flagged (all 6 HMP ones are), so a
+        # shot at the spawn — where the player has no line of sight to any of
+        # them — must wake NONE. Before EF-2 the flood woke every monster it
+        # reached and they wandered off their posts (the "missing zombies at the
+        # armor staircase" field report). NB: the pre-EF-2 test here asserted 5
+        # woke — that was the sound flood REACH (correct) conflated with a wake
+        # (wrong: deaf monsters don't wake to sound).
         game_skill = 3;
         things_spawn_from_map();
         var idle0 = 0;
+        var amb0 = 0;
         for (var nm = 0; nm < thing_count; nm += 1) {
-            if (thing_category(nm) == CAT_MONSTER && thing_state(nm) == STATE_SPAWN) { idle0 += 1; }
+            if (thing_category(nm) != CAT_MONSTER) { continue; }
+            if (thing_state(nm) == STATE_SPAWN) { idle0 += 1; }
+            if ((thing_flags(nm) & TF_AMBUSH) != 0) { amb0 += 1; }
         }
         assert_eq(idle0, 6, "HMP E1M1 spawns 6 idle monsters");
-        things_noise_alert(player_start_x(), player_start_y());
+        assert_eq(amb0, 6, "all 6 HMP monsters carry TF_AMBUSH (options bit 0x08)");
+        player_x = player_start_x();
+        player_y = player_start_y();
+        things_noise_alert(player_x, player_y);
         var woke = 0;
         var asleep = 0;
         for (var nw = 0; nw < thing_count; nw += 1) {
@@ -1046,8 +1053,68 @@ fn main() {
             if (thing_state(nw) == STATE_SEE) { woke += 1; }
             if (thing_state(nw) == STATE_SPAWN) { asleep += 1; }
         }
-        assert_eq(woke, 5, "one shot at spawn wakes the 5 door-free monsters");
-        assert_eq(asleep, 1, "the closed south door keeps its imp asleep (vanilla)");
+        assert_eq(woke, 0, "a shot at spawn wakes NO deaf monster (no line of sight)");
+        assert_eq(asleep, 6, "all 6 hold their posts through the flood (EF-2)");
+        # Discriminator: the flood still works — stand the player ON a monster so
+        # its sight check trivially passes, and the deaf gate opens for it.
+        things_spawn_from_map();
+        var mi = 0 - 1;
+        for (var fm = 0; fm < thing_count; fm += 1) {
+            if (thing_category(fm) == CAT_MONSTER) { mi = fm; break; }
+        }
+        assert(mi >= 0, "found a monster to stand on");
+        player_x = thing_x(mi);
+        player_y = thing_y(mi);
+        things_noise_alert(player_x, player_y);
+        var woke2 = 0;
+        for (var nw2 = 0; nw2 < thing_count; nw2 += 1) {
+            if (thing_category(nw2) == CAT_MONSTER && thing_state(nw2) == STATE_SEE) { woke2 += 1; }
+        }
+        assert(woke2 >= 1, "a deaf monster the player can see DOES wake to the flood");
+        player_x = player_start_x();
+        player_y = player_start_y();
+        things_spawn_from_map();
+
+        # ============================================================
+        test_group("corpse decor keeps its frame after a tick (EF-1)");
+        # ============================================================
+        # Dead-player (15) and gib-marine (10/12) decorations spawn on their
+        # corpse frames (PLAY N=13 / PLAY W=22). thing_animate used to reset
+        # every non-monster idle thing to frame 0 (PLAY A = a STANDING marine)
+        # on tick 1 — invisible to --ppm (renders at tick 0), so they looked
+        # like live "greenshirts that won't die" in play. Verify the frame
+        # survives a world tick now.
+        game_skill = 3;
+        things_spawn_from_map();
+        var dpi = 0 - 1;
+        var gbi = 0 - 1;
+        for (var ti = 0; ti < thing_count; ti += 1) {
+            if (thing_type(ti) == 15) { dpi = ti; }
+            if (thing_type(ti) == 10 || thing_type(ti) == 12) { gbi = ti; }
+        }
+        assert(dpi >= 0, "E1M1 has a dead-player (15) decoration");
+        assert(gbi >= 0, "E1M1 has a gib-marine (10/12) decoration");
+        assert_eq(thing_frame(dpi), 13, "dead player spawns on PLAY N (frame 13)");
+        assert_eq(thing_frame(gbi), 22, "gib marine spawns on PLAY W (frame 22)");
+        things_tick();
+        assert_eq(thing_frame(dpi), 13, "dead player STAYS frame 13 after a tick (EF-1)");
+        assert_eq(thing_frame(gbi), 22, "gib marine STAYS frame 22 after a tick (EF-1)");
+        things_spawn_from_map();
+
+        # ============================================================
+        test_group("deathmatch starts not spawned in single-player (EF-3)");
+        # ============================================================
+        # Type 11 (deathmatch start) is a spawn point, not a map object; vanilla
+        # spawns no mobj for it in SP. We used to admit all 5 as invisible inert
+        # decor, inflating the E1M1 HMP spawn from vanilla's 91 to 96.
+        game_skill = 3;
+        things_spawn_from_map();
+        var dmc = 0;
+        for (var di = 0; di < thing_count; di += 1) {
+            if (thing_type(di) == 11) { dmc += 1; }
+        }
+        assert_eq(dmc, 0, "no deathmatch starts (type 11) spawn in single-player");
+        assert_eq(thing_count, 91, "E1M1 HMP spawns 91 things (vanilla; was 96 with 5 DM starts)");
         things_spawn_from_map();
 
         # ============================================================

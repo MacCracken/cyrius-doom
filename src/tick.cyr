@@ -71,5 +71,10 @@ fn tick_wait(): i64 {
 }
 
 fn tick_get_count(): i64 {
+    # EF-4: tick_state is null until tick_init(). --ppm mode renders before
+    # tick_init, and thing_animate reads the count for its frame stagger, so an
+    # uninitialized load64(0) would SIGSEGV any "tick then screenshot" probe.
+    # The count is genuinely 0 before the game clock starts.
+    if (tick_state == 0) { return 0; }
     return load64(tick_state);
 }

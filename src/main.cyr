@@ -142,7 +142,7 @@ fn doom_main(): i64 {
     # non-identity arena top (0x3FC00000); no warm-up needed.
     alloc_init();
     args_init();
-    sakshi_info("cyrius-doom v0.34.0", 19);
+    sakshi_info("cyrius-doom v0.34.1", 19);
 
     # WAD path: argv[1] on Linux. On agnos, agnsh `run /bin/doom` passes no argv
     # beyond the path, so default to /DOOM1.WAD (staged on the ext2 root).
@@ -238,6 +238,7 @@ fn doom_main(): i64 {
     # Parse args
     var ppm_mode = 0;
     var ppm_menu = 0;
+    var ppm_tick_n = 0;
     var audio_test = 0;
     var music_test = 0;
     var direct_map = 0;
@@ -245,6 +246,18 @@ fn doom_main(): i64 {
         var arg = argv(ai);
         if (streq(arg, "--ppm") == 1) { ppm_mode = 1; }
         if (streq(arg, "--ppm-menu") == 1) { ppm_menu = 1; }
+        # EF-4: --ppm-tick N runs N world ticks (things_tick) before the game
+        # screenshot, so the PPM gate can see first-tick regressions the tick-0
+        # shot is blind to (e.g. EF-1 corpse-decor frame clobber). Implies --ppm.
+        # Defaults to 4 ticks; an optional following integer overrides.
+        if (streq(arg, "--ppm-tick") == 1) {
+            ppm_mode = 1;
+            ppm_tick_n = 4;
+            if (ai + 1 < argc()) {
+                var tn = atoi(argv(ai + 1));
+                if (tn > 0 && tn <= 100000) { ppm_tick_n = tn; }
+            }
+        }
         if (streq(arg, "--audio-test") == 1) { audio_test = 1; }
         if (streq(arg, "--music-test") == 1) { music_test = 1; }
         # Direct-map arg "E<ep>M<mp>" (e.g. E1M3). Require the full 4-char shape
@@ -393,6 +406,16 @@ fn doom_main(): i64 {
         view_x = player_start_x();
         view_y = player_start_y();
         view_angle = player_start_angle();
+        # EF-4: advance the world N ticks before the shot (--ppm-tick). tick_init
+        # first (EF-4 guard), and put the player at the spawn view so monster AI
+        # sight/distance resolve against it. Off by default (ppm_tick_n==0) so the
+        # normal --ppm tick-0 screenshot is byte-identical.
+        if (ppm_tick_n > 0) {
+            player_x = view_x;
+            player_y = view_y;
+            tick_init();
+            for (var pt = 0; pt < ppm_tick_n; pt += 1) { things_tick(); }
+        }
         render_frame();
         sprite_render_all();
         render_draw_weapon(4);

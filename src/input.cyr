@@ -15,6 +15,26 @@
 # ================================================================
 var key_state = 0;
 
+# AGNOS raw-scancode drain state (AG-2 / F-U6, both in input_poll's kbscan path):
+#   key_made      - per-poll "MAKE seen this drain" latch. A make+break of the
+#                   same key inside ONE kbscan#42 drain nets key_state back to 0,
+#                   so a fast tap (QEMU bare sendkey, or a real quick press) used
+#                   to deliver zero edges and the menu never advanced. This lets a
+#                   same-drain tap register exactly one press-poll (AG-2).
+#   ag_ext_prefix - carries a dangling 0xE0 extended-key prefix across polls (it
+#                   can be the last byte of one drain with its scancode in the
+#                   next), so arrows / right-Ctrl split across polls don't misfire
+#                   (F-U6). Was a per-call local that lost the carry.
+var key_made = 0;
+var ag_ext_prefix = 0;
+#   ag_pause_skip - bytes still to swallow from a 0xE1 (Pause) sequence. Pause is
+#                   `E1 1D 45 E1 9D C5` in Set-1 — its embedded 0x1D/0x9D decode
+#                   as left-Ctrl (= fire). Pre-AG-2 that make+break netted to zero
+#                   (harmless); with the make-latch it would leave one spurious
+#                   INP_FIRE, so recognize 0xE1 as a prefix and drop its 2 trailing
+#                   bytes. Persisted across polls in case the 6-byte run splits a drain.
+var ag_pause_skip = 0;
+
 # Game action flags: packed into a single i64 bitmask + weapon var
 var input_flags = 0;
 var input_weapon = 0;
@@ -390,6 +410,21 @@ fn input_poll_setu(): i64 {
 }
 #endif
 
+#ifdef CYRIUS_TARGET_AGNOS
+# AG-2: a key is "down" for this poll's action/quit/weapon scan if it is held
+# (key_state==1) OR it was tapped-and-released within this single drain
+# (key_made==1, key_state back to 0). The latter delivers exactly one press-poll
+# for a fast tap, then releases next poll (key_made is cleared at the top of each
+# drain). Held keys are unaffected: a held key keeps key_state==1 every poll.
+fn ag_key_down(kc): i64 {
+    if (load64(key_state + kc * 8) == 1) { return 1; }
+    if (key_made != 0) {
+        if (load64(key_made + kc * 8) == 1) { return 1; }
+    }
+    return 0;
+}
+#endif
+
 fn input_poll(): i64 {
     input_flags = 0;
 
@@ -409,13 +444,18 @@ fn input_poll(): i64 {
     # DESKTOP: when windowed on aethersafha the compositor owns the keyboard and
     # delivers keys over setu — do NOT drain the raw kbscan#42 buffer.
     if (present_mode == PM_SETU) { return input_poll_setu(); }
+    if (key_made == 0) { key_made = alloc(2048); }
+    for (var ag_c = 0; ag_c < 256; ag_c += 1) { store64(key_made + ag_c * 8, 0); }
     var ag_buf[64];
     var ag_n = syscall(42, &ag_buf, 64);
     var ag_i = 0;
-    var ag_ext = 0;
+    var ag_ext = ag_ext_prefix;                     # F-U6: carry a dangling 0xE0 from last poll
+    var ag_skip = ag_pause_skip;                     # carry a mid-Pause-sequence swallow
     while (ag_i < ag_n) {
         var ag_sc = load8(&ag_buf + ag_i);
         ag_i += 1;
+        if (ag_skip > 0) { ag_skip -= 1; continue; }  # swallow a Pause sequence's trailing bytes
+        if (ag_sc == 225) { ag_skip = 2; continue; }  # 0xE1 = Pause prefix; drop its embedded 0x1D/0x9D (would false-fire)
         if (ag_sc == 224) { ag_ext = 1; continue; }   # 0xE0 extended-key prefix
         var ag_rel = 0;
         if (ag_sc > 127) { ag_rel = 1; ag_sc = ag_sc & 0x7F; }   # high bit = break (key up)
@@ -423,46 +463,55 @@ fn input_poll(): i64 {
         ag_ext = 0;
         if (ag_kc >= 0) {
             if (ag_rel == 1) { store64(key_state + ag_kc * 8, 0); }
-            else { store64(key_state + ag_kc * 8, 1); }
+            else {
+                store64(key_state + ag_kc * 8, 1);
+                store64(key_made + ag_kc * 8, 1);   # AG-2: remember the make this drain
+            }
         }
     }
+    # F-U6: ag_ext is nonzero here ONLY if 0xE0 was the last byte of the drain
+    # (its scancode is coming next poll) — persist that carry.
+    ag_ext_prefix = ag_ext;
+    ag_pause_skip = ag_skip;                         # persist a Pause run that split the drain
 
-    # Build action flags from the persistent key_state (NOT cleared here).
-    if (load64(key_state + KEY_W * 8) == 1) { input_flags |= INP_FORWARD; }
-    if (load64(key_state + KEY_UP * 8) == 1) { input_flags |= INP_FORWARD; }
-    if (load64(key_state + KEY_S * 8) == 1) { input_flags |= INP_BACKWARD; }
-    if (load64(key_state + KEY_DOWN * 8) == 1) { input_flags |= INP_BACKWARD; }
+    # Build action flags from the persistent key_state PLUS this drain's tap
+    # latch (AG-2, via ag_key_down) — so a key pressed-and-released within one
+    # kbscan drain still registers one press-poll. Held keys ride key_state.
+    if (ag_key_down(KEY_W) == 1) { input_flags |= INP_FORWARD; }
+    if (ag_key_down(KEY_UP) == 1) { input_flags |= INP_FORWARD; }
+    if (ag_key_down(KEY_S) == 1) { input_flags |= INP_BACKWARD; }
+    if (ag_key_down(KEY_DOWN) == 1) { input_flags |= INP_BACKWARD; }
     # Left/Right arrows strafe (mirror A/D); hold Shift to turn instead. Until
     # mouse input lands this keeps turning on a modifier and frees the arrows for
     # strafing. KEY_SHIFT is set by the Shift scancodes here on AGNOS; on Linux a
     # bare Shift is invisible but the ESC[1;2C/D shift+arrow sequence sets it.
-    var ag_turn = load64(key_state + KEY_SHIFT * 8) == 1;
-    if (load64(key_state + KEY_LEFT * 8) == 1) {
+    var ag_turn = ag_key_down(KEY_SHIFT) == 1;
+    if (ag_key_down(KEY_LEFT) == 1) {
         if (ag_turn == 1) { input_flags |= INP_TURN_LEFT; } else { input_flags |= INP_STRAFE_LEFT; }
     }
-    if (load64(key_state + KEY_RIGHT * 8) == 1) {
+    if (ag_key_down(KEY_RIGHT) == 1) {
         if (ag_turn == 1) { input_flags |= INP_TURN_RIGHT; } else { input_flags |= INP_STRAFE_RIGHT; }
     }
     # A/D strafe, or turn while Shift is held (mirrors the arrows). W/S forward/
     # back are unaffected by Shift, so turning-while-moving works.
-    if (load64(key_state + KEY_A * 8) == 1) {
+    if (ag_key_down(KEY_A) == 1) {
         if (ag_turn == 1) { input_flags |= INP_TURN_LEFT; } else { input_flags |= INP_STRAFE_LEFT; }
     }
-    if (load64(key_state + KEY_D * 8) == 1) {
+    if (ag_key_down(KEY_D) == 1) {
         if (ag_turn == 1) { input_flags |= INP_TURN_RIGHT; } else { input_flags |= INP_STRAFE_RIGHT; }
     }
-    if (load64(key_state + KEY_SPACE * 8) == 1) { input_flags |= INP_USE; }
-    if (load64(key_state + KEY_E * 8) == 1) { input_flags |= INP_USE; }
-    if (load64(key_state + KEY_CTRL * 8) == 1) { input_flags |= INP_FIRE; }
-    if (load64(key_state + 102 * 8) == 1) { input_flags |= INP_FIRE; }
-    if (load64(key_state + KEY_R * 8) == 1) { input_flags |= INP_RUN; }
-    if (load64(key_state + KEY_TAB * 8) == 1) { input_flags |= INP_TAB; }
-    if (load64(key_state + KEY_Q * 8) == 1) { input_quit = 1; }
-    if (load64(key_state + KEY_ESC * 8) == 1) { input_quit = 1; }
+    if (ag_key_down(KEY_SPACE) == 1) { input_flags |= INP_USE; }
+    if (ag_key_down(KEY_E) == 1) { input_flags |= INP_USE; }
+    if (ag_key_down(KEY_CTRL) == 1) { input_flags |= INP_FIRE; }
+    if (ag_key_down(102) == 1) { input_flags |= INP_FIRE; }
+    if (ag_key_down(KEY_R) == 1) { input_flags |= INP_RUN; }
+    if (ag_key_down(KEY_TAB) == 1) { input_flags |= INP_TAB; }
+    if (ag_key_down(KEY_Q) == 1) { input_quit = 1; }
+    if (ag_key_down(KEY_ESC) == 1) { input_quit = 1; }
 
     input_weapon = 0;
     for (var ag_wi = 1; ag_wi <= 7; ag_wi += 1) {
-        if (load64(key_state + (48 + ag_wi) * 8) == 1) { input_weapon = ag_wi; }
+        if (ag_key_down(48 + ag_wi) == 1) { input_weapon = ag_wi; }
     }
     return 0;
     #endif
