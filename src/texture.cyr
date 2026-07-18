@@ -29,12 +29,25 @@ enum TexConst {
     # the height to this bound. DOOM textures top out at 128, so valid content
     # is unaffected.
     TEX_COL_MAX = 256;
+    # OP-2 composite cache (v0.34.4): textures wider than this bypass the
+    # composite (served uncached) so a malformed huge width can't blow up the
+    # one-time build loop / alloc(tw*th). Real DOOM textures top out at 256 wide.
+    TEX_COMP_W_MAX = 4096;
 }
 
 # Texture table: name_hash(8) width(8) height(8) lump_data_ptr(8) = 32 bytes each
 var tex_table = 0;
 var tex_count = 0;
 var tex_def_end = 0;
+
+# OP-2 composited-texture cache (v0.34.4). Two parallel TEX_MAX-slot pointer
+# arrays, indexed by texture index: tex_comp_data[i] = the fully composited
+# pixel buffer (tw*th bytes) for texture i, tex_comp_mask[i] = its parallel
+# fill mask; 0 means "not built yet / invalidated". Declared here (ahead of
+# texture_init) so the re-parse reset can reach them. Full contract + the
+# byte-identity argument live above texture_get_column.
+var tex_comp_data = 0;
+var tex_comp_mask = 0;
 
 # Patch names -> lump indices
 var patch_lumps = 0;
@@ -67,6 +80,18 @@ fn texture_init(): i64 {
     tex_count = 0;
     patch_count = 0;
     flat_count = 0;
+
+    # OP-2: invalidate any composite cache from a prior init. A fresh
+    # texture_init re-parses TEXTURE1 into NEW tex_def pointers (and, in
+    # fuzz_texture, an entirely new WAD at the same indices), so every cached
+    # composite is stale. Zero the slots — the orphaned composite buffers are
+    # reclaimed at process exit (texture_init is a per-WAD/level event, cold).
+    if (tex_comp_data != 0) {
+        for (var ci = 0; ci < TEX_MAX; ci += 1) {
+            store64(tex_comp_data + ci * 8, 0);
+            store64(tex_comp_mask + ci * 8, 0);
+        }
+    }
 
     # Load PNAMES: patch name -> WAD lump index mapping
     var pn_idx = wad_find_lump("PNAMES");
@@ -244,12 +269,100 @@ fn texture_height(idx): i64 { return load64(tex_table + idx * TEX_ENTRY_SIZE + 1
 # valid until the next texture_get_column call.
 var tex_col_mask = 0;
 
-# Get a column of pixels from a texture
+# ================================================================
+# OP-2 composited-texture cache (v0.34.4) — perf, byte-identical.
+#
+# texture_get_column used to re-decode patch posts from scratch on EVERY call
+# (~823 ns: clear 2*th bytes, walk patch refs, pcache_get, decode posts; 729
+# calls/frame ~= 612 us at the E1M1 spawn). It is now a memoizing wrapper: the
+# FIRST touch of a texture composites the WHOLE thing once — all tw columns via
+# the original per-column decoder, now texture_get_column_uncached — into two
+# contiguous tw*th buffers (pixels in tex_comp_data[tex_idx], fill mask in
+# tex_comp_mask[tex_idx]); every later call is two th-byte memcpys (~30 ns).
+# Heap: ~1-2 MB for shareware (only textures actually drawn are built, lazily).
+#
+# BYTE-IDENTITY (proof sketch). A built column K is written by
+# texture_get_column_uncached(tex_idx, K, cd+K*th), so cd+K*th holds exactly the
+# uncached pixels and cm+K*th holds exactly that call's tex_col_mask (uncached's
+# th clamp, dest/mask clear, and post decode are unchanged). Serving reproduces
+# uncached's wrap (col % tw, +tw if negative), then copies th pixels + th mask
+# bytes and returns th — so (dest, tex_col_mask, return) match uncached for
+# every (tex_idx, col), including col % tw, the th clamp to TEX_COL_MAX, and
+# negative col. The WAD is immutable, so a built composite is valid until the
+# slot's CONTENT changes — which happens ONLY at texture_init re-parse (cache
+# zeroed there) and in anim_rotate_tex_3 (composite ptrs rotated in lockstep
+# with the entries, so a composite follows its content — see that fn). Malformed
+# width / OOM cases delegate to texture_get_column_uncached, so they stay
+# byte-identical to the pre-OP-2 path as well.
+# ================================================================
+
+# Public column API — see the cache contract above. Serves from the composite,
+# building it on first touch.
+fn texture_get_column(tex_idx, col, dest): i64 {
+    if (tex_idx < 0) { return 0; }
+    if (tex_idx >= tex_count) { return 0; }
+
+    # Lazy-init the two parallel ptr arrays (one slot per texture index). On
+    # alloc failure, degrade to the uncached decoder (never cache a null slot).
+    if (tex_comp_data == 0) {
+        tex_comp_data = alloc(TEX_MAX * 8);
+        tex_comp_mask = alloc(TEX_MAX * 8);
+        if (tex_comp_data == 0) { return texture_get_column_uncached(tex_idx, col, dest); }
+        if (tex_comp_mask == 0) { tex_comp_data = 0; return texture_get_column_uncached(tex_idx, col, dest); }
+        for (var zi = 0; zi < TEX_MAX; zi += 1) {
+            store64(tex_comp_data + zi * 8, 0);
+            store64(tex_comp_mask + zi * 8, 0);
+        }
+    }
+
+    var entry = tex_table + tex_idx * TEX_ENTRY_SIZE;
+    var tw = load64(entry + 8);
+    var th = load64(entry + 16);
+    # Clamp th to the caller-buffer capacity BEFORE it sizes the composite, so
+    # every stored column is exactly `th` bytes — the same clamp uncached uses.
+    if (th > TEX_COL_MAX) { th = TEX_COL_MAX; }
+    if (th <= 0) { return 0; }
+    if (tw <= 0) { return 0; }
+    # Malformed-WAD safety valve: a texture wider than any legitimate content
+    # would make the one-time build loop + alloc(tw*th) pathologically large.
+    # Serve those uncached (byte-identical), so tw can never blow up the cache.
+    if (tw > TEX_COMP_W_MAX) { return texture_get_column_uncached(tex_idx, col, dest); }
+
+    # First touch (or a freshly-invalidated slot): composite every column once.
+    var cd = load64(tex_comp_data + tex_idx * 8);
+    if (cd == 0) {
+        cd = alloc(tw * th);
+        var cm = alloc(tw * th);
+        # alloc failure: fall back to the uncached path, leave the slot empty.
+        if (cd == 0) { return texture_get_column_uncached(tex_idx, col, dest); }
+        if (cm == 0) { return texture_get_column_uncached(tex_idx, col, dest); }
+        for (var cc = 0; cc < tw; cc += 1) {
+            # uncached writes th pixels to cd+cc*th and fills tex_col_mask[0..th).
+            texture_get_column_uncached(tex_idx, cc, cd + cc * th);
+            memcpy(cm + cc * th, tex_col_mask, th);
+        }
+        store64(tex_comp_data + tex_idx * 8, cd);
+        store64(tex_comp_mask + tex_idx * 8, cm);
+    }
+
+    # Serve: reproduce uncached's wrap, then two th-byte copies (pixels + mask).
+    col = col % tw;
+    if (col < 0) { col += tw; }
+    if (tex_col_mask == 0) { tex_col_mask = alloc(TEX_COL_MAX); }
+    memcpy(dest, cd + col * th, th);
+    memcpy(tex_col_mask, load64(tex_comp_mask + tex_idx * 8) + col * th, th);
+    return th;
+}
+
+# Per-column patch decoder — the original texture_get_column body, now the
+# builder the cache calls once per column. Composites the referenced patches'
+# posts into `dest` and marks covered rows in tex_col_mask. Also serves directly
+# as the byte-identical fallback for the malformed/oversized/OOM cases above.
 # Returns pointer to column data (palette indices), writes height to out_height
 # tex_idx = texture index, col = column number (wrapped by texture width)
 # dest = buffer to write column pixels into (caller provides, must be >= tex_height)
 # Side effect: tex_col_mask marks which rows were actually covered by posts.
-fn texture_get_column(tex_idx, col, dest): i64 {
+fn texture_get_column_uncached(tex_idx, col, dest): i64 {
     if (tex_idx < 0) { return 0; }
     if (tex_idx >= tex_count) { return 0; }
 
@@ -435,6 +548,26 @@ fn anim_rotate_tex_3(group): i64 {
     memcpy(e0, e1, TEX_ENTRY_SIZE);
     memcpy(e1, e2, TEX_ENTRY_SIZE);
     memcpy(e2, anim_tex_buf, TEX_ENTRY_SIZE);
+
+    # OP-2 (v0.34.4): the composite cache is keyed by tex_idx, so when a slot's
+    # CONTENT rotates its cached composite must follow it — otherwise the slot
+    # serves the previous occupant's STALE composite (render_seg re-resolves by
+    # NAME each frame, and the name hash rotates with the entry, so a stale slot
+    # would draw the wrong animation frame). Rotate the two parallel composite
+    # ptr arrays with the SAME 1→0, 2→1, 0→2 permutation the entries used, so
+    # tex_comp_data[k] stays paired with the content now at tex_table[k] (0 slots
+    # rotate harmlessly — an unbuilt composite is rebuilt lazily on next touch).
+    # If no column has been fetched yet the arrays are still 0 → nothing cached.
+    if (tex_comp_data != 0) {
+        var d0 = load64(tex_comp_data + i0 * 8);
+        store64(tex_comp_data + i0 * 8, load64(tex_comp_data + i1 * 8));
+        store64(tex_comp_data + i1 * 8, load64(tex_comp_data + i2 * 8));
+        store64(tex_comp_data + i2 * 8, d0);
+        var m0 = load64(tex_comp_mask + i0 * 8);
+        store64(tex_comp_mask + i0 * 8, load64(tex_comp_mask + i1 * 8));
+        store64(tex_comp_mask + i1 * 8, load64(tex_comp_mask + i2 * 8));
+        store64(tex_comp_mask + i2 * 8, m0);
+    }
     return 0;
 }
 

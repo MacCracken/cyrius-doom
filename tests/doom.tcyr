@@ -936,6 +936,76 @@ fn main() {
         assert(door3 >= 0, "DOOR3 found");
 
         # ============================================================
+        test_group("OP-2 animated-texture composite invalidation (v0.34.4)");
+        # ============================================================
+        # SLADRIP1/2/3 is DOOM1.WAD's animated wall group. anim_rotate_tex_3
+        # rotates the tex_table ENTRIES (name+w+h+def) among their 3 slots every
+        # 8 tics; render_seg re-resolves by NAME each frame. OP-2's composite
+        # cache is keyed by tex_idx, so the composite ptrs MUST rotate in
+        # lockstep — else a slot serves the previous occupant's STALE pixels.
+        # --ppm can't catch this (texture_animate runs in the game loop, not at
+        # tick 0), so it is exercised only here: force a composite, rotate, then
+        # assert the cache matches an uncached decode of the rotated content.
+        texture_init_wall_anim();
+        var sd0 = texture_find("SLADRIP1");
+        var sd1 = texture_find("SLADRIP2");
+        var sd2 = texture_find("SLADRIP3");
+        assert(sd0 >= 0, "SLADRIP1 found");
+        assert(sd1 >= 0, "SLADRIP2 found");
+        assert(sd2 >= 0, "SLADRIP3 found");
+        assert(sd0 != sd1, "SLADRIP1/2 are distinct slots");
+        assert(sd1 != sd2, "SLADRIP2/3 are distinct slots");
+
+        var sda = alloc(TEX_COL_MAX);   # cached-serve dest
+        var sdb = alloc(TEX_COL_MAX);   # uncached-decode dest
+        var sdm = alloc(TEX_COL_MAX);   # cached-mask snapshot
+
+        # Build all three composites (first touch builds the whole texture) and
+        # confirm SLADRIP1 vs SLADRIP2 actually differ, so a stale composite
+        # would be DETECTABLE (not a vacuous pass).
+        # SLADRIP1/2/3 (WALL57_2/3/4) are 64x128 and differ only in the drip
+        # columns (11..57) — scan the FULL width, not just the static left edge.
+        var sd_tw = load64(tex_table + sd0 * TEX_ENTRY_SIZE + 8);
+        var sd_diff = 0;
+        for (var sd_c = 0; sd_c < sd_tw; sd_c += 1) {
+            var sd_h1 = texture_get_column(sd0, sd_c, sda);
+            memcpy(sdm, sda, sd_h1);
+            var sd_h2 = texture_get_column(sd1, sd_c, sdb);
+            if (sd_h1 != sd_h2) { sd_diff = 1; }
+            for (var sd_q = 0; sd_q < sd_h1; sd_q += 1) {
+                if (load8(sdm + sd_q) != load8(sdb + sd_q)) { sd_diff = 1; }
+            }
+        }
+        assert_eq(sd_diff, 1, "SLADRIP1/2 composites differ (staleness detectable)");
+        texture_get_column(sd2, 0, sdb);   # build SLADRIP3's composite too
+
+        # Rotate the group. Content at each slot changes; composite ptrs must
+        # follow, or the next serve is stale.
+        anim_rotate_tex_3(anim_sladrip);
+
+        # Decisive check: for each of the 3 slots + several columns, the CACHED
+        # serve must equal a fresh UNCACHED decode of whatever content now lives
+        # at that slot (pixels, fill mask, and returned height). A pre-fix stale
+        # cache would return the PRE-rotation frame here → nonzero mismatch.
+        var sd_mis = 0;
+        for (var sd_s = 0; sd_s < 3; sd_s += 1) {
+            var sd_idx = sd0;
+            if (sd_s == 1) { sd_idx = sd1; }
+            if (sd_s == 2) { sd_idx = sd2; }
+            for (var sd_cc = 0; sd_cc < sd_tw; sd_cc += 1) {
+                var sd_thc = texture_get_column(sd_idx, sd_cc, sda);
+                memcpy(sdm, tex_col_mask, sd_thc);
+                var sd_thu = texture_get_column_uncached(sd_idx, sd_cc, sdb);
+                if (sd_thc != sd_thu) { sd_mis += 1; }
+                for (var sd_r = 0; sd_r < sd_thc; sd_r += 1) {
+                    if (load8(sda + sd_r) != load8(sdb + sd_r)) { sd_mis += 1; }
+                    if (load8(sdm + sd_r) != load8(tex_col_mask + sd_r)) { sd_mis += 1; }
+                }
+            }
+        }
+        assert_eq(sd_mis, 0, "post-rotation cache == uncached (composite followed its content)");
+
+        # ============================================================
         test_group("status: name-scratch lump lookup (R-2)");
         # ============================================================
         # The death-face name "STFDEAD0" is EXACTLY 8 chars; st_name_buf must be 9

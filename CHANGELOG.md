@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.34.4] - 2026-07-18 — performance batch B (texture + status caches)
+
+Two more per-frame caches, both **byte-identical output** (verified by a 9-map + 5-menu `--ppm` A/B
+against v0.34.3 + the 295-test suite, all identical). Design + adversarial-review workflows (review
+clean — 0 findings; OP-2 "provably byte-identical + memory-safe"). Extracted from the 2026-07-17
+audit's OP-2 prototype (productionized with correct animation-cache invalidation) + a fresh OP-4
+design.
+
+### Changed
+
+- **OP-2 — composited-texture cache (`texture_get_column` 823 → 438 ns; spawn frame −0.39 ms).**
+  `texture_get_column` re-composited a texture's patch posts from scratch on *every* call (729
+  calls/frame at spawn). It's now a memoizing wrapper over `texture_get_column_uncached` (the
+  original body): the first touch composites the whole texture once (all columns + fill masks) into
+  `tex_comp_data[idx]`/`tex_comp_mask[idx]`, later calls serve two `th`-byte memcpys. Removes the
+  hidden pcache-overflow cliff (a scene whose per-frame patch working set exceeded the 8-slot pcache
+  degraded to WAD syscalls per column). **Animation correctness**: `anim_rotate_tex_3` rotates the
+  composite pointers in lockstep with the texture-entry group permutation (a composite follows its
+  content, never goes stale); `texture_init` zeroes the cache on re-parse; pathological widths
+  (> `TEX_COMP_W_MAX` = 4096) and alloc failures fall through to the uncached path. New WAD-gated
+  SLADRIP1/2/3 test (with a negative control that fails by 2104 stale bytes if the lockstep is
+  removed) covers the animated path (tick-0 `--ppm` can't reach it). +7 WAD-gated asserts.
+- **OP-4 — status-bar patch cache (`status_render` 161 → 124 µs, ~27 fewer syscalls/frame).**
+  `status_render` re-resolved (`wad_find_lump` directory scan) and re-slurped (`lseek`+`read`) every
+  digit / face / key / ARMS / percent patch *every frame*. All are now resolved + slurped once at
+  `status_init_font` into 16-byte `[buf, sz]` slots and drawn from RAM (`st_cache_slot` /
+  `st_cache_draw`); cache caps (`ST_CAP_DIGIT` 16384 / `ST_CAP_FACE` 4096) equal the old per-draw
+  reject bounds so slot acceptance is byte-identical. (STBAR/STARMS backgrounds were already cached.)
+  The residual 124 µs is the patch *blit* itself, not I/O — so the win is the eliminated
+  per-frame directory scans + ~27 `lseek`/`read` syscalls, which matters most on AGNOS.
+
+Result: byte-identical on all 9 maps + 5 menus + 295 tests; true E1M1 spawn frame now **1.239 ms**
+(from 1.631 at 0.34.3, cycc 6.4.58); `texture_get_column` 823 → 438 ns. Tests 181 WAD-free /
+**295 full** (+7 SLADRIP); fuzz ×5 (`fuzz_texture` exercises the re-parse invalidation); deps 36/0;
+binary `build/doom` 451,632 → **455,800 B** (`build/doom_agnos` 438,048 → **442,200 B**); AGNOS QEMU
+direct-map render PASS. **Deferred → later perf cut**: OP-5 `thing_check_sight` scaling (the dense-map
+/ AGNOS budget-killer — REJECT lump + per-linedef bboxes), OP-8 per-seg incremental stepping (must
+follow TX-3), OP-9 clip-band stepping, OP-10 palette→XRGB present LUT.
+
 ## [0.34.3] - 2026-07-18 — performance batch A (caches + bench-truth, −62% frame)
 
 Algorithmic render/lookup speedups, all **byte-identical output** (verified by a 9-map + 5-menu

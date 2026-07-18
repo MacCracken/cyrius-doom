@@ -11,15 +11,34 @@ enum StBarConst {
     STBAR_HEIGHT = 32;
 }
 
+# OP-4 (v0.34.4): per-lump cache capacities. Each MUST equal the OLD per-draw
+# reject bound so slot acceptance is byte-identical to the pre-cache sz-range
+# checks: digits / keys / percent used st_patch_buf's 16384 cap (old st_draw_patch
+# reject), faces used face_patch_buf's 4096 cap (old status_draw_face reject).
+# Enum members are const-folded — no gvar_toks slot consumed.
+enum StCacheCap {
+    ST_CAP_DIGIT = 16384;
+    ST_CAP_FACE = 4096;
+}
+
 var stbar_bg = 0;
 var stbar_bg_size = 0;
 var stbar_arms_bg = 0;
 var stbar_arms_size = 0;
-var st_nums = 0;
-var st_ynums = 0;
-var st_percent = 0;
-var st_minus = 0;
-var st_patch_buf = 0;
+# OP-4 (v0.34.4): status_render used to re-resolve (wad_find_lump directory scan)
+# and re-slurp (lseek+read) every digit / face / key / ARMS / percent patch EVERY
+# frame (~7 scans + ~20 reads, ~161 us/frame measured at 0.34.3). Each now resolves
+# + slurps its raw patch bytes ONCE at status_init_font into a 16-byte [buf, sz]
+# slot (buf at +0, sz at +8) and draws from RAM. buf == 0 means "lump missing /
+# oversize at init" -> the draw no-ops, reproducing the old lump<0 / sz-range rejects.
+var st_nums = 0;        # STTNUM0-9  big red   -- 10 slots, cap ST_CAP_DIGIT, shade 0
+var st_ynums = 0;       # STYSNUM0-9 yellow    -- 10 slots, cap ST_CAP_DIGIT, shade 2
+var st_gnums = 0;       # STGNUM0-9  grey ARMS -- 10 slots, cap ST_CAP_DIGIT, shade 0
+var st_faces = 0;       # 0-4 STFST{band}0 / 5 STFDEAD0 -- 6 slots, cap ST_CAP_FACE, shade 0
+var st_keys = 0;        # STKEYS0/1/2          -- 3 slots,  cap ST_CAP_DIGIT, shade 0
+var st_percent = 0;     # STTPRCNT             -- 1 [buf,sz] slot ptr, cap ST_CAP_DIGIT
+var st_minus = 0;       # STTMINUS lump index -- resolved but never drawn (pre-existing dead)
+var st_patch_buf = 0;   # retained: backs the now-dead st_draw_patch (prune in cleanup)
 # Shared 8-byte lump-name scratch (RC-G7): the face/ARMS/grey-number draws
 # each alloc'd a fresh name buffer PER FRAME on the never-free bump allocator
 # (~2 KB/s at 35 Hz). Each use fully consumes the buffer before returning,
@@ -38,8 +57,12 @@ fn st_name_buf(): i64 {
 
 fn status_init_font(): i64 {
     st_patch_buf = alloc(16384);
-    st_nums = alloc(10 * 8);
-    st_ynums = alloc(10 * 8);
+    st_nums = alloc(10 * 16);       # [buf,sz] slots -- 16 B each
+    st_ynums = alloc(10 * 16);
+    st_gnums = alloc(10 * 16);
+    st_faces = alloc(6 * 16);
+    st_keys = alloc(3 * 16);
+    st_percent = alloc(16);
 
     # STBAR / STARMS backgrounds: cap the lump size (shareware STBAR is 13 KB,
     # STARMS 1.6 KB — 64 KB is generous headroom) and guard the alloc. A malformed
@@ -70,21 +93,51 @@ fn status_init_font(): i64 {
     # (else strlen over-reads the next bump-alloc; worked before only because fresh
     # bump space was zero — audit R-2 sibling).
     var numname = alloc(9);
+
+    # STTNUM0-9 (big red) -- slurp raw bytes once into st_nums slots
     for (var i = 0; i < 10; i += 1) {
         memcpy(numname, "STTNUM", 6);
         store8(numname + 6, 48 + i);
         store8(numname + 7, 0);
-        store64(st_nums + i * 8, wad_find_lump(numname));
+        st_cache_slot(st_nums + i * 16, wad_find_lump(numname), ST_CAP_DIGIT);
     }
 
+    # STYSNUM0-9 (yellow small)
     for (var i = 0; i < 10; i += 1) {
         memcpy(numname, "STYSNUM", 7);
         store8(numname + 7, 48 + i);
         store8(numname + 8, 0);
-        store64(st_ynums + i * 8, wad_find_lump(numname));
+        st_cache_slot(st_ynums + i * 16, wad_find_lump(numname), ST_CAP_DIGIT);
     }
 
-    st_percent = wad_find_lump("STTPRCNT");
+    # STGNUM0-9 (grey ARMS)
+    for (var i = 0; i < 10; i += 1) {
+        memcpy(numname, "STGNUM", 6);
+        store8(numname + 6, 48 + i);
+        store8(numname + 7, 0);
+        st_cache_slot(st_gnums + i * 16, wad_find_lump(numname), ST_CAP_DIGIT);
+    }
+
+    # Faces: slots 0-4 = STFST{band}0 (STFST00/10/20/30/40), slot 5 = STFDEAD0
+    for (var i = 0; i < 5; i += 1) {
+        memcpy(numname, "STFST", 5);
+        store8(numname + 5, 48 + i);
+        store8(numname + 6, 48);
+        store8(numname + 7, 0);
+        st_cache_slot(st_faces + i * 16, wad_find_lump(numname), ST_CAP_FACE);
+    }
+    memcpy(numname, "STFDEAD0", 8);
+    store8(numname + 8, 0);
+    st_cache_slot(st_faces + 5 * 16, wad_find_lump(numname), ST_CAP_FACE);
+
+    # Keys (right of face)
+    st_cache_slot(st_keys + 0 * 16, wad_find_lump("STKEYS0"), ST_CAP_DIGIT);
+    st_cache_slot(st_keys + 1 * 16, wad_find_lump("STKEYS1"), ST_CAP_DIGIT);
+    st_cache_slot(st_keys + 2 * 16, wad_find_lump("STKEYS2"), ST_CAP_DIGIT);
+
+    # Percent glyph (health / armor)
+    st_cache_slot(st_percent, wad_find_lump("STTPRCNT"), ST_CAP_DIGIT);
+
     st_minus = wad_find_lump("STTMINUS");
     return 0;
 }
@@ -143,38 +196,69 @@ fn st_draw_patch_shaded(buf, px, py, shade, sz): i64 {
     return 0;
 }
 
+# ── OP-4 status/HUD patch cache ──────────────────────────────────
+# st_cache_slot: resolve a lump ONCE (at status_init_font) and slurp its raw
+# patch bytes into a fixed cap-sized buffer, storing [buf, sz] in the 16-byte
+# slot at slot_ptr (buf at +0, sz at +8). The slot is zeroed first so a not-found
+# (lump_index < 0), empty/short (sz < 8), or oversize (sz > cap) lump reads back
+# buf == 0 and its draw no-ops. cap MUST equal the old per-draw reject bound
+# (ST_CAP_DIGIT / ST_CAP_FACE) so acceptance matches the pre-cache checks.
+# wad_read_lump_into clamps its read to the true lump size (never past sz <= cap),
+# so buf holds exactly the bytes the old per-frame read produced -- byte-identical.
+fn st_cache_slot(slot_ptr, lump_index, cap): i64 {
+    store64(slot_ptr, 0);          # buf
+    store64(slot_ptr + 8, 0);      # sz
+    if (lump_index < 0) { return 0; }
+    var sz = wad_lump_size(lump_index);
+    if (sz < 8) { return 0; }
+    if (sz > cap) { return 0; }
+    var buf = alloc(cap);
+    if (buf == 0) { return 0; }
+    wad_read_lump_into(lump_index, buf, cap);
+    store64(slot_ptr, buf);
+    store64(slot_ptr + 8, sz);
+    return 0;
+}
+
+# st_cache_draw: draw a cached [buf, sz] patch at (px, py) with COLORMAP shade.
+# No-op when buf == 0 (lump missing / oversize at init) -- reproduces the old
+# lump<0 / sz-range early-returns. Shares the status+menu decoder so pixels are
+# byte-identical to the old st_draw_patch / st_draw_patch_shaded path.
+fn st_cache_draw(slot_ptr, px, py, shade): i64 {
+    var buf = load64(slot_ptr);
+    if (buf == 0) { return 0; }
+    var sz = load64(slot_ptr + 8);
+    st_draw_patch_shaded(buf, px, py, shade, sz);
+    return 0;
+}
+
 fn st_draw_number(num, px, py): i64 {
     if (num < 0) { num = 0; }
     if (num > 999) { num = 999; }
     var hundreds = num / 100;
     var tens = (num / 10) % 10;
     var ones = num % 10;
-    if (hundreds > 0) { st_draw_patch(load64(st_nums + hundreds * 8), px, py); }
+    if (hundreds > 0) { st_cache_draw(st_nums + hundreds * 16, px, py, 0); }
     if (hundreds > 0) {
-        st_draw_patch(load64(st_nums + tens * 8), px + 14, py);
+        st_cache_draw(st_nums + tens * 16, px + 14, py, 0);
     } else {
-        if (tens > 0) { st_draw_patch(load64(st_nums + tens * 8), px + 14, py); }
+        if (tens > 0) { st_cache_draw(st_nums + tens * 16, px + 14, py, 0); }
     }
-    st_draw_patch(load64(st_nums + ones * 8), px + 28, py);
+    st_cache_draw(st_nums + ones * 16, px + 28, py, 0);
     return 0;
 }
 
 fn st_draw_percent(num, px, py): i64 {
     st_draw_number(num, px, py);
-    if (st_percent >= 0) { st_draw_patch(st_percent, px + 42, py); }
+    st_cache_draw(st_percent, px + 42, py, 0);
     return 0;
 }
 
 fn st_draw_small_num(digit, px, py): i64 {
     if (digit < 0) { return 0; }
     if (digit > 9) { return 0; }
-    var lump = load64(st_ynums + digit * 8);
-    if (lump < 0) { return 0; }
-    var sz = wad_lump_size(lump);
-    if (sz < 8 || sz > 16384) { return 0; }
-    wad_read_lump_into(lump, st_patch_buf, sz);
     # Softened yellow (shade 2 = one step down from full bright)
-    st_draw_patch_shaded(st_patch_buf, px, py, 2, sz);
+    st_cache_draw(st_ynums + digit * 16, px, py, 2);
     return 0;
 }
 
@@ -235,24 +319,10 @@ fn status_face_color(): i64 {
 }
 
 fn status_draw_face(px, py): i64 {
-    if (face_patch_buf == 0) { face_patch_buf = alloc(4096); }
-    var face_name = st_name_buf();
-    var hl = status_face_color();
-    if (player_health <= 0) {
-        memcpy(face_name, "STFDEAD0", 8);
-        store8(face_name + 8, 0);                  # NUL the 8-char name (R-2)
-    } else {
-        memcpy(face_name, "STFST", 5);
-        store8(face_name + 5, 48 + hl);
-        store8(face_name + 6, 48);
-        store8(face_name + 7, 0);
-    }
-    var lump = wad_find_lump(face_name);
-    if (lump < 0) { return 0; }
-    var psz = wad_lump_size(lump);
-    if (psz < 8 || psz > 4096) { return 0; }
-    wad_read_lump_into(lump, face_patch_buf, psz);
-    st_draw_patch_from_buf(face_patch_buf, px, py, psz);
+    # OP-4: faces cached at init -- slot 0-4 by health band, slot 5 = STFDEAD0.
+    var slot = st_faces + 5 * 16;
+    if (player_health > 0) { slot = st_faces + status_face_color() * 16; }
+    st_cache_draw(slot, px, py, 0);
     return 0;
 }
 
@@ -286,12 +356,7 @@ fn status_render(): i64 {
         if (has == 1) {
             st_draw_small_num(w, ax, ay);
         } else {
-            var gname = st_name_buf();
-            memcpy(gname, "STGNUM", 6);
-            store8(gname + 6, 48 + w);
-            store8(gname + 7, 0);
-            var gl = wad_find_lump(gname);
-            if (gl >= 0) { st_draw_patch(gl, ax, ay); }
+            st_cache_draw(st_gnums + w * 16, ax, ay, 0);
         }
     }
 
@@ -304,9 +369,9 @@ fn status_render(): i64 {
     # KEYS — right of face at x=239
     var key_x = 239;
     var key_y = STBAR_Y + 3;
-    if ((player_keys & KEY_CARD_BLUE) != 0) { st_draw_patch(wad_find_lump("STKEYS0"), key_x, key_y); }
-    if ((player_keys & KEY_CARD_YELLOW) != 0) { st_draw_patch(wad_find_lump("STKEYS1"), key_x, key_y + 10); }
-    if ((player_keys & KEY_CARD_RED) != 0) { st_draw_patch(wad_find_lump("STKEYS2"), key_x, key_y + 20); }
+    if ((player_keys & KEY_CARD_BLUE) != 0) { st_cache_draw(st_keys + 0 * 16, key_x, key_y, 0); }
+    if ((player_keys & KEY_CARD_YELLOW) != 0) { st_cache_draw(st_keys + 1 * 16, key_x, key_y + 10, 0); }
+    if ((player_keys & KEY_CARD_RED) != 0) { st_cache_draw(st_keys + 2 * 16, key_x, key_y + 20, 0); }
 
     # AMMO totals — current / max in number boxes LEFT of BULL/SHEL/RCKT/CELL labels
     # STBAR has slash separators baked in at ~x=283
