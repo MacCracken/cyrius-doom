@@ -731,6 +731,44 @@ fn render_draw_tex_column(x, y1, y2, tex_idx, tex_col, tex_y_start, tex_y_step, 
     var tex_y = tex_y_start;
     if (y1 < 0) { tex_y += tex_y_step * (0 - y1); y1 = 0; }
     if (y2 > SCREEN_HEIGHT - 1) { y2 = SCREEN_HEIGHT - 1; }
+
+    # Per-pixel loop hoist (OP-3), taken when the common preconditions hold: a
+    # COLORMAP is loaded and the V-step is positive and smaller than the wrapped
+    # texture height. This replaces, per pixel: the fixed_to_int (asr) + `% th`
+    # (an integer divide), the render_shade + framebuf_pixel calls (each a
+    # bounds-checked recompute of the framebuffer offset), and the COLORMAP-row
+    # base add. Instead: a compare-subtract wrapped-V accumulator, a hoisted
+    # COLORMAP row, and a destination pointer stepped by SCREEN_WIDTH.
+    #
+    # BYTE-IDENTICAL to the slow loop below. wty is held in [0, th<<16) and
+    # tracks tex_y modulo (th<<16): th<<16 is an exact multiple of 65536, so
+    # (wty >> 16) == fixed_to_int(tex_y) % th (with the same [0,th) sign
+    # correction the slow path applies) for every row. tex_y_step < (th<<16)
+    # bounds wty+step below 2*(th<<16), so a single subtract re-wraps. The
+    # framebuffer write is in bounds for the same (x,y) framebuf_pixel would
+    # draw: y1 is clamped to [0, SCREEN_HEIGHT-1] above and every caller passes
+    # x in [0, SCREEN_WIDTH-1] (seg/sky columns), so no write is dropped.
+    var thf = th << 16;
+    if (colormap != 0 && tex_y_step > 0 && tex_y_step < thf) {
+        var llv = light_level;
+        if (llv < 0) { llv = 0; }
+        if (llv > 31) { llv = 31; }
+        var crow = colormap + llv * 256;
+        var wty = tex_y % thf;
+        if (wty < 0) { wty += thf; }
+        var dp = screen_buf + y1 * SCREEN_WIDTH + x;
+        for (var yq = y1; yq <= y2; yq += 1) {
+            var tyq = wty >> 16;
+            if (load8(tex_col_mask + tyq) != 0) {
+                store8(dp, load8(crow + load8(tex_col_buf + tyq)));
+            }
+            wty += tex_y_step;
+            if (wty >= thf) { wty -= thf; }
+            dp += SCREEN_WIDTH;
+        }
+        return 0;
+    }
+
     for (var y = y1; y <= y2; y += 1) {
         var ty = fixed_to_int(tex_y) % th;
         if (ty < 0) { ty += th; }
@@ -1474,11 +1512,33 @@ fn render_plane_row(y, x1, x2, hd, flat, lightnum): i64 {
     # +worldY had every flat vertically mirrored vs the reference renderer.
     if (colormap != 0) {
         var crow = colormap + lv * 256;
+        var rowp = screen_buf + y * SCREEN_WIDTH;
+        var fbase = flat_cache + flat * FLAT_SIZE;
+        # Per-pixel loop hoist (OP-3): replace the two per-pixel fixed_to_int
+        # (asr) calls + framebuf_pixel (bounds check + y*SCREEN_WIDTH multiply)
+        # with masked LOGICAL shifts on biased accumulators and a hoisted row
+        # pointer indexed by x. BYTE-IDENTICAL to the slow (colormap == 0) branch:
+        #  - U: (bwx >> 16) & 63 keeps bits 16..21 of the accumulator, which for
+        #    any value equals fixed_to_int & 63 (& 63 makes logical vs arithmetic
+        #    shift agree). The +0x40000000 bias is an exact multiple of (64<<16),
+        #    so it drops out under & 63 == fixed_to_int(wx) & 63.
+        #  - V: the original is (0 - fixed_to_int(wy)) & 63 = (-floor(wy/2^16)) & 63.
+        #    Since -floor(a/m) = floor((-a + m-1)/m), biasing by 0x40000000 + 65535
+        #    - wy and taking floor(bias/2^16) & 63 reproduces it EXACTLY. The
+        #    +65535 (0xFFFF) is the load-bearing term that converts the logical
+        #    floor into the original negate-after-floor; without it every flat
+        #    shifts one texel. 0x40000000 keeps the accumulator's low bits a clean
+        #    floor and also drops under & 63.
+        # Bounds: y in [0,SCREEN_HEIGHT-1] and x1..x2 in [0,SCREEN_WIDTH-1]
+        # (plane-span columns/rows), so rowp + x is always the pixel framebuf_pixel
+        # would write — no dropped writes.
+        var bwx = wx + 0x40000000;
+        var bwy = 0x40000000 + 65535 - wy;
         for (var x = x1; x <= x2; x += 1) {
-            var cp = load8(flat_cache + flat * FLAT_SIZE + ((0 - fixed_to_int(wy)) & 63) * 64 + (fixed_to_int(wx) & 63));
-            framebuf_pixel(x, y, load8(crow + cp));
-            wx += step_wx;
-            wy += step_wy;
+            var cp = load8(fbase + ((bwy >> 16) & 63) * 64 + ((bwx >> 16) & 63));
+            store8(rowp + x, load8(crow + cp));
+            bwx += step_wx;
+            bwy -= step_wy;
         }
     } else {
         for (var x = x1; x <= x2; x += 1) {

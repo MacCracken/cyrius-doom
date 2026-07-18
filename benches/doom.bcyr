@@ -193,6 +193,51 @@ fn main() {
     }
     vec_push(benches, b13);
 
+    # --- OP-0 (bench-truth): true in-game frame cost ---
+    # b12/b13 above measure an EMPTY world (things never spawned) and are kept
+    # for row-over-row continuity with bench-history.csv. The rows below spawn
+    # the map's things at skill 3 and init the subsystems the real frame loop
+    # touches, so render_frame+sprites reflects the true ~4 ms E1M1 spawn frame
+    # (the empty bench understated it ~1.85x) and the OP-1/OP-3 render gains
+    # become measurable. TOOLING only — the game binary is unaffected.
+    game_skill = 3;
+    render_init_light_tables();
+    level_init();
+    status_init_font();
+    sound_init();
+    things_spawn_from_map();
+    doors_init();
+    player_init();
+    view_x = player_x;
+    view_y = player_y;
+    view_angle = player_angle;
+    render_frame();
+    sprite_render_all();
+
+    var b14 = bench_new("render_frame+sprites_spawned");
+    for (var r14 = 0; r14 < 10; r14 = r14 + 1) {
+        bench_batch_start(b14);
+        for (var i14 = 0; i14 < 10; i14 = i14 + 1) { render_frame(); sprite_render_all(); }
+        bench_batch_stop(b14, 10);
+    }
+    vec_push(benches, b14);
+
+    var b15 = bench_new("things_tick");
+    for (var r15 = 0; r15 < 10; r15 = r15 + 1) {
+        bench_batch_start(b15);
+        for (var i15 = 0; i15 < 100; i15 = i15 + 1) { things_tick(); }
+        bench_batch_stop(b15, 100);
+    }
+    vec_push(benches, b15);
+
+    var b16 = bench_new("status_render");
+    for (var r16 = 0; r16 < 10; r16 = r16 + 1) {
+        bench_batch_start(b16);
+        for (var i16 = 0; i16 < 100; i16 = i16 + 1) { status_render(); }
+        bench_batch_stop(b16, 100);
+    }
+    vec_push(benches, b16);
+
     syscall(1, 1, "\n=== DOOM Benchmarks (batch) ===\n", 32);
     bench_report_all(benches);
 

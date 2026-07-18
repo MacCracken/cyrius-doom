@@ -163,16 +163,39 @@ fn wad_name_eq(lump_name_ptr, name): i64 {
     return 1;
 }
 
+# OP-6: pack a query name once into the little-endian 8-byte word the WAD
+# directory stores each lump name in (uppercase, null-padded), so a directory
+# scan compares load64(entry+16) against one word instead of re-running strlen +
+# an 8-byte loop per entry (~33.7 µs → ~2-4 µs per ~1,260-entry scan). Mirrors
+# wad_name_eq EXACTLY: only ASCII a-z (97..122) uppercase; positions past the
+# query length stay 0 (null padding); a name > 8 chars can never match a lump.
+# Returns (packed_word, valid) — valid == 0 means "> 8 chars, no match".
+fn wad_name_pack(name): i64 {
+    var nlen = strlen(name);
+    if (nlen > 8) { return (0, 0); }
+    var packed = 0;
+    for (var i = 0; i < nlen; i += 1) {
+        var nc = load8(name + i);
+        if (nc >= 97 && nc <= 122) { nc -= 32; }
+        packed = packed | (nc << (i * 8));
+    }
+    return (packed, 1);
+}
+
 fn wad_find_lump(name): i64 {
+    var q, ok = wad_name_pack(name);
+    if (ok == 0) { return -1; }
     for (var i = 0; i < wad_numlumps; i += 1) {
-        if (wad_name_eq(wad_dir + i * WAD_DIR_ENTRY_SIZE + 16, name) == 1) { return i; }
+        if (load64(wad_dir + i * WAD_DIR_ENTRY_SIZE + 16) == q) { return i; }
     }
     return -1;
 }
 
 fn wad_find_lump_after(name, after): i64 {
+    var q, ok = wad_name_pack(name);
+    if (ok == 0) { return -1; }
     for (var i = after + 1; i < wad_numlumps; i += 1) {
-        if (wad_name_eq(wad_dir + i * WAD_DIR_ENTRY_SIZE + 16, name) == 1) { return i; }
+        if (load64(wad_dir + i * WAD_DIR_ENTRY_SIZE + 16) == q) { return i; }
     }
     return -1;
 }

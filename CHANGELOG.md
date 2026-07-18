@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.34.3] - 2026-07-18 — performance batch A (caches + bench-truth, −62% frame)
+
+Algorithmic render/lookup speedups, all **byte-identical output** (verified by a 9-map + 5-menu
+`--ppm` A/B against v0.34.2 + the full 288-test suite, all identical). Extracted from the
+2026-07-17 audit's validated optimization prototype; adversarial review clean (one refuted-as-
+unreachable LOW). The design surfaced that the bench itself was measuring an **empty world** —
+fixed here (OP-0), which made the real gains visible.
+
+### Changed
+
+- **OP-0 — bench-truth.** `benches/doom.bcyr` never spawned the map's things, so
+  `render_frame+sprites` timed an empty world (~2 µs sprite pass) — every `bench-history.csv` row
+  understated the real frame by ~1.85×. Added spawned-world rows (`render_frame+sprites_spawned`,
+  `things_tick`, `status_render`) after the existing empty-world rows (kept for continuity). Tooling
+  only — the game binary is untouched. Revealed the true E1M1 spawn frame: **4.348 ms** (v0.34.2,
+  cycc 6.4.58).
+- **OP-1 — sprite lump memo (−1.52 ms/frame).** `sprite_find_frame` did up to ~5 `wad_find_lump`
+  directory scans per visible sprite *per frame* (65 scans/frame at spawn). Now a permanent memo
+  keyed `(type, frame, rotation) → (lump, flip)` over the renamed `sprite_find_frame_uncached`; the
+  WAD directory is immutable so hits are byte-identical to the uncached result and never need
+  invalidation.
+- **OP-3 — per-pixel loop hoists (−0.92 ms/frame).** `render_plane_row` and `render_draw_tex_column`
+  hoisted the colormap row + destination pointer out of the pixel loop, replaced the per-pixel
+  `fixed_to_int` calls / `% th` divide with biased-accumulator logical shifts / a compare-subtract
+  wrapped-V accumulator, and write via a stepped `store8` instead of the bounds-checked
+  `framebuf_pixel`. Byte-identical: the plane-row negated-V bias carries the load-bearing `+0xFFFF`
+  so the biased logical shift reproduces the original negate-after-floor exactly.
+- **OP-6 — `wad_name_eq` packed-i64 compare (~33.7 µs → ~2-4 µs/scan).** `wad_find_lump` packs the
+  query name once into the uppercase, null-padded, little-endian 8-byte word the WAD directory
+  stores names in, then compares `load64(entry+16)` against it per entry instead of re-running
+  `strlen` + an 8-byte loop. Byte-identical to `wad_name_eq` (which is now unreferenced —
+  DCE-eliminated; +1 NOP-sled fn).
+
+Result: true E1M1 spawn frame **4.348 → 1.631 ms (−62.5%)**, same-compiler (6.4.58) A/B; empty-world
+`render_frame` 2.354 → 1.433 ms (−39%). Tests 181 WAD-free / 288 full (unchanged — perf-only);
+fuzz ×5; deps 36/0; binary `build/doom` 451,600 → **451,632 B** (`build/doom_agnos` 433,920 →
+**438,048 B**); AGNOS QEMU direct-map render PASS. **Deferred → v0.34.4**: OP-2 composited-texture
+cache (the `texture_get_column` ~823 ns hot path + the pcache-overflow cliff; intersects the SLADRIP
+anim fix) and OP-4 status-bar lump/patch caching (`status_render` still ~161 µs → est. <30). OP-5
+(`thing_check_sight` scaling — the dense-map/AGNOS budget) stays perf batch B.
+
 ## [0.34.2] - 2026-07-18 — texture world-lock: walls (the "distorts on turning" fix)
 
 Fixes the headline field report — "changing viewing angle still distorts texture." Wall texture-U
