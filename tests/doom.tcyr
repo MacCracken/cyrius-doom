@@ -99,6 +99,30 @@ fn main() {
     assert_eq(fixed_to_int(neg1000), 0 - 1000, "to_int(from_int(-1000)) = -1000");
 
     # ============================================================
+    test_group("exact seg length — isqrt (TX-4)");
+    # ============================================================
+    # Replaces fixed_approx_dist (max+min/2, up to +11.8% long on diagonals) for
+    # the wall/masked texture-U seg length. isqrt = floor(sqrt), integer units.
+    assert_eq(isqrt(0), 0, "isqrt(0) = 0");
+    assert_eq(isqrt(1), 1, "isqrt(1) = 1");
+    assert_eq(isqrt(3), 1, "isqrt(3) = 1 (floor)");
+    assert_eq(isqrt(4), 2, "isqrt(4) = 2");
+    assert_eq(isqrt(15), 3, "isqrt(15) = 3 (floor)");
+    assert_eq(isqrt(16), 4, "isqrt(16) = 4");
+    assert_eq(isqrt(9999), 99, "isqrt(9999) = 99 (floor)");
+    assert_eq(isqrt(10000), 100, "isqrt(10000) = 100");
+    assert_eq(isqrt(0 - 5), 0, "isqrt(negative) = 0 (guard)");
+    # 65535^2 = 4294836225 — max integer seg-delta squared (worst-case WAD coord).
+    assert_eq(isqrt(4294836225), 65535, "isqrt(65535^2) = 65535");
+    # Diagonal seg lengths the approximation got wrong:
+    # (128,128): true 181.02 -> 181 (approx gave 192).
+    assert_eq(isqrt(128 * 128 + 128 * 128), 181, "len(128,128) = 181 (approx was 192)");
+    # (200,100): true 223.6 -> 223 (approx gave 250, +11.8%).
+    assert_eq(isqrt(200 * 200 + 100 * 100), 223, "len(200,100) = 223 (approx was 250)");
+    # Axis-aligned is exact for both methods (regression guard).
+    assert_eq(isqrt(256 * 256), 256, "len(256,0) = 256 (axis-aligned exact)");
+
+    # ============================================================
     test_group("fixed-point arithmetic");
     # ============================================================
 

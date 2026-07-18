@@ -571,6 +571,9 @@ enum MaskedConst {
 }
 
 var masked_segs = 0;
+# V4 (TX-1/TX-2): 320 entries of the per-column view-ray slope
+# tan = (col - HALF_WIDTH) / HALF_WIDTH in 16.16, lazily built in render_frame.
+var r_table = 0;
 var masked_count = 0;
 var masked_dropped = 0;
 var masked_warned = 0;
@@ -842,6 +845,13 @@ fn render_seg(seg_idx): i64 {
     # Both behind the viewer? Skip.
     if (ty1 <= 0 && ty2 <= 0) { return 0; }
 
+    # V4 (TX-1): capture the UNCLIPPED view-space endpoints before the near-clip
+    # below mutates tx*/ty*. The per-column ray-cast (TX-2) intersects each
+    # column's view ray against the ORIGINAL v1->v2 segment; the near-clip still
+    # adjusts tx*/ty* for the screen-X projection + the drawseg/masked scale
+    # endpoints (wscale1/2), which stay live.
+    var rtx1 = tx1; var rty1 = ty1; var rtx2 = tx2; var rty2 = ty2;
+
     # Near-plane clipping: if a vertex is behind the viewer,
     # clip it to a small positive depth
     var NEAR_CLIP = 256;
@@ -963,10 +973,17 @@ fn render_seg(seg_idx): i64 {
     # Seg offset along linedef (for texture U coordinate)
     var seg_offset = map_seg_offset(seg_idx);
 
-    # World length of seg for U interpolation
+    # World length of seg for U interpolation (TX-4). EXACT integer texel length
+    # via isqrt on the integer map-unit deltas — fixed_approx_dist's max+min/2
+    # ran up to +11.8% long on diagonal segs, statically stretching texture-U and
+    # seaming at every seg boundary (closes ledger R-4). u_v2 feeds the wall pass
+    # AND the masked-midtex pass. Integer units (not 16.16): fixed_to_int(delta)
+    # <= 65535 so the squares sum < 2^33, far inside i64 (16.16 squares to ~2^62).
     var world_dx = map_vertex_x(v2_idx) - map_vertex_x(v1_idx);
     var world_dy = map_vertex_y(v2_idx) - map_vertex_y(v1_idx);
-    var seg_len = fixed_approx_dist(world_dx, world_dy);
+    var seg_dxi = fixed_to_int(world_dx);
+    var seg_dyi = fixed_to_int(world_dy);
+    var seg_len = isqrt(seg_dxi * seg_dxi + seg_dyi * seg_dyi);
 
     # Texture-U at the seg endpoints, in SCREEN left→right order. u at v1 is the
     # sidedef x-offset plus the seg's running offset along the linedef; u at v2
@@ -975,7 +992,7 @@ fn render_seg(seg_idx): i64 {
     # right is v1, so the U endpoints swap to match — otherwise the wall texture
     # renders mirrored, and flips the instant a turn crosses that threshold.
     var u_v1 = sd_xoff + seg_offset;
-    var u_v2 = sd_xoff + seg_offset + fixed_to_int(seg_len);
+    var u_v2 = sd_xoff + seg_offset + seg_len;
     var u_left = u_v1;
     var u_right = u_v2;
     if (seg_u_swapped == 1) { u_left = u_v2; u_right = u_v1; }
@@ -1115,16 +1132,26 @@ fn render_seg(seg_idx): i64 {
         var cb = load64(clip_bottom + col * 8);
         if (ct > cb) { continue; }
 
-        # frac is linear in screen-x (used for the texture-U interpolation below).
-        var frac = 0;
-        if (sx2 != sx1) {
-            frac = fixed_div((col - sx1) << 16, (sx2 - sx1) << 16);
-        }
-        # Perspective-correct depth from linearly-interpolated scale.
-        var col_scale = fixed_lerp(wscale1, wscale2, frac);
+        # V4 (TX-2): per-column depth + texture-U from the intersection of this
+        # column's view ray with the ORIGINAL (unclipped) v1->v2 segment, in pure
+        # 16.16. World-anchored, so U/scale stay LOCKED to the wall as the view
+        # turns — replaces the screen-x frac-lerp of wscale/uow, which slid up to
+        # ~48 texels on segs extending behind the viewer (the near-clip distorted
+        # the lerp endpoints). rr = r_table[col] = tan(col ray).
+        #   sp = param along v1->v2 = (rr*ty1 - tx1) / ((tx2-tx1) - rr*(ty2-ty1))
+        var rr = load64(r_table + col * 8);
+        var v4den = (rtx2 - rtx1) - fixed_mul(rr, rty2 - rty1);
+        var v4num = fixed_mul(rr, rty1) - rtx1;
+        var sp = 0;
+        if (v4den != 0) { sp = fixed_div(v4num, v4den); }
+        if (sp < 0) { sp = 0; }
+        if (sp > FIXED_ONE) { sp = FIXED_ONE; }
+        # depth = ray-cast intersection depth (v4ty); floored to near-clip so the
+        # height projection + col_scale can't blow up.
+        var depth = rty1 + fixed_mul(sp, rty2 - rty1);
+        if (depth < 256) { depth = 256; }
+        var col_scale = fixed_div(PROJ_DIST, depth);
         if (col_scale <= 0) { col_scale = 1; }
-        var depth = fixed_div(PROJ_DIST, col_scale);
-        if (depth <= 0) { depth = 256; }
 
         # Project floor and ceiling heights to screen Y
         # screen_y = HALF_HEIGHT - (height - eye_height) * PROJ_DIST / depth
@@ -1203,9 +1230,13 @@ fn render_seg(seg_idx): i64 {
             }
         }
 
-        # Texture U coordinate for this column (perspective-correct, F22):
-        # (u/z interpolated) / (1/z interpolated) = lerp(uow) / col_scale.
-        var tex_u = fixed_lerp(uow1, uow2, frac) / col_scale;
+        # V4 (TX-2): U directly from the world-anchored seg parameter sp, in RAW
+        # v1->v2 order — sp already carries screen orientation, so no
+        # seg_u_swapped handling and no uow/frac interpolation is needed for the
+        # wall U. (uow1/uow2 + seg_u_swapped stay live for the deferred
+        # masked-midtexture pass.)
+        var v4u = (u_v1 << 16) + fixed_mul(sp, (u_v2 - u_v1) << 16);
+        var tex_u = fixed_to_int(v4u);
 
         if (is_twosided != 0) {
             var back_ceil_screen = HALF_HEIGHT - fixed_to_int(
@@ -1647,6 +1678,15 @@ fn render_masked_one(mi): i64 {
 }
 
 fn render_frame(): i64 {
+    # V4 (TX-1/TX-2): lazy-build the per-column ray-slope table (tan of each
+    # column's view ray = (col - HALF_WIDTH) / HALF_WIDTH, 16.16). Self-init so no
+    # render path depends on tables_init having run first (project lazy-init idiom).
+    if (r_table == 0) {
+        r_table = alloc(SCREEN_WIDTH * 8);
+        for (var rc = 0; rc < SCREEN_WIDTH; rc += 1) {
+            store64(r_table + rc * 8, fixed_div((rc - HALF_WIDTH) << 16, HALF_WIDTH << 16));
+        }
+    }
     view_cos = fixed_cos(view_angle);
     view_sin = fixed_sin(view_angle);
     render_update_view_z();

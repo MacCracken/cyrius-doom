@@ -7,6 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.34.2] - 2026-07-18 — texture world-lock: walls (the "distorts on turning" fix)
+
+Fixes the headline field report — "changing viewing angle still distorts texture." Wall texture-U
+and depth are now **world-anchored per column** instead of screen-x-interpolated from near-clip-
+distorted endpoints, so texels stay locked to their world position on the wall as the view turns.
+Design + adversarial-review workflows (the review was clean — two INFO nits, no bugs); the fix
+reuses the V4 algorithm validated to the measurement noise floor by the 2026-07-17 audit's staged
+world-lock harness. See [`docs/audit/2026-07-17-texture-lock-perf-agnos-e1m1.md`](docs/audit/2026-07-17-texture-lock-perf-agnos-e1m1.md)
+§1 (TX-1..TX-4).
+
+### Fixed
+
+- **TX-1/TX-2 — wall texture world-lock (the view-angle distortion).** The per-column wall U and
+  depth were interpolated in screen-x between the seg's two *projected* endpoints. When a seg
+  extends behind the eye, the near-clip moves an endpoint but not its texture-U/scale anchor, so the
+  interpolation endpoints correspond to no point on the wall — texture-U became a function of view
+  angle and slid up to **~48 texels** while turning near a wall (the common corridor case). Replaced
+  with a per-column **ray↔seg intersection in view space against the UNCLIPPED endpoints** (vanilla's
+  world-anchored mapping, reparametrized; pure 16.16, no tangent table): for each column,
+  `sp` = parameter along the true v1→v2 segment from `r_table[col]` (the column ray's tangent,
+  precomputed 320-entry table), then `depth = rty1 + sp·(rty2−rty1)` and
+  `tex_u = u_v1 + sp·(u_v2−u_v1)`. Worst world-lock slide drops from 48.24 to **2.49 texels** (the
+  float-vanilla noise floor). `wscale1/2` + the drawseg occlusion band + `seg_u_swapped` are
+  unchanged (still feed the sprite/masked passes). Verified: 9-map `--ppm` A/B (viewport-only diffs,
+  HUD byte-identical, no black-hole voids, distinct-color counts unchanged), a static formula-match
+  proof against the validated harness build, and AGNOS QEMU direct-map render.
+- **TX-4 — exact seg texel length (diagonal wall stretch + seams).** `u_v2` used
+  `fixed_approx_dist` (max+min/2, up to **+11.8%** long at ~26.6°), statically stretching texture-U
+  on diagonal segs and seaming at every seg boundary (closes the ledger's R-4). Now an exact integer
+  `isqrt` (new pure `fixed.cyr` helper, Newton, floor) of the seg's integer-map-unit deltas —
+  computed in integer units (a 16.16 delta would square past 2⁶²; integer deltas ≤65535 keep the sum
+  < 2³³). +13 WAD-free asserts (isqrt edge/frontier cases + the (128,128)→181 and (200,100)→223
+  diagonal cases the approximation got wrong).
+
+### Changed
+
+- Tests **181 WAD-free / 288 full** (+13 for TX-4 isqrt). Binary `build/doom` **451,600 B**
+  (unchanged — V4 trades a `fixed_lerp`/`fixed_div` per column for the ray-cast, net size-neutral
+  under DCE), `build/doom_agnos` 433,904→**433,920 B**. `render_frame` **2.419 ms** (variance vs
+  0.34.1's 2.391 — the r_table lookup + 2 `fixed_mul`/col replace the lerp; no bench claim). Pin
+  6.4.58; deps 36/0; fuzz ×5.
+- **Deferred to v0.34.3** (design + review recommendation): **masked-midtexture V4** (grates/fences
+  swim the same way, but it's a higher-blast-radius `MASKED_ENTRY` layout change with no E1M1
+  midtexture to verify against without extra harness staging) and **TX-3** (vertical V-anchor at the
+  view center — a ≤1-texel shimmer whose benefit is contingent on this V4 fix and which risks the
+  shipped F06 pegging; needs a vertical-slide harness metric). Known INFO nits from the review:
+  `uow1/uow2` are computed but consumed only by the deferred masked store (removable when masked-V4
+  lands); the `v4den==0` fallback is defensive (unreachable on drawn columns).
+
 ## [0.34.1] - 2026-07-17 — E1M1 fidelity + AGNOS input robustness (field-report patch)
 
 Four E1M1 gameplay-fidelity fixes from a field-review pass plus the AGNOS raw-keyboard robustness

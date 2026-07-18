@@ -66,6 +66,22 @@ fn fixed_approx_dist(dx, dy): i64 {
     return ady + asr(adx, 1);
 }
 
+# Integer square root (floor) of a non-negative value (TX-4). Newton iteration,
+# no FPU, converges in a few steps. Callers pass dx*dx+dy*dy in INTEGER map
+# units (a seg delta is <= 65535, so the sum < 2^33 — far inside i64); passing
+# 16.16 deltas would square a 2^31 value to 2^62 and is NOT supported here.
+# n < 0 returns 0; n in {0,1} returns n.
+fn isqrt(n): i64 {
+    if (n < 2) { if (n < 0) { return 0; } return n; }
+    var x = n;
+    var y = asr(x + 1, 1);
+    while (y < x) {
+        x = y;
+        y = asr(x + n / x, 1);
+    }
+    return x;
+}
+
 fn fixed_lerp(a, b, t): i64 {
     return a + fixed_mul(t, b - a);
 }
