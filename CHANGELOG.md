@@ -65,8 +65,14 @@ See [`docs/audit/2026-07-17-texture-lock-perf-agnos-e1m1.md`](docs/audit/2026-07
   key (`E1 1D 45 E1 9D C5`) carries an embedded `0x1D`/`0x9D` that decodes as Ctrl (= fire); the
   latch turned its previously-harmless net-zero make+break into a one-poll spurious fire. Fixed by
   recognizing `0xE1` as a prefix and swallowing its trailing bytes (persisted across drains).
-  Verified via Linux build + the full suite; behavioral confirmation is the QEMU held-key + bare-tap
-  harness (AGNOS input is `#ifdef`-compiled out on the Linux test path).
+  **AGNOS QEMU verified (2026-07-18):** direct-map render PASS (E1M1 renders on AGNOS, banner
+  `v0.34.1`) + held-key menu-drive PASS (title→New Game→skill→game, `WASD=` banner on serial =
+  `menu_run` returned into the game) + **AG-2 confirmed via an instrumented build** — the drain
+  logged a make+break arriving in ONE kbscan poll (`dbgDRAIN→dbgMK→dbgBK`) yet still set
+  `input_flags` (`dbgFLAG`), which pre-AG-2 could not (the same-drain pair netted `key_state` to 0).
+  Residual bare-`sendkey` game-start flakiness is a QEMU USB-xHCI/TCG delivery artifact (only 2 of 3
+  rapid taps produced a scancode at all) — upstream of doom, the AG-1 cadence limitation the held-key
+  harness accommodates.
 
 ### Changed
 
