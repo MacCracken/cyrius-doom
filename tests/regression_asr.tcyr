@@ -25,10 +25,24 @@ fn main() {
     assert_eq(asr(1, 0), 1, "1>>0 = 1");
 
     test_group("asr negative values (the critical bug)");
+    # NB: these four all divide exactly, so they pass under BOTH the old
+    # round-toward-zero asr and the floor asr — they do not pin the semantics.
     assert_eq(asr(0 - 100, 1), 0 - 50, "-100>>1 = -50");
     assert_eq(asr(0 - 256, 4), 0 - 16, "-256>>4 = -16");
     assert_eq(asr(0 - 65536, 16), 0 - 1, "-65536>>16 = -1");
-    assert_eq(asr(0 - 1000000, 16), 0 - 15, "-1000000>>16 = -15");
+
+    test_group("asr negative values FLOOR, not truncate (RC-F2 / bsp 1.2.1)");
+    # The inexact cases are the ones that pin the semantics. bsp 1.2.1 (adopted
+    # at doom v0.33.6) fixed `asr` to FLOOR negatives — C's signed `>>` and
+    # DOOM's fixed-point math both floor — where it previously rounded toward
+    # zero, which mis-wrapped flats by one texel over negative world coords.
+    # doom shares bsp's `asr` engine-wide (all 95 signed-shift sites), so this
+    # is the load-bearing assertion for the whole engine's negative-coord math.
+    # -1000000/65536 = -15.2588… → floor -16 (round-toward-zero gave -15).
+    assert_eq(asr(0 - 1000000, 16), 0 - 16, "-1000000>>16 = -16 (floor, not -15)");
+    assert_eq(asr(0 - 3, 1), 0 - 2, "-3>>1 = -2 (floor; trunc gave -1)");
+    assert_eq(asr(0 - 1, 1), 0 - 1, "-1>>1 = -1 (floor; trunc gave 0)");
+    assert_eq(asr(0 - 7, 2), 0 - 2, "-7>>2 = -2 (floor; trunc gave -1)");
 
     test_group("fixed_to_int negative round-trip");
     var neg5 = fixed_from_int(0 - 5);

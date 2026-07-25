@@ -40,6 +40,29 @@ include "src/automap.cyr"
 include "src/level.cyr"
 include "src/menu.cyr"
 
+# Hermetic vani stubs (same pattern as tests/doom.tcyr's audio_play_name/at).
+# src/audio.cyr calls vani's ALSA primitives, and the bench benches `things_tick`,
+# which reaches src/audio.cyr via audio_play_at — so without these the bench built
+# with 11 UNDEFINED `audio_*` symbols. They are unreachable today only because the
+# bench never runs audio_init (audio_dev stays 0, so the device path is never
+# entered), but in cycc an undefined fn is a SEGFAULT if called, not a link error:
+# one lazy-init guard away from a crash inside a benched path.
+# Stubbed rather than including vendor/vani-core.cyr, deliberately: linking the
+# real shim measured ~+2.4% on `render_frame+sprites_spawned` (bigger image, worse
+# layout) with no change to the code under test, which would put a step in
+# bench-history.csv that reflects the instrument, not the engine.
+fn audio_open_playback(card, device): i64 { return -1; }
+fn audio_open_capture(card, device): i64 { return -1; }
+fn audio_set_params(dev, rate, ch, bits): i64 { return -1; }
+fn audio_set_params_full(dev, rate, ch, bits, period, buffer): i64 { return -1; }
+fn audio_set_sw_params(dev, start, buffer, period): i64 { return -1; }
+fn audio_prepare(dev): i64 { return -1; }
+fn audio_resume(dev): i64 { return -1; }
+fn audio_write(dev, buf, frames): i64 { return -1; }
+fn audio_drain(dev): i64 { return -1; }
+fn audio_fd(dev): i64 { return -1; }
+fn audio_close(dev): i64 { return 0; }
+
 var _b_startan = 0;
 var _b_texcol = 0;
 

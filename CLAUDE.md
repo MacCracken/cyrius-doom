@@ -114,7 +114,15 @@ Dep pins (bsp / vani versions) and module/lib counts live in [`state.md`](docs/d
 - **`asr()` everywhere on signed shifts** — Cyrius `>>` is logical. Every right-shift on a signed value must use `asr()`.
 - **Lazy init guards** — `if (ptr == 0) { ptr = alloc(N); }` — prevents double-alloc and null deref. Pattern lives in framebuf / texture / masked-segs.
 - **Enum for constants** — saves `gvar_toks` slots (cycc limit: 4,096 initialized globals). Use `var` only for mutable state.
-- **Initialized-globals counting rule** — only a top-level `var NAME = <non-literal>;` (call / identifier / expression initializer) consumes a slot; a bare integer-literal init (`var x = 42;`) takes the static-init fast path and enum members are const-folded, so neither counts. See the cyrius guide's **Global Initializers** section (`docs/guides/cyrius-guide.md` in the cyrius repo).
+- **Initialized-globals counting rule** — *corrected 2026-07-25 (cycc 6.4.74); the old wording here
+  was wrong in both directions.* As of 6.4.74 **any** constant-foldable non-zero integer expression
+  at module scope takes the static-init fast path (not just a bare literal), and enum members are
+  const-folded — neither consumes a `gvar_toks` slot. But **`var x = 0;` DOES consume one**: a folded
+  zero deliberately falls through to the runtime-store path, and **263 of doom's 288 module-scope
+  `var NAME = …` are `= 0`**. A shadowing redefinition never skips. Don't reason from the rule —
+  **measure with `CYRIUS_STATS=1`**; 6.4.73/.75 also recalibrated the `fn_table` (now /32768) and
+  `code_size` denominators, so utilization numbers from before then are not comparable. See the
+  cyrius guide's **Global Initializers** section (`docs/guides/cyrius-guide.md` in the cyrius repo).
 - **Patch cache** — `pcache_get()` eliminates WAD I/O during rendering (200× speedup). Don't bypass it.
 - **Sakshi tracing** — all error paths use `sakshi_error / sakshi_warn / sakshi_info` — structured timestamped logging. Don't `file_write(2, ...)` raw.
 - **Clean-room implementation** — read [Black Book](https://fabiensanglard.net/gebbdoom/) + [Unofficial Specs](https://doomwiki.org/wiki/WAD) before implementing. Never copy from [id Software DOOM source](https://github.com/id-Software/DOOM) (GPL-2.0; read for understanding only).
@@ -164,7 +172,9 @@ Dep pins (bsp / vani versions) and module/lib counts live in [`state.md`](docs/d
 
 ### Closeout Pass (before every minor bump)
 
-1. Full test suite — all `.tcyr` pass (63/63 WAD-free, 101/101 full as of 0.30.0).
+1. Full test suite — **every** `tests/*.tcyr` passes, not just `doom.tcyr`. Naming one file is how
+   `regression_asr.tcyr` sat red for two weeks after 0.33.6 (CI never ran it); CI globs the
+   directory as of 0.34.5. Live counts are in [`state.md`](docs/development/state.md), not here.
 2. Bench baseline — `bench-history.sh`; compare against prior closeout.
 3. Dead-code audit — `CYRIUS_DCE=1` build; record NOP-sled size in CHANGELOG.
 4. Refactor pass — consolidate the minor's additions where parallel codepaths accreted.
@@ -206,7 +216,9 @@ Dep pins (bsp / vani versions) and module/lib counts live in [`state.md`](docs/d
 - **Patra-style installer**: pre-flight HTTP check on the cyrius release asset; version-pinned install layout (`~/.cyrius/versions/$V/{bin,lib}/`).
 - **`cyrius.lock`**: committed supply-chain anchor — the resolver's own `cyrius deps` output; the entry count tracks the pinned toolchain's `lib/` snapshot + the git-dep set (current count in [`state.md`](docs/development/state.md) — do not inline it here). `./lib/` is gitignored, so the lock hashes the pinned stdlib + git-override deps. CI checks the lock is present, runs `cyrius deps` (resolves `./lib/` + rewrites the lock from the pinned toolchain), then `cyrius deps --verify` as the unconditional gate. The earlier cycc 6.0.1 lockfile-writer regression (empty lock → `sha256sum` hand-population + guarded verify) was resolved in 0.27.5 by the 6.0.29 pin.
 - **Dead-code elimination**: release workflow runs `CYRIUS_DCE=1`. Binary size tracked.
-- **CI test job**: WAD-free 63-assert subset (full 101-assert suite needs a WAD; not exercised in CI by design).
+- **CI test job**: the WAD-free subset of **every** `tests/*.tcyr` (glob, not a named file — see the
+  Closeout note above). The WAD-gated assertions need a WAD path passed to the built binary and are
+  exercised locally, not in CI, by design. Live counts live in `state.md`.
 - **Bench history**: `bench-history.csv` appended via `scripts/bench-history.sh`; compare row-over-row.
 
 ## References

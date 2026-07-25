@@ -123,6 +123,74 @@ fn main() {
     assert_eq(isqrt(256 * 256), 256, "len(256,0) = 256 (axis-aligned exact)");
 
     # ============================================================
+    test_group("masked entry layout lock (TX-MASKED, v0.34.5)");
+    # ============================================================
+    # v0.34.5 grew MASKED_ENTRY 120 -> 144 B to carry the UNCLIPPED view-space
+    # endpoints + raw texel U for the world-anchored ray-cast. Every offset from
+    # base+48 up moved. A missed offset here is SILENT MEMORY CORRUPTION — the
+    # writer and reader just disagree about which field is which, with no compile
+    # error and no crash — so the layout is pinned by round-tripping 18 distinct
+    # sentinels through the real render_store_masked.
+    assert_eq(MASKED_ENTRY_SIZE, 144, "MASKED_ENTRY_SIZE = 144 (18 fields x 8)");
+    masked_count = 0;
+    render_store_masked(101, 102, 103, 104, 105, 106, 107, 108, 109, 110,
+    111, 112, 113, 114, 115, 116, 117, 118);
+    assert_eq(masked_count, 1, "store bumps masked_count");
+    var mb = masked_segs;
+    assert_eq(load64(mb), 101, "base+0   = sx1");
+    assert_eq(load64(mb + 8), 102, "base+8   = sx2");
+    assert_eq(load64(mb + 16), 103, "base+16  = mid_tex");
+    assert_eq(load64(mb + 24), 104, "base+24  = lightnum");
+    assert_eq(load64(mb + 32), 105, "base+32  = scale1 (FROZEN — sprite.cyr reads it)");
+    assert_eq(load64(mb + 40), 106, "base+40  = scale2 (FROZEN — sprite.cyr reads it)");
+    assert_eq(load64(mb + 48), 107, "base+48  = rtx1");
+    assert_eq(load64(mb + 56), 108, "base+56  = rty1");
+    assert_eq(load64(mb + 64), 109, "base+64  = rtx2");
+    assert_eq(load64(mb + 72), 110, "base+72  = rty2");
+    assert_eq(load64(mb + 80), 111, "base+80  = u_v1");
+    assert_eq(load64(mb + 88), 112, "base+88  = u_v2");
+    assert_eq(load64(mb + 96), 113, "base+96  = sd_yoff");
+    assert_eq(load64(mb + 104), 114, "base+104 = floor_h");
+    assert_eq(load64(mb + 112), 115, "base+112 = ceil_h");
+    assert_eq(load64(mb + 120), 116, "base+120 = back_floor_h");
+    assert_eq(load64(mb + 128), 117, "base+128 = back_ceil_h");
+    assert_eq(load64(mb + 136), 118, "base+136 = dont_peg_bottom");
+    # Second entry must land exactly one stride on, or entry N>0 reads entry N-1's tail.
+    render_store_masked(201, 202, 203, 204, 205, 206, 207, 208, 209, 210,
+    211, 212, 213, 214, 215, 216, 217, 218);
+    assert_eq(load64(masked_segs + 144), 201, "entry 1 starts at base + 144");
+    assert_eq(load64(masked_segs + 144 + 136), 218, "entry 1 tail field intact");
+    assert_eq(load64(mb + 136), 118, "entry 0 tail NOT overwritten by entry 1");
+    masked_count = 0;
+
+    # ============================================================
+    test_group("world-anchored ray-cast (TX-MASKED / TX-2)");
+    # ============================================================
+    # render_ray_param is now SHARED by the wall pass and the masked pass — the
+    # two must agree bit-for-bit or a grate and the wall behind it disagree about
+    # where the world is. These pin its contract.
+    render_init_r_table();
+    assert_eq(load64(r_table + 160 * 8), 0, "r_table[HALF_WIDTH] = 0 (centre ray)");
+    # Frontal seg at constant depth 120, spanning x -96..+96 in view space.
+    var fa_x = (0 - 96) << 16; var fa_y = 120 << 16;
+    var fb_x = 96 << 16;       var fb_y = 120 << 16;
+    var sp_c, dz_c = render_ray_param(0, fa_x, fa_y, fb_x, fb_y);
+    assert_eq(sp_c, 32768, "centre ray hits seg midpoint (sp = 0.5)");
+    assert_eq(dz_c, 120 << 16, "frontal seg depth is constant 120");
+    # A ray steeper than the seg's extent clamps into [0, 1] rather than running off.
+    var sp_l, dz_l = render_ray_param(0 - FIXED_ONE, fa_x, fa_y, fb_x, fb_y);
+    assert(sp_l >= 0, "sp clamped >= 0");
+    assert(sp_l <= FIXED_ONE, "sp clamped <= 1");
+    # Degenerate: zero-length seg makes the denominator 0 — must not divide by it.
+    var sp_d, dz_d = render_ray_param(0, fa_x, fa_y, fa_x, fa_y);
+    assert_eq(sp_d, 0, "den == 0 leaves sp at 0 (no div-by-zero)");
+    assert_eq(dz_d, 120 << 16, "degenerate seg still reports its own depth");
+    # Endpoint behind the eye: depth floors to the near clip, never <= 0, so the
+    # col_scale division downstream cannot blow up.
+    var sp_b, dz_b = render_ray_param(0, fa_x, (0 - 64) << 16, fb_x, (0 - 64) << 16);
+    assert(dz_b >= 256, "depth floored to near-clip for a seg behind the eye");
+
+    # ============================================================
     test_group("fixed-point arithmetic");
     # ============================================================
 

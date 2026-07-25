@@ -15,9 +15,15 @@ enum Screen {
 # resolution is almost never 320x200. Blitting a tightly-packed
 # 320-wide block straight to /dev/fb0 tiles horizontally and
 # collapses into the top band of a real display (the v0.27.3 bug).
+# SYS_LSEEK is deliberately NOT redefined here: the stdlib carries it in every
+# syscall peer (Linux #8, aarch64 #62, macos #8, agnos #58), and a local copy of
+# the Linux number silently overrode the agnos one — where #8 is `dup`, not
+# `lseek`. Unreachable today (the --agnos paths of framebuf_init/framebuf_flip
+# both return before the fb0 code), but cycc 6.4.78's duplicate-symbol
+# diagnostic flagged it, and it is one edit away from issuing dup() on agnos.
+# SYS_IOCTL below matches the Linux peer exactly and agnos defines no ioctl.
 enum FbIoctl {
     SYS_IOCTL              = 16;
-    SYS_LSEEK              = 8;
     FBIOGET_VSCREENINFO    = 0x4600;   # fb_var_screeninfo
     FBIOGET_FSCREENINFO    = 0x4602;   # fb_fix_screeninfo
     # fb_var_screeninfo field offsets (u32 each)

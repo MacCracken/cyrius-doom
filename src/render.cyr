@@ -558,16 +558,27 @@ fn plane_get(height, flat, lightnum, x1, x2): i64 {
 # ================================================================
 # Masked midtexture drawsegs: deferred two-sided middle textures
 # Stored during BSP wall pass, rendered after walls before sprites
-# Each entry: 15 fields * 8 = 120 bytes (MASKED_ENTRY_SIZE)
+# Each entry: 18 fields * 8 = 144 bytes (MASKED_ENTRY_SIZE)
 #   0: sx1   8: sx2   16: mid_tex  24: lightnum
 #  32: scale1  40: scale2   (perspective scale at the CLAMPED sx1/sx2 endpoints)
-#  48: uow1    56: uow2     (texture-U/z at the same endpoints, screen-ordered)
-#  64: sd_xoff  72: sd_yoff  80: floor_h  88: ceil_h
-#  96: back_floor_h  104: back_ceil_h  112: dont_peg_bottom
+#  48: rtx1  56: rty1  64: rtx2  72: rty2   (UNCLIPPED view-space endpoints, V4)
+#  80: u_v1  88: u_v2                       (texel U at v1/v2, RAW v1->v2 order)
+#  96: sd_yoff  104: floor_h  112: ceil_h
+# 120: back_floor_h  128: back_ceil_h  136: dont_peg_bottom
+#
+# v0.34.5 (TX-MASKED) grew this 120 -> 144. Offsets 0..40 are FROZEN: sprite.cyr
+# reads scale1/scale2 (base+32/+40) for the depth sort and must not be touched.
+# Three fields were retired rather than moved: uow1/uow2 (the screen-x frac-lerp
+# interpolants the V4 ray-cast replaces) and sd_xoff, which render_store_masked
+# wrote at base+64 and which NOTHING ever read — the complete reader set is
+# render_masked_one plus sprite.cyr:387-388. Hence 144, not the 152 the roadmap
+# estimated. The masked pass now carries the same UNCLIPPED endpoints the wall
+# pass keeps at render_seg:891, so both passes run the identical world-anchored
+# ray-cast instead of the near-clip-corrupted lerp.
 # ================================================================
 enum MaskedConst {
     MASKED_MAX = 64;
-    MASKED_ENTRY_SIZE = 120;
+    MASKED_ENTRY_SIZE = 144;
 }
 
 var masked_segs = 0;
@@ -579,7 +590,7 @@ var masked_dropped = 0;
 var masked_warned = 0;
 
 fn render_store_masked(sx1, sx2, mid_tex, lightnum_val, scale1_val, scale2_val,
-uow1_val, uow2_val, sd_xoff_val, sd_yoff_val,
+rtx1_val, rty1_val, rtx2_val, rty2_val, u_v1_val, u_v2_val, sd_yoff_val,
 floor_h_val, ceil_h_val, back_floor_h_val, back_ceil_h_val, dpb): i64 {
     if (masked_segs == 0) { masked_segs = alloc(MASKED_MAX * MASKED_ENTRY_SIZE); }
     if (masked_count >= MASKED_MAX) { masked_dropped += 1; return 0; }
@@ -590,15 +601,18 @@ floor_h_val, ceil_h_val, back_floor_h_val, back_ceil_h_val, dpb): i64 {
     store64(base + 24, lightnum_val);
     store64(base + 32, scale1_val);
     store64(base + 40, scale2_val);
-    store64(base + 48, uow1_val);
-    store64(base + 56, uow2_val);
-    store64(base + 64, sd_xoff_val);
-    store64(base + 72, sd_yoff_val);
-    store64(base + 80, floor_h_val);
-    store64(base + 88, ceil_h_val);
-    store64(base + 96, back_floor_h_val);
-    store64(base + 104, back_ceil_h_val);
-    store64(base + 112, dpb);
+    store64(base + 48, rtx1_val);
+    store64(base + 56, rty1_val);
+    store64(base + 64, rtx2_val);
+    store64(base + 72, rty2_val);
+    store64(base + 80, u_v1_val);
+    store64(base + 88, u_v2_val);
+    store64(base + 96, sd_yoff_val);
+    store64(base + 104, floor_h_val);
+    store64(base + 112, ceil_h_val);
+    store64(base + 120, back_floor_h_val);
+    store64(base + 128, back_ceil_h_val);
+    store64(base + 136, dpb);
     masked_count += 1;
     return 0;
 }
@@ -859,6 +873,52 @@ fn render_transform_vertex(wx, wy): i64 {
     return (tx, ty);
 }
 
+# V4 (TX-1/TX-2/TX-MASKED): intersect one column's view ray with the ORIGINAL
+# (unclipped) v1->v2 segment, in pure 16.16, and return both the seg parameter
+# and the intersection depth.
+#   sp = param along v1->v2 = (rr*ty1 - tx1) / ((tx2-tx1) - rr*(ty2-ty1))
+#   depth = ty1 + sp*(ty2-ty1)
+# rr is the column's ray slope, r_table[col] = tan(col ray).
+#
+# World-anchored, so U/scale stay LOCKED to the wall as the view turns. This
+# replaces the screen-x frac-lerp of wscale/uow, which slid up to ~48 texels on
+# segs extending behind the viewer (the near-clip distorted the lerp endpoints).
+#
+# Shared by BOTH the wall pass (render_seg) and the masked-midtexture pass
+# (render_masked_one) deliberately: the two passes must run bit-identical math
+# or a grate and the wall behind it disagree about where the world is, and two
+# hand-copied versions of eight lines in two hot loops is exactly the kind of
+# thing that drifts apart over a release or two.
+fn render_ray_param(rr, ax, ay, bx, by): i64 {
+    var den = (bx - ax) - fixed_mul(rr, by - ay);
+    var num = fixed_mul(rr, ay) - ax;
+    var sp = 0;
+    if (den != 0) { sp = fixed_div(num, den); }
+    if (sp < 0) { sp = 0; }
+    if (sp > FIXED_ONE) { sp = FIXED_ONE; }
+    # depth floored to near-clip so the height projection + col_scale can't blow up.
+    var dz = ay + fixed_mul(sp, by - ay);
+    if (dz < 256) { dz = 256; }
+    return (sp, dz);
+}
+
+# V4 per-column ray-slope table: tan of each column's view ray
+# = (col - HALF_WIDTH) / HALF_WIDTH, in 16.16. Lazily built (project idiom) so
+# no render path depends on tables_init having run first. Called from BOTH
+# render_frame and render_masked_one — the masked pass is driven from
+# sprite.cyr's depth-sorted walk, not from render_frame, so it cannot assume
+# the table is already up: after TX-MASKED a miss would be load64(0 + col*8),
+# a null deref rather than a cosmetic glitch.
+fn render_init_r_table(): i64 {
+    if (r_table == 0) {
+        r_table = alloc(SCREEN_WIDTH * 8);
+        for (var rc = 0; rc < SCREEN_WIDTH; rc += 1) {
+            store64(r_table + rc * 8, fixed_div((rc - HALF_WIDTH) << 16, HALF_WIDTH << 16));
+        }
+    }
+    return 0;
+}
+
 # ================================================================
 # Render a wall segment (seg)
 # ================================================================
@@ -918,8 +978,12 @@ fn render_seg(seg_idx): i64 {
     var sx1 = HALF_WIDTH + fixed_to_int(fixed_div(fixed_mul(tx1, PROJ_DIST), ty1));
     var sx2 = HALF_WIDTH + fixed_to_int(fixed_div(fixed_mul(tx2, PROJ_DIST), ty2));
 
-    # Ensure left-to-right order
-    var seg_u_swapped = 0;
+    # Ensure left-to-right order. Only the SCREEN ordering is swapped here; the
+    # texture-U endpoints are not. They used to be (via a seg_u_swapped flag),
+    # because U was lerped in screen-x and would otherwise mirror the seg — the
+    # 0.30.1 "walls warp when turning" fix. Since TX-2/TX-MASKED derive U from
+    # the ray parameter sp along the RAW v1->v2 segment, sp already carries the
+    # screen orientation and the flag has no readers left.
     if (sx1 > sx2) {
         # Swap endpoints
         var tmp = sx1;
@@ -928,10 +992,6 @@ fn render_seg(seg_idx): i64 {
         tmp = ty1;
         ty1 = ty2;
         ty2 = tmp;
-        # The seg's texture-U endpoints are keyed to v1→v2; flag that screen
-        # order no longer matches vertex order so the U endpoints get swapped
-        # to match (else the texture mirrors — "walls warp when turning").
-        seg_u_swapped = 1;
     }
 
     # Clip to screen bounds. Keep the UNCLAMPED endpoints: scale and u/z are
@@ -1031,9 +1091,6 @@ fn render_seg(seg_idx): i64 {
     # renders mirrored, and flips the instant a turn crosses that threshold.
     var u_v1 = sd_xoff + seg_offset;
     var u_v2 = sd_xoff + seg_offset + seg_len;
-    var u_left = u_v1;
-    var u_right = u_v2;
-    if (seg_u_swapped == 1) { u_left = u_v2; u_right = u_v1; }
 
     # Perspective-correct depth: for a flat wall, scale (= PROJ_DIST / z) is
     # linear in screen-x while z is NOT. Interpolate scale across the span and
@@ -1042,19 +1099,16 @@ fn render_seg(seg_idx): i64 {
     var wscale1 = fixed_div(PROJ_DIST, ty1);
     var wscale2 = fixed_div(PROJ_DIST, ty2);
 
-    # Perspective-correct texture-U (F22): interpolate u*scale (proportional to
-    # u/z) and the scale (proportional to 1/z) separately, then U = (u/z)/(1/z)
-    # = lerp(uow) / col_scale. u_left/u_right (screen-ordered) are the texel U
-    # at the ORIGINAL projected endpoints.
-    var uow1 = u_left * wscale1;
-    var uow2 = u_right * wscale2;
-
-    # Re-anchor both interpolants onto the CLAMPED screen span (RC-W9, found
+    # Re-anchor the scale interpolant onto the CLAMPED screen span (RC-W9, found
     # during the Bite B drawseg work): the column loop lerps over [sx1, sx2],
     # but the endpoint values belonged to the UNCLAMPED projection — clamping
-    # compressed the whole scale/U line into the visible span, shifting depth,
-    # lighting, and texture-U whenever a seg crossed a screen edge (texture
-    # swim at the edges while turning) and corrupting drawseg depths.
+    # compressed the whole scale line into the visible span, shifting depth and
+    # lighting whenever a seg crossed a screen edge and corrupting drawseg
+    # depths. wscale1/2 still feed render_store_drawseg, the masked entry's
+    # scale1/scale2 (sprite.cyr's depth sort) and render_clip_band_build, so the
+    # re-anchor stays. The U half is gone with uow1/uow2 — TX-2/TX-MASKED derive
+    # U from the world-anchored ray parameter, which is clamp-independent by
+    # construction and needs no re-anchoring.
     if (sx1 != sx1_orig || sx2 != sx2_orig) {
         var ospan = sx2_orig - sx1_orig;
         if (ospan > 0) {
@@ -1062,12 +1116,8 @@ fn render_seg(seg_idx): i64 {
             var rt2 = fixed_div((sx2 - sx1_orig) << 16, ospan << 16);
             var nw1 = fixed_lerp(wscale1, wscale2, rt1);
             var nw2 = fixed_lerp(wscale1, wscale2, rt2);
-            var nu1 = fixed_lerp(uow1, uow2, rt1);
-            var nu2 = fixed_lerp(uow1, uow2, rt2);
             wscale1 = nw1;
             wscale2 = nw2;
-            uow1 = nu1;
-            uow2 = nu2;
         }
     }
 
@@ -1106,15 +1156,17 @@ fn render_seg(seg_idx): i64 {
     }
 
     # Store masked midtexture for deferred rendering (two-sided with mid texture).
-    # Pass the CLAMPED-endpoint scales + u/z values (swap-corrected and
-    # re-anchored above) so the deferred pass lerps the exact same lines the
-    # wall pass does. Closed portals have no opening (the draw pass would skip
-    # the entry) — don't burn a MASKED_MAX slot on them.
+    # scale1/scale2 are still the CLAMPED-endpoint scales (sprite.cyr depth-sorts
+    # on them and render_clip_band_build lerps them), but U and depth now ride the
+    # UNCLIPPED endpoints rtx*/rty* + the raw v1->v2 texel U, so the deferred pass
+    # re-runs the same world-anchored ray-cast the wall pass did instead of
+    # re-lerping a near-clip-corrupted line (TX-MASKED). Closed portals have no
+    # opening (the draw pass would skip the entry) — don't burn a MASKED_MAX slot.
     if (is_twosided != 0) {
         if (mid_tex >= 0) {
             if (is_closed == 0) {
                 render_store_masked(sx1, sx2, mid_tex, lightnum, wscale1, wscale2,
-                uow1, uow2, sd_xoff, sd_yoff,
+                rtx1, rty1, rtx2, rty2, u_v1, u_v2, sd_yoff,
                 floor_h, ceil_h, back_floor_h, back_ceil_h, dont_peg_bottom);
             }
         }
@@ -1170,24 +1222,11 @@ fn render_seg(seg_idx): i64 {
         var cb = load64(clip_bottom + col * 8);
         if (ct > cb) { continue; }
 
-        # V4 (TX-2): per-column depth + texture-U from the intersection of this
-        # column's view ray with the ORIGINAL (unclipped) v1->v2 segment, in pure
-        # 16.16. World-anchored, so U/scale stay LOCKED to the wall as the view
-        # turns — replaces the screen-x frac-lerp of wscale/uow, which slid up to
-        # ~48 texels on segs extending behind the viewer (the near-clip distorted
-        # the lerp endpoints). rr = r_table[col] = tan(col ray).
-        #   sp = param along v1->v2 = (rr*ty1 - tx1) / ((tx2-tx1) - rr*(ty2-ty1))
+        # V4 (TX-2): per-column depth + texture-U from the ray-cast against the
+        # ORIGINAL (unclipped) v1->v2 segment. See render_ray_param — the masked
+        # pass runs the identical call.
         var rr = load64(r_table + col * 8);
-        var v4den = (rtx2 - rtx1) - fixed_mul(rr, rty2 - rty1);
-        var v4num = fixed_mul(rr, rty1) - rtx1;
-        var sp = 0;
-        if (v4den != 0) { sp = fixed_div(v4num, v4den); }
-        if (sp < 0) { sp = 0; }
-        if (sp > FIXED_ONE) { sp = FIXED_ONE; }
-        # depth = ray-cast intersection depth (v4ty); floored to near-clip so the
-        # height projection + col_scale can't blow up.
-        var depth = rty1 + fixed_mul(sp, rty2 - rty1);
-        if (depth < 256) { depth = 256; }
+        var sp, depth = render_ray_param(rr, rtx1, rty1, rtx2, rty2);
         var col_scale = fixed_div(PROJ_DIST, depth);
         if (col_scale <= 0) { col_scale = 1; }
 
@@ -1269,10 +1308,9 @@ fn render_seg(seg_idx): i64 {
         }
 
         # V4 (TX-2): U directly from the world-anchored seg parameter sp, in RAW
-        # v1->v2 order — sp already carries screen orientation, so no
-        # seg_u_swapped handling and no uow/frac interpolation is needed for the
-        # wall U. (uow1/uow2 + seg_u_swapped stay live for the deferred
-        # masked-midtexture pass.)
+        # v1->v2 order — sp already carries screen orientation, so no swap
+        # handling and no uow/frac interpolation is needed. The masked pass now
+        # computes U the same way from the same stored endpoints (TX-MASKED).
         var v4u = (u_v1 << 16) + fixed_mul(sp, (u_v2 - u_v1) << 16);
         var tex_u = fixed_to_int(v4u);
 
@@ -1629,6 +1667,9 @@ fn render_masked_one(mi): i64 {
     if (mi < 0) { return 0; }
     if (mi >= masked_count) { return 0; }
     if (tex_col_buf == 0) { tex_col_buf = alloc(TEX_COL_MAX); }
+    # This pass runs off sprite.cyr's depth-sorted walk, not render_frame, so it
+    # cannot assume render_frame already built the ray table (TX-MASKED).
+    render_init_r_table();
 
     var base = masked_segs + mi * MASKED_ENTRY_SIZE;
     var sx1 = load64(base);
@@ -1637,13 +1678,18 @@ fn render_masked_one(mi): i64 {
     var mlight = load64(base + 24);
     var mscale1 = load64(base + 32);
     var mscale2 = load64(base + 40);
-    var muow1 = load64(base + 48);
-    var muow2 = load64(base + 56);
-    var myoff = load64(base + 72);
-    var mfloor = load64(base + 80);
-    var mceil = load64(base + 88);
-    var mbfloor = load64(base + 96);
-    var mbceil = load64(base + 104);
+    var mrtx1 = load64(base + 48);
+    var mrty1 = load64(base + 56);
+    var mrtx2 = load64(base + 64);
+    var mrty2 = load64(base + 72);
+    var mu1 = load64(base + 80);
+    var mu2 = load64(base + 88);
+    var myoff = load64(base + 96);
+    var mfloor = load64(base + 104);
+    var mceil = load64(base + 112);
+    var mbfloor = load64(base + 120);
+    var mbceil = load64(base + 128);
+    var m_dpb = load64(base + 136);
 
     # Opening: highest floor to lowest ceiling
     var open_floor = mfloor;
@@ -1661,23 +1707,25 @@ fn render_masked_one(mi): i64 {
     # the re-anchored values.
     render_clip_band_build(sx1, sx2, mscale1, mscale2);
 
+    # Frame-global eye (viewz), matching the wall pass projections. Per-seg, not
+    # per-column — hoisted out of the loop.
+    var eye_h = view_z;
+
     for (var col = sx1; col <= sx2; col += 1) {
         var band_t = load64(rc_band_top + col * 8);
         var band_b = load64(rc_band_bot + col * 8);
         if (band_t > band_b) { continue; }
 
-        # frac linear in screen-x (texture-U). Depth is perspective-correct.
-        var frac = 0;
-        if (sx2 != sx1) {
-            frac = fixed_div((col - sx1) << 16, (sx2 - sx1) << 16);
-        }
-        var col_scale = fixed_lerp(mscale1, mscale2, frac);
+        # V4 (TX-MASKED): depth + U from the world-anchored ray-cast against the
+        # UNCLIPPED v1->v2 endpoints — the identical render_ray_param call the
+        # wall pass makes. Replaces the screen-x frac-lerp of the clamped-endpoint
+        # scale/uow line, which is the same defect TX-1/TX-2 fixed for walls in
+        # v0.34.2 and which left grates and two-sided midtextures swimming against
+        # the geometry around them as the view turned.
+        var rr = load64(r_table + col * 8);
+        var sp, depth = render_ray_param(rr, mrtx1, mrty1, mrtx2, mrty2);
+        var col_scale = fixed_div(PROJ_DIST, depth);
         if (col_scale <= 0) { col_scale = 1; }
-        var depth = fixed_div(PROJ_DIST, col_scale);
-        if (depth <= 0) { depth = 256; }
-
-        # Frame-global eye (viewz), matching the wall pass projections.
-        var eye_h = view_z;
 
         var open_top = HALF_HEIGHT - fixed_to_int(
         fixed_div(fixed_mul((open_ceil << 16) - eye_h, PROJ_DIST), depth));
@@ -1690,8 +1738,10 @@ fn render_masked_one(mi): i64 {
 
         var col_lv = render_wall_light(mlight, col_scale);
 
-        # Texture U coordinate (perspective-correct, F22)
-        var tex_u = fixed_lerp(muow1, muow2, frac) / col_scale;
+        # Texture U from the world-anchored seg parameter, in RAW v1->v2 order —
+        # byte-for-byte the same form as the wall pass. mu1/mu2 are INTEGER
+        # texels (sd_xoff + seg_offset [+ seg_len]), not 16.16.
+        var tex_u = fixed_to_int((mu1 << 16) + fixed_mul(sp, (mu2 - mu1) << 16));
 
         # Get texture column
         var th = texture_get_column(mtex, tex_u, tex_col_buf);
@@ -1699,9 +1749,9 @@ fn render_masked_one(mi): i64 {
 
         var ty_step = fixed_div(FIXED_ONE, col_scale);   # native scale (F06); masked mids don't tile
         # Masked-mid pegging (F06): default top-anchors at myoff; DONTPEGBOTTOM
-        # (stored at base+112, previously never read here) anchors the texture
-        # BOTTOM to the opening's floor. ystart is the native V at the top row.
-        var m_dpb = load64(base + 112);
+        # (stored at base+136) anchors the texture BOTTOM to the opening's
+        # floor. ystart is the native V at the top row. (m_dpb is loaded once
+        # with the rest of the entry, above the column loop.)
         var ty_pos = myoff << 16;
         if (m_dpb != 0) {
             ty_pos = (tex_h - (open_ceil - open_floor) + myoff) << 16;
@@ -1738,15 +1788,7 @@ fn render_masked_one(mi): i64 {
 }
 
 fn render_frame(): i64 {
-    # V4 (TX-1/TX-2): lazy-build the per-column ray-slope table (tan of each
-    # column's view ray = (col - HALF_WIDTH) / HALF_WIDTH, 16.16). Self-init so no
-    # render path depends on tables_init having run first (project lazy-init idiom).
-    if (r_table == 0) {
-        r_table = alloc(SCREEN_WIDTH * 8);
-        for (var rc = 0; rc < SCREEN_WIDTH; rc += 1) {
-            store64(r_table + rc * 8, fixed_div((rc - HALF_WIDTH) << 16, HALF_WIDTH << 16));
-        }
-    }
+    render_init_r_table();
     view_cos = fixed_cos(view_angle);
     view_sin = fixed_sin(view_angle);
     render_update_view_z();

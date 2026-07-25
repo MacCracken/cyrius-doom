@@ -7,6 +7,154 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.34.5] - 2026-07-25 — masked-midtexture world-lock + toolchain/dep refresh
+
+The masked half of the texture world-lock work (the roadmap's queued v0.34.5), plus the toolchain
+and vendored-dep refresh, plus three defects the new toolchain's diagnostics surfaced. **TX-3
+(vertical V anchor) is NOT in this cut** — see *Deferred* below.
+
+### Fixed
+
+- **TX-MASKED — grates and two-sided midtextures swam against the world exactly as walls did
+  before v0.34.2.** `render_masked_one` still derived per-column depth and texture-U by lerping the
+  *clamped-endpoint* scale/`uow` line in screen-x — the precise defect TX-1/TX-2 replaced for the
+  wall pass, left in place because the fix needed a record-layout change. The masked entry now
+  carries the **UNCLIPPED** view-space endpoints (`rtx1/rty1/rtx2/rty2`) plus the raw `u_v1/u_v2`
+  texel offsets, and the deferred pass re-runs the identical world-anchored ray↔seg intersection the
+  wall pass runs.
+  **Measured on E1M1's barred alcove** (sector 72, linedefs 298–303, BRNBIGL/C/R — front sector ==
+  back sector, so the masked midtexture is the *only* thing drawn on those columns), via a
+  per-column `tex_u` dump from the shipped engine, old build vs new at the same staged viewpoints:
+
+  | staged view | worst \|ΔU\| | mean \|ΔU\| | note |
+  |---|---|---|---|
+  | frontal, eye at (3008,−4256) BAM 512 | **1 texel** | 0.16–0.40 | control — a perpendicular wall has linear U, so the old lerp was already right |
+  | seg straddling the eye plane, (2900,−4256) BAM 256 | **53 texels** | 40.1 | the near-clip case; entries fully in front of the eye still agree to 1 texel |
+
+  53 texels is the same magnitude TX-1/TX-2 measured for walls (48.24). The direction confirms the
+  fix rather than merely a change: at the straddling view the old code crammed U 23..128 (105 of 128
+  texels) into columns where only about half the seg is in front of the eye, while the new code
+  draws a contiguous 76..128 (52 texels) — about half, as the geometry requires.
+- **`render_ray_param` is now shared by both passes** rather than hand-copied. The wall and masked
+  passes must agree bit-for-bit or a grate and the wall behind it disagree about where the world is,
+  and eight lines duplicated across two hot loops is exactly what drifts apart over a release.
+  Bench says the call costs nothing measurable (see *Performance*).
+- **`r_table` is now lazily built via `render_init_r_table()`, called from both `render_frame` and
+  `render_masked_one`.** The masked pass runs off `sprite.cyr`'s depth-sorted walk, not
+  `render_frame`, so it cannot assume the table is up; before TX-MASKED that was merely a convention
+  noted in a comment, but a violation would now be `load64(0 + col*8)` — a null deref, not a
+  cosmetic glitch.
+- **`src/framebuf.cyr` shadowed the stdlib's `SYS_LSEEK` with the Linux number on the agnos
+  target.** `enum FbIoctl` hardcoded `SYS_LSEEK = 8`; the stdlib carries the syscall in every peer
+  and agnos's is **58**, where **#8 is `dup`**. doom's copy was textually last, so it won — cycc
+  6.4.78's new duplicate-symbol diagnostic surfaced it. **Not a live bug**: both fb0 paths return
+  early under `#ifdef CYRIUS_TARGET_AGNOS` (`framebuf_init` at the `#endif`, `framebuf_flip`
+  likewise), verified by reading the control flow rather than assumed. But it is one edit away from
+  issuing `dup()` on agnos — the same hazard `sound.cyr` already documents for agnos's
+  `#16 = kill, not ioctl`. Fixed by **deleting** doom's copy so the call site inherits the
+  per-target-correct number. A sweep of every other doom-local `SYS_*` constant (`SYS_IOCTL`,
+  `SYS_FCNTL`, `SYS_MEMFD_CREATE`, `SYS_FTRUNCATE`, `SYS_CLOCK_GETTIME`, `SYS_NANOSLEEP`) confirmed
+  `SYS_LSEEK` was the only genuine conflict.
+- **`tests/regression_asr.tcyr` had been RED for two weeks and nothing ran it.** It asserted
+  `asr(-1000000, 16) == -15` — round-toward-zero — which v0.33.6 deliberately replaced when bsp
+  1.2.1 made `asr` **floor** negatives (RC-F2), matching C's signed `>>` and DOOM's fixed-point
+  math. The file's other negative cases all divide exactly, so that one assertion was the only thing
+  pinning the semantics, and it pinned the *old* ones. Corrected to `-16` and extended with the
+  inexact cases that actually discriminate (`-3>>1 == -2`, `-1>>1 == -1`, `-7>>2 == -2`). Found by
+  `cyrius audit`, which walks every `tests/*.tcyr`.
+- **CI only ever ran `tests/doom.tcyr`** — which is why the above hid. The test step now globs
+  `tests/*.tcyr` and fails on any suite, so a new suite is gated the moment it lands. Also dropped
+  two stale lock-count comments (`37 entries under 6.1.29`) that rot at every pin bump; the live
+  count belongs in `state.md`.
+- **`benches/doom.bcyr` built with 11 undefined `audio_*` symbols.** The bench benches `things_tick`,
+  which reaches `src/audio.cyr` via `audio_play_at`, but never linked vani's ALSA primitives. Dead
+  today only because the bench never runs `audio_init` (so `audio_dev` stays 0 and the device path is
+  never entered) — and in cycc an undefined fn is a **segfault if called**, not a link error. Fixed
+  with hermetic stubs (the `tests/doom.tcyr` pattern) rather than linking `vendor/vani-core.cyr`:
+  linking the real shim measured **~+2.4%** on `render_frame+sprites_spawned` with no change to the
+  code under test, which would put a step in `bench-history.csv` that reflects the instrument rather
+  than the engine.
+
+### Changed
+
+- **`MASKED_ENTRY` grew 120 → 144 B** (15 → 18 fields). Offsets 0–40 are **frozen** so
+  `sprite.cyr`'s depth sort (which reads `scale1`/`scale2` at base+32/+40) needed no edit.
+  Three fields were **retired**, not moved: `uow1`/`uow2` (the screen-x interpolants the ray-cast
+  replaces) and `sd_xoff`, which `render_store_masked` wrote at base+64 and which **nothing ever
+  read** — hence 144 rather than the 152 the roadmap estimated.
+
+  | | 0 | 8 | 16 | 24 | 32 | 40 | 48 | 56 | 64 | 72 | 80 | 88 | 96 | 104 | 112 | 120 | 128 | 136 |
+  |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+  | **old** | sx1 | sx2 | mid_tex | light | scale1 | scale2 | uow1 | uow2 | sd_xoff | sd_yoff | floor_h | ceil_h | bfloor | bceil | dpb | — | — | — |
+  | **new** | sx1 | sx2 | mid_tex | light | scale1 | scale2 | rtx1 | rty1 | rtx2 | rty2 | u_v1 | u_v2 | sd_yoff | floor_h | ceil_h | bfloor | bceil | dpb |
+
+- **Retired the dead `uow`/`seg_u_swapped` machinery in `render_seg`** now that nothing consumes it:
+  the `u_left`/`u_right` swap, both `uow` multiplies, the `uow` half of the RC-W9 re-anchor, and the
+  `seg_u_swapped` flag itself (U now rides the ray parameter along the raw v1→v2 segment, which
+  already carries screen orientation). The `wscale` half of the re-anchor **stays** — `wscale1/2`
+  still feed `render_store_drawseg`, the masked `scale1/scale2`, and `render_clip_band_build`.
+- **Toolchain pin `6.4.58` → `6.4.78`** (20 releases). The local wrapper was already 6.4.78, so this
+  is a **true-pin** build — local cycc == pin, no drift and no version-dir swap. Lock regenerated from
+  scratch (`rm -rf lib && cyrius deps`): **36 entries, 36 verified / 0 failed**, and the resolved file
+  *set* is unchanged — only 9 of the 36 files changed content (all six `syscalls_*`, plus `net`, `fs`,
+  `fmt`). `io.cyr` and `alloc.cyr` are untouched, so doom's syscall-wrapper layer and heap behavior
+  cannot have shifted. **All 14 `--ppm` captures (9 maps + 5 menus) are byte-identical to the 6.4.58
+  baseline**, 181/181 WAD-free + 295/295 full tests, fuzz ×5 clean. Binary 455,800 → **455,816 B**
+  (+16); agnos 442,200 → **442,344 B** (+144).
+- **vani vendor `1.1.1` → `1.1.2`** (`vendor/vani-core.cyr`) — version-header-only; upstream 1.1.2 was
+  itself a toolchain-pin refresh with zero vani source lines changed (diff against vani's `dist/` is
+  exactly the `# Version:` line).
+- **setu vendor `0.5.1` → `0.7.0`** (`vendor/setu.cyr`) — agnos-only (`PM_SETU`). **0.6.0**:
+  `setu_buf_create` now asks for `shm_create_gpu` **#86** (GPU-visible memory) and falls back to
+  `shm_create` **#71**, which is what makes a client surface eligible for a hardware blit at all — a
+  `#71` slot is structurally un-blittable on agnos (bus-master is off; the engines see only the
+  framebuffer aperture) and the kernel rejects it at both GPU entry points. No API or call-site change
+  for doom; the `#71` fallback is the QEMU path. **0.7.0**: adds the opt-in
+  `SETU_SURF_PREMULTIPLIED` surface flag + `setu_client_request_premultiplied`. **doom deliberately
+  does NOT call it** — doom presents opaque `0x00RRGGBB` pixels, and under the premultiplied path
+  (`gpu_shader_op` #92) an alpha byte of 0 renders the window fully transparent.
+- **`[deps.bsp]` stays at `1.2.1`** — still the latest upstream tag; re-verified against the GitHub
+  tag list, no change.
+
+### Performance
+
+- **Variance-neutral.** `render_frame+sprites_spawned` best-of-mins **1.288 ms** post-change vs
+  **1.298 ms** pre-change (4 and 3 runs, same binary shape, quiet box); `render_frame` 1.087 ms,
+  `texture_get_column` 448 ns, `fixed_mul` 6 ns. The shared `render_ray_param` call adds one call per
+  wall column but the retired `uow` machinery removes 2 multiplies + 2 lerps per seg and one
+  `fixed_div` per masked column, so no perf claim is made in either direction. Binary **455,816 B**
+  (agnos **442,344 B**); NOP-sled 535 fns / 100,688 B.
+
+### Verification
+
+- **9-map + 5-menu `--ppm` A/B vs the 6.4.58 baseline**: HUD **100% byte-identical** on every capture,
+  all 5 menus byte-identical, 7 of 9 maps byte-identical at spawn, E1M6 2 px, E1M9 213 px
+  (0.40% of viewport) with **8 fewer black pixels** — spawn views mostly don't face a grate, and where
+  they do the change removes void rather than adding it. Distinct-colour counts unchanged everywhere
+  (no palette corruption).
+- The **+822 black pixels** in the staged near-clip view are **see-through slots, not voids**:
+  BRNBIGC is 128×128 with wide diagonal *transparent* stripes (verified by compositing the texture
+  straight out of the WAD's TEXTURE1/PNAMES/patch lumps), so a corrected U range legitimately exposes
+  more gap.
+- **Tests 212 WAD-free / 326 full** (+31): an 18-sentinel **layout lock** round-tripped through the
+  real `render_store_masked` (a missed offset is silent memory corruption, not a compile error) plus
+  `render_ray_param` contract asserts (centre ray → seg midpoint, `[0,1]` clamping, `den == 0` no
+  div-by-zero, depth floored to near-clip behind the eye). The layout lock is **mutation-proven** —
+  swapping two adjacent writer offsets fails exactly the two matching asserts.
+- All three `tests/*.tcyr` green (212 / 18 / 12), fuzz ×5 clean (1000 / 50000 / 2000 / 1000 / 1000),
+  `cyrius deps --verify` **36/0**, both targets build clean.
+
+### Deferred
+
+- **TX-3 (vertical V anchor)** — anchoring wall texture-V at the view centre (vanilla
+  `dc_texturemid`) instead of the floor-truncated wall-top row. Designed but not implemented: it
+  touches all four wall sections plus the F06/F-R3/F-R4 pegging, carries a known intended
+  one-`ty_step` lower-wall shift, and needs a vertical-slide metric the U-only harness doesn't have.
+  Deliberately not bundled with a record-layout change. → roadmap v0.34.6.
+- **Clip-band subject scale** still uses the lerped `scale1/scale2` while the masked pass's own
+  per-column scale is now the ray-cast value, so a grate can still be marginally mis-occluded at its
+  near end. Cheap follow-up; recorded against OP-9.
+
 ## [0.34.4] - 2026-07-18 — performance batch B (texture + status caches)
 
 Two more per-frame caches, both **byte-identical output** (verified by a 9-map + 5-menu `--ppm` A/B

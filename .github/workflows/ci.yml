@@ -71,8 +71,11 @@ jobs:
         # Unconditional supply-chain gate: verifies the resolved ./lib/ file
         # hashes against cyrius.lock. cyrius.lock is committed as the presence
         # anchor (checked above) + human-auditable record; `cyrius deps` rewrites
-        # it from the pinned stdlib each run, so a clean checkout under 6.1.29
-        # yields a 37-entry lock that verifies 37/0.
+        # it from the pinned stdlib each run, so a clean checkout verifies N/0
+        # for whatever N the pinned stdlib snapshot + git-dep set resolves to.
+        # (The live count is tracked in docs/development/state.md, not here — a
+        # number inlined in CI YAML rots at the next pin bump; it said 37 under
+        # 6.1.29 and the resolve has been 36 since 6.4.x.)
         run: cyrius deps --verify
 
       - name: Build
@@ -143,17 +146,30 @@ jobs:
         # Unconditional supply-chain gate: verifies the resolved ./lib/ file
         # hashes against cyrius.lock. cyrius.lock is committed as the presence
         # anchor (checked above) + human-auditable record; `cyrius deps` rewrites
-        # it from the pinned stdlib each run, so a clean checkout under 6.1.29
-        # yields a 37-entry lock that verifies 37/0.
+        # it from the pinned stdlib each run, so a clean checkout verifies N/0
+        # for whatever N the pinned stdlib snapshot + git-dep set resolves to.
+        # (The live count is tracked in docs/development/state.md, not here — a
+        # number inlined in CI YAML rots at the next pin bump; it said 37 under
+        # 6.1.29 and the resolve has been 36 since 6.4.x.)
         run: cyrius deps --verify
 
       - name: Run tests (WAD-free assertions)
         run: |
-          # WAD is not checked into the repo, so this runs the 37-assertion
-          # subset that doesn't need DOOM1.WAD (asr, fixed-point, trig, angles).
-          # The full 73-assertion suite requires passing a WAD path.
-          cyrius test tests/doom.tcyr 2>&1 | tee /tmp/test_output
-          tail -1 /tmp/test_output | grep "0 failed"
+          # The WAD is not checked into the repo, so this runs the WAD-free
+          # subset of each suite; the WAD-gated assertions need a WAD path
+          # passed to the built binary and are exercised locally, not in CI.
+          #
+          # Every tests/*.tcyr is run, not just doom.tcyr. Naming one file meant
+          # tests/regression_asr.tcyr sat RED for two weeks after v0.33.6 changed
+          # asr() to floor negatives (RC-F2) without anyone noticing — CI never
+          # executed it. Globbing means a new suite is gated the moment it lands.
+          fail=0
+          for t in tests/*.tcyr; do
+            echo "=== $t ==="
+            cyrius test "$t" 2>&1 | tee /tmp/test_output
+            tail -1 /tmp/test_output | grep -q "0 failed" || { echo "FAILED: $t"; fail=1; }
+          done
+          exit $fail
 
   docs:
     name: Documentation
