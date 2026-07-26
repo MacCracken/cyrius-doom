@@ -164,6 +164,68 @@ fn main() {
     masked_count = 0;
 
     # ============================================================
+    test_group("texture-V view-centre anchor (TX-3, v0.34.5)");
+    # ============================================================
+    # TX-3 moved V from "pinned to the wall-top SCREEN row" to "pinned to a WORLD
+    # height, evaluated at whatever row is drawn". The safety property is that the
+    # anchors are the shipped F06/F-R3/F-R4 pegging re-expressed at the view
+    # centre — if that equivalence ever breaks, pegged walls silently slide. These
+    # assert it directly: reconstruct the OLD ystart from the new vmid at the
+    # exactly-projected wall-top row and require the shipped formula back.
+    #
+    # Anchor choice (the pegging itself):
+    assert_eq(render_anchor_upper(200, 120, 64, 1), 200, "upper DONTPEGTOP anchors at ceil_h");
+    assert_eq(render_anchor_upper(200, 120, 64, 0), 184, "upper default anchors at back_ceil + tex_h");
+    assert_eq(render_anchor_lower(40, 200, 0), 40, "lower default anchors at back_floor_h");
+    assert_eq(render_anchor_lower(40, 200, 1), 200, "lower DONTPEGBOTTOM anchors at ceil_h");
+    assert_eq(render_anchor_mid(200, 40, 128, 0), 200, "mid default anchors at ceil_h");
+    assert_eq(render_anchor_mid(200, 40, 128, 1), 168, "mid DONTPEGBOTTOM anchors at floor + tex_h");
+    # vmid is V at the horizon row, in 16.16:
+    assert_eq(render_vmid(200, 0, 0), 200 << 16, "vmid = anchor<<16 at viewz 0, yoff 0");
+    assert_eq(render_vmid(200, 8, 0), 208 << 16, "vmid carries the sidedef yoff");
+    assert_eq(render_vmid(200, 0, 100 << 16), 100 << 16, "vmid subtracts viewz");
+    #
+    # PEGGING EQUIVALENCE. At the exactly-projected wall-top row the new
+    # expression must reproduce the shipped ystart. Rows are integers, so pick a
+    # scale where the projection is exact: col_scale = 1.0 => ty_step = 1.0, and
+    # one screen row is one world unit.
+    var t_step = FIXED_ONE;
+    var t_view = 60 << 16;
+    var t_ceil = 200; var t_bceil = 120; var t_floor = 40; var t_yoff = 8;
+    var t_th = 64;
+    # upper, DONTPEGTOP: shipped ystart = yoff, at the row where z == ceil_h.
+    var up_row = HALF_HEIGHT - (t_ceil - 60);
+    var up_vmid = render_vmid(render_anchor_upper(t_ceil, t_bceil, t_th, 1), t_yoff, t_view);
+    assert_eq(up_vmid + (up_row - HALF_HEIGHT) * t_step, t_yoff << 16,
+    "upper DONTPEGTOP reproduces ystart = yoff");
+    # upper, default: shipped ystart = (tex_h - (ceil_h - back_ceil_h) + yoff).
+    var up_vmid2 = render_vmid(render_anchor_upper(t_ceil, t_bceil, t_th, 0), t_yoff, t_view);
+    assert_eq(up_vmid2 + (up_row - HALF_HEIGHT) * t_step,
+    (t_th - (t_ceil - t_bceil) + t_yoff) << 16,
+    "upper default reproduces ystart = tex_h - (ceil - bceil) + yoff");
+    # one-sided mid, default: shipped ystart = yoff at the ceil row.
+    var md_vmid = render_vmid(render_anchor_mid(t_ceil, t_floor, t_th, 0), t_yoff, t_view);
+    assert_eq(md_vmid + (up_row - HALF_HEIGHT) * t_step, t_yoff << 16,
+    "mid default reproduces ystart = yoff");
+    # one-sided mid, DONTPEGBOTTOM: shipped = (tex_h - (ceil_h - floor_h) + yoff).
+    var md_vmid2 = render_vmid(render_anchor_mid(t_ceil, t_floor, t_th, 1), t_yoff, t_view);
+    assert_eq(md_vmid2 + (up_row - HALF_HEIGHT) * t_step,
+    (t_th - (t_ceil - t_floor) + t_yoff) << 16,
+    "mid DONTPEGBOTTOM reproduces ystart = tex_h - (ceil - floor) + yoff");
+    # lower, DONTPEGBOTTOM: shipped = (ceil_h - back_floor + yoff) at the back-floor row.
+    var lo_row = HALF_HEIGHT - (t_bceil - 60);
+    var lo_vmid = render_vmid(render_anchor_lower(t_bceil, t_ceil, 1), t_yoff, t_view);
+    assert_eq(lo_vmid + (lo_row - HALF_HEIGHT) * t_step,
+    (t_ceil - t_bceil + t_yoff) << 16,
+    "lower DONTPEGBOTTOM reproduces ystart = ceil - back_floor + yoff");
+    # A clamped start row must CONTINUE the texture, not restart it — the
+    # pre-existing upper/one-sided-mid bug TX-3 subsumes. Ten rows lower must
+    # read exactly ten world units further down the texture.
+    assert_eq((md_vmid + (up_row + 10 - HALF_HEIGHT) * t_step)
+    - (md_vmid + (up_row - HALF_HEIGHT) * t_step), 10 * t_step,
+    "a clipped start row advances V, never restarts it");
+
+    # ============================================================
     test_group("world-anchored ray-cast (TX-MASKED / TX-2)");
     # ============================================================
     # render_ray_param is now SHARED by the wall pass and the masked pass — the

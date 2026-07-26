@@ -80,6 +80,31 @@ fn menu_draw_lump(name, px, py): i64 {
     return 0;
 }
 
+# Patch dimensions (width, height) by lump name, from the 4-byte patch header.
+# Vanilla's intermission stacks labels by the level-name patch's HEIGHT and
+# centres each on its own WIDTH, so those draw sites need the dims and not just
+# the blit. Returns (0, 0) for a missing/short/oversized lump — callers must
+# treat 0 as "don't draw", exactly as menu_draw_lump does.
+fn menu_lump_wh(name): i64 {
+    if (menu_patch_buf == 0) { menu_patch_buf = alloc(MENU_PATCH_BUF_SIZE); }
+    var idx = wad_find_lump(name);
+    if (idx < 0) { return (0, 0); }
+    var sz = wad_lump_size(idx);
+    if (sz < 8) { return (0, 0); }
+    if (sz > MENU_PATCH_BUF_SIZE) { return (0, 0); }
+    wad_read_lump_into(idx, menu_patch_buf, sz);
+    return (read_le16(menu_patch_buf), read_le16(menu_patch_buf + 2));
+}
+
+# Draw a patch horizontally centred on the screen — vanilla's
+# V_DrawPatch((SCREENWIDTH - width) / 2, y, ...) idiom.
+fn menu_draw_lump_centered(name, py): i64 {
+    var cw, ch = menu_lump_wh(name);
+    if (cw <= 0) { return 0; }
+    menu_draw_lump(name, (SCREEN_WIDTH - cw) / 2, py);
+    return 0;
+}
+
 # Draw skull cursor at (px, py), alternating frames
 fn menu_draw_skull(px, py): i64 {
     menu_skull_timer += 1;

@@ -7,13 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.34.5] - 2026-07-25 — masked-midtexture world-lock + toolchain/dep refresh
+## [0.34.5] - 2026-07-25 — texture world-lock completed (masked + vertical) + toolchain/dep refresh
 
-The masked half of the texture world-lock work (the roadmap's queued v0.34.5), plus the toolchain
-and vendored-dep refresh, plus three defects the new toolchain's diagnostics surfaced. **TX-3
-(vertical V anchor) is NOT in this cut** — see *Deferred* below.
+Both halves of the texture world-lock work — **TX-MASKED** (grates/two-sided midtextures) and
+**TX-3** (vertical V anchor) — plus the toolchain and vendored-dep refresh, an intermission-layout
+fix from the field, and three defects the new toolchain's diagnostics surfaced.
 
 ### Fixed
+
+- **TX-3 — wall texture-V was pinned to a floor-truncated SCREEN row, and on clipped columns it
+  restarted the texture outright.** Every section anchored V as "V equals `ystart` at row
+  `ceil_screen`", but that row comes out of `fixed_to_int(...)`, so the anchor itself snapped as the
+  view moved — a sub-row vertical shimmer on every wall while turning or walking. V is now pinned to
+  a **world** constant evaluated once per seg per section,
+  `v_mid = ((anchor_h + sd_yoff) << 16) - view_z` (vanilla `dc_texturemid`), with each column taking
+  `ystart = v_mid + (y1 - HALF_HEIGHT) * ty_step` — exact for whatever row `y1` actually lands on.
+  `ty_step = fixed_div(FIXED_ONE, col_scale)` (the F06 native step) is untouched.
+
+  Measured per column at the E1M1 spawn, old build vs new, split by whether the start row was clamped:
+
+  | section | columns | worst ΔV | reading |
+  |---|---|---|---|
+  | one-sided mid, **unclamped** | 165 | **0.999 rows** | the truncation error TX-3 targets — never reaches a full row |
+  | one-sided mid, **clamped** | 155 | 50.8 rows | **equals the clamp distance on 155/155 columns** |
+  | upper, **clamped** | 132 | 26.9 rows | **equals the clamp distance on 132/132 columns** |
+  | lower, clamped | 178 | 2.0 rows | the intended one-`ty_step` vanilla re-anchor + truncation |
+
+  That second population is a **pre-existing bug this subsumes**, not new behaviour. The lower
+  section already compensated for a moved start row
+  (`lower_ystart += (lower_y1 - (back_floor_screen + 1)) * ty_step`) and the masked pass had R-10's
+  equivalent — but **upper and one-sided-mid had neither**, so whenever a wall's top row was clipped
+  (off-screen or by the running clip band — 132/132 uppers and 155/320 mids at the E1M1 spawn alone)
+  the texture restarted at the clip row instead of continuing. Anchoring in world space makes any
+  start-row adjustment self-correcting, so both compensations are now deleted rather than duplicated.
+  **Known intended delta**: the lower section shifts by exactly one `ty_step`, because the shipped
+  anchor put V at row `back_floor_screen + 1` while vanilla anchors at `back_floor_h` itself. That
+  off-by-one row cannot be expressed as a world constant (it is depth-dependent) and preserving it
+  would defeat the fix.
+
+  **Pegging is preserved by construction, and now by test.** The three anchor pickers
+  (`render_anchor_upper` / `_lower` / `_mid`) are the shipped F06/F-R3/F-R4 pegging solved at
+  `z = eye`; 15 new asserts reconstruct the *old* `ystart` from the new `v_mid` at the
+  exactly-projected wall-top row and require the shipped formula back, for all six
+  section×pegging combinations. Mutation-proven: inverting one anchor's pegging sense fails 4 asserts.
+
+- **Intermission drew the level name and "FINISHED" on the same row, overlapping by 26 px.**
+  `WIF` was drawn at x=64 and the `WILVxx` level name at x=130, **both at y=10** — with widths 92 and
+  87 they spanned x 64..156 and 130..217, so the two graphics collided in the middle. Now vanilla
+  `WI_drawLF`: the level name is centred at `WI_TITLEY` (2) and "FINISHED" is centred **below** it,
+  offset by 5/4 of the level-name patch height (3 px of clear space). "ENTERING" is centred too. New
+  `menu_lump_wh` / `menu_draw_lump_centered` helpers read the patch header for the dims.
+  **Why the PPM gate never caught it**: the `--ppm` intermission screenshot in `main.cyr` was a
+  *second copy* of the layout that had drifted — it never drew the level name at all. The draw is now
+  split into `level_intermission_draw()` and both paths call it, so the screenshot renders the real
+  screen and the two cannot diverge again.
 
 - **TX-MASKED — grates and two-sided midtextures swam against the world exactly as walls did
   before v0.34.2.** `render_masked_one` still derived per-column depth and texture-U by lerping the
@@ -118,12 +165,14 @@ and vendored-dep refresh, plus three defects the new toolchain's diagnostics sur
 
 ### Performance
 
-- **Variance-neutral.** `render_frame+sprites_spawned` best-of-mins **1.288 ms** post-change vs
-  **1.298 ms** pre-change (4 and 3 runs, same binary shape, quiet box); `render_frame` 1.087 ms,
-  `texture_get_column` 448 ns, `fixed_mul` 6 ns. The shared `render_ray_param` call adds one call per
-  wall column but the retired `uow` machinery removes 2 multiplies + 2 lerps per seg and one
-  `fixed_div` per masked column, so no perf claim is made in either direction. Binary **455,816 B**
-  (agnos **442,344 B**); NOP-sled 535 fns / 100,688 B.
+- **Variance-neutral across both changes; no perf claim in either direction.**
+  `render_frame+sprites_spawned` best-of-mins: **1.298 ms** before TX-MASKED → **1.288 ms** after →
+  **1.284 ms** after TX-3 (3-4 runs each, quiet box). `render_frame` 1.112 ms, `texture_get_column`
+  474 ns, `fixed_mul` 6 ns. Work is added and removed on both sides: TX-MASKED's shared
+  `render_ray_param` costs one call per wall column but retires 2 multiplies + 2 lerps per seg and a
+  `fixed_div` per masked column; TX-3 adds a multiply-add per drawn section but hoists
+  `texture_height` and the pegging branches out of the column loop entirely.
+  Binary **455,824 B** (agnos **442,352 B**); NOP-sled 535 fns / 100,688 B.
 
 ### Verification
 
@@ -136,21 +185,28 @@ and vendored-dep refresh, plus three defects the new toolchain's diagnostics sur
   BRNBIGC is 128×128 with wide diagonal *transparent* stripes (verified by compositing the texture
   straight out of the WAD's TEXTURE1/PNAMES/patch lumps), so a corrected U range legitimately exposes
   more gap.
-- **Tests 212 WAD-free / 326 full** (+31): an 18-sentinel **layout lock** round-tripped through the
-  real `render_store_masked` (a missed offset is silent memory corruption, not a compile error) plus
-  `render_ray_param` contract asserts (centre ray → seg midpoint, `[0,1]` clamping, `den == 0` no
-  div-by-zero, depth floored to near-clip behind the eye). The layout lock is **mutation-proven** —
-  swapping two adjacent writer offsets fails exactly the two matching asserts.
-- All three `tests/*.tcyr` green (212 / 18 / 12), fuzz ×5 clean (1000 / 50000 / 2000 / 1000 / 1000),
+- **TX-3 A/B**: viewport-only, 4.5-16% of viewport per map, HUD and all 5 menus **byte-identical**,
+  distinct-colour counts unchanged, and **184 fewer black pixels** overall (E1M5 alone drops 192) —
+  the clipped-column fix removes void, it does not add it.
+- **Tests 227 WAD-free / 341 full** (+46 over v0.34.4). An 18-sentinel **layout lock** round-tripped
+  through the real `render_store_masked` (a missed offset is silent memory corruption, not a compile
+  error); `render_ray_param` contract asserts (centre ray → seg midpoint, `[0,1]` clamping,
+  `den == 0` no div-by-zero, depth floored to near-clip behind the eye); and the TX-3 pegging
+  equivalence for all six section×pegging combinations. **Both new groups are mutation-proven** —
+  swapping two adjacent writer offsets fails exactly the two matching layout asserts, and inverting
+  one anchor's pegging sense fails 4 pegging asserts.
+- All three `tests/*.tcyr` green (227 / 18 / 12), fuzz ×5 clean (1000 / 50000 / 2000 / 1000 / 1000),
   `cyrius deps --verify` **36/0**, both targets build clean.
+- **AGNOS QEMU `doom-directmap-smoke.sh` PASS on the final binary**, and a 4×-block pixel-diff of the
+  AGNOS screendump against the Linux `--ppm` is **100.00% exact — 0 of 64,000 pixels differ**
+  (viewport and HUD both 100%). Both render changes are target-agnostic.
 
 ### Deferred
 
-- **TX-3 (vertical V anchor)** — anchoring wall texture-V at the view centre (vanilla
-  `dc_texturemid`) instead of the floor-truncated wall-top row. Designed but not implemented: it
-  touches all four wall sections plus the F06/F-R3/F-R4 pegging, carries a known intended
-  one-`ty_step` lower-wall shift, and needs a vertical-slide metric the U-only harness doesn't have.
-  Deliberately not bundled with a record-layout change. → roadmap v0.34.6.
+- **OP-8 (per-seg incremental V stepping) is now unblocked** — the audit sequenced it after TX-3
+  because both restructure the same per-column V-step. → roadmap.
+- **Vanilla `WI_drawEL` also stacks the NEXT level's name under "ENTERING"**; we draw the label
+  alone, so there is nothing to overlap, but the second line is still missing. → roadmap.
 - **Clip-band subject scale** still uses the lerped `scale1/scale2` while the masked pass's own
   per-column scale is now the ray-cast value, so a grate can still be marginally mis-occluded at its
   near end. Cheap follow-up; recorded against OP-9.

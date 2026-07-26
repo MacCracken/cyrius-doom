@@ -429,22 +429,13 @@ fn doom_main(): i64 {
         status_render();
         framebuf_write_ppm("/tmp/doom_automap.ppm");
         sakshi_info("wrote /tmp/doom_automap.ppm", 27);
-        # Render intermission screenshot
+        # Render intermission screenshot. Calls the REAL draw (minus the
+        # input-wait loop) rather than restating the layout: the old inline copy
+        # had drifted — it never drew the level name — so the gate was blind to
+        # the title block, which is where the overlapping-title bug lived.
         level_kills = 20; level_items = 45; level_secrets = 2;
         level_time = 35 * 127;
-        framebuf_clear(0);
-        menu_init();
-        menu_draw_lump("WIMAP0", 0, 0);
-        menu_draw_lump("WIF", 64, 10);
-        menu_draw_lump("WIOSTK", 50, 50);
-        wi_draw_percent(level_kills, level_max_kills, 200, 50);
-        menu_draw_lump("WIOSTI", 50, 74);
-        wi_draw_percent(level_items, level_max_items, 200, 74);
-        menu_draw_lump("WIOSTS", 50, 98);
-        wi_draw_percent(level_secrets, level_max_secrets, 200, 98);
-        menu_draw_lump("WITIME", 50, 122);
-        wi_draw_time(level_time, 200, 122);
-        menu_draw_lump("WIENTER", 64, 156);
+        level_intermission_draw();
         framebuf_write_ppm("/tmp/doom_inter.ppm");
         sakshi_info("wrote /tmp/doom_inter.ppm", 25);
         wad_close();

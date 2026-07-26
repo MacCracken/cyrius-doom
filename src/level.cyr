@@ -18,6 +18,10 @@ fn lv_name_buf(): i64 {
 var next_level_flag = 0;
 var secret_exit_flag = 0;
 
+enum InterConst {
+    WI_TITLEY = 2;          # vanilla WI_TITLEY — top of the intermission title block
+}
+
 # Level stats (tracked during gameplay, shown at intermission)
 var level_kills = 0;
 var level_max_kills = 0;
@@ -228,23 +232,35 @@ fn wi_draw_time(ticks, px, py): i64 {
     return 0;
 }
 
-# Draw the full intermission screen
-fn level_intermission(): i64 {
+# Paint the intermission screen. Split out of level_intermission so the
+# `--ppm` screenshot path renders the REAL screen instead of its own copy of
+# the layout — that duplicate had drifted (it never drew the level name at all),
+# which is precisely why the overlapping title went unnoticed by the PPM gate.
+fn level_intermission_draw(): i64 {
     menu_init();
     framebuf_clear(0);
 
     # Background: WIMAP0 for episode 1
     menu_draw_lump("WIMAP0", 0, 0);
 
-    # "Finished" label
-    menu_draw_lump("WIF", 64, 10);
-
-    # Level name: WILVxx (episode*10 + map - 1)
+    # Title block — vanilla WI_drawLF: the level name sits at WI_TITLEY and
+    # "FINISHED" goes BELOW it, offset by 5/4 of the level-name patch height,
+    # with BOTH horizontally centred on their own widths.
+    # This used to draw the two side by side on the same row ("WIF" at x=64,
+    # the level name at x=130, both y=10), so a wide WILVxx ran straight into
+    # the FINISHED graphic.
     var lv_name = lv_name_buf();
     memcpy(lv_name, "WILV0", 5);
     store8(lv_name + 5, 48 + cur_map - 1);
     store8(lv_name + 6, 0);
-    menu_draw_lump(lv_name, 130, 10);
+    var lnw, lnh = menu_lump_wh(lv_name);
+    menu_draw_lump_centered(lv_name, WI_TITLEY);
+    # Fall back to the bare title row if the level-name lump is missing
+    # (registered-only WILVxx beyond episode 1) so FINISHED never lands on top
+    # of it or drifts off-screen.
+    var fin_y = WI_TITLEY;
+    if (lnh > 0) { fin_y = WI_TITLEY + (5 * lnh) / 4; }
+    menu_draw_lump_centered("WIF", fin_y);
 
     # Stats
     var sy = 50;
@@ -266,9 +282,16 @@ fn level_intermission(): i64 {
     menu_draw_lump("WITIME", 50, sy + sp * 3);
     wi_draw_time(level_time, 200, sy + sp * 3);
 
-    # "Entering" label
-    menu_draw_lump("WIENTER", 64, sy + sp * 4 + 10);
+    # "Entering" label. Vanilla WI_drawEL also stacks the NEXT level's name
+    # under this one; we have no next-name draw yet, so the label stands alone
+    # and there is nothing here to overlap.
+    menu_draw_lump_centered("WIENTER", sy + sp * 4 + 10);
+    return 0;
+}
 
+# Draw the full intermission screen, then hold it until the player advances.
+fn level_intermission(): i64 {
+    level_intermission_draw();
     framebuf_flip();
 
     # Wait for a FRESH key press to advance (edge-triggered). A level is almost
