@@ -4,334 +4,270 @@
 > **Historical record** (per-version shipped milestones) lives in [`completed-phases.md`](completed-phases.md).
 > **CHANGELOG** ([`CHANGELOG.md`](../../CHANGELOG.md)) is the per-release detail.
 >
-> This file is **forward-facing only** — slots that haven't shipped yet. When a slot ships, the row moves to `completed-phases.md` and the CHANGELOG carries the detail.
+> This file is **forward-facing only**. When a slot ships, its row moves to `completed-phases.md` and the
+> CHANGELOG carries the detail — nothing struck-through accumulates here.
+
+**Reorganized 2026-07-25 at the v0.34.6 cut.** The file had grown to 340 lines organized *by audit round*
+(2026-07-08 bites, the 2026-07-12 band, the 2026-07-17 band, July Fable) with 55 already-shipped entries
+still in it and roughly 70 open items scattered across `(unslotted)` / `(follow-ups)` / vague `v0.34.x`
+buckets. Every open item is now **pinned to a numbered release**; blocked work sits in explicitly-labelled
+holding groups instead of interleaved with actionable cuts; and refuted/superseded items are listed once in
+[§ Dropped](#dropped--do-not-re-add) so they stop costing review attention every cut.
+
+Verified against the v0.34.6 source tree, not against the previous doc — nine audit findings that had **no
+roadmap row at all** are now placed, and six rows describing work already in the tree were struck.
 
 ---
 
-## Slot map (forward)
+## Critical path to v1.0.0 — two releases
 
-> **Re-slotted at the 0.28.4 cut (2026-06-10):** v0.28.1–.3 shipped the AGNOS bring-up arc (target support → renders on AGNOS → keyboard input) and v0.28.4 shipped gameplay correctness — see `completed-phases.md` for all four. The Black Book parity / perf themes below therefore start at **v0.28.5**. F22 (perspective-correct U/depth) was pulled forward and shipped in 0.28.4, so it is off the v0.29.x list.
+v1.0.0 is "plays E1M1–E1M9 start to finish, on multiple display backends, on AGNOS". Three of its six
+checklist items already ship. Only two things stand in the way, and they are independently schedulable:
 
-> **Re-slotted at the 0.33.3 audit round (2026-07-12):** the consolidated audit
-> ([`docs/audit/2026-07-12-consolidated-audit.md`](../audit/2026-07-12-consolidated-audit.md)) —
-> five parallel review agents over the whole tree — classified every prior-audit finding and
-> surfaced a fresh set. **0.33.3 itself shipped**: toolchain 6.4.43→6.4.55, vani 1.1.0→1.1.1,
-> **setu 0.5.0→0.5.1 carrying the P-1 present-buffer leak fix** (was a system-wide agnos shm-slot
-> DoS within 0.5 s of play — patched upstream in setu, QEMU-verified) + the doom-side setu input
-> hardening (P-2 focus clear, P-3/P-5 stream reassembly, P-4 persistent poll scratch). The
-> remaining findings are slotted into the **new near-term patch band below (0.33.4–0.33.6)** plus
-> the pre-existing 0.28.x/0.34.x slots. **Codegen gate correction**: the cyrius perf/regalloc arc
-> ("O4") is **v6.5.x — Performance-Quality**, NOT v6.4.x (6.4.x is ABI/Language-Features); the
-> v0.29.x perf-pass gate below is re-pointed accordingly. cyrius **6.4.46 shipped `>>>`** (native
-> arithmetic right-shift) — an `asr()`-migration opportunity slotted at v0.34.x.
->
-> **`>>>` gate corrected 2026-07-25: the enabling version is 6.4.74, NOT 6.4.46.** Between .46 and
-> .74 `>>>` had **no `_cfo == 1` const-fold guard at all**, so any `x >>> <literal> <op> …` silently
-> collapsed to a folded constant (`100 >>> 1 + 1` evaluated to 2, not 51). Migrating ~95 sites on a
-> pre-.74 pin would have shipped silently wrong fixed-point values engine-wide with no diagnostic.
-> doom uses `>>>` in zero places today. When the migration does land,
-> `tests/regression_asr.tcyr`'s floor asserts are the gate: re-run them with `>>>` substituted for
-> `asr()` **before** touching any of the 95 sites — doom shares bsp 1.2.1's floor semantics, so `>>>`
-> must emit SAR, not truncate toward zero.
-
-### Near-term patch band (2026-07-12 audit → new slots)
-
-| Slot | Theme | Contents | Status |
-|---|---|---|---|
-| ~~**v0.33.4**~~ | ~~Security + safety quick-wins~~ **SHIPPED 2026-07-12** — all six: M-1 Wayland resize-below-320×200 crash (`win__clamp_size` floor + `set_min_size`), P-6 compositor-dim overflow cap + `shm_create` overflow guard, M-2 bounded `wl__sock_path` (fails closed → fb0), R-2 dead death-face (`alloc(9)`+NUL, face + STYSNUM), R-6/M-3/M-4 TEXTURE1/STBAR alloc null-guard+cap, G-7 sparse `doors_walk_trigger`/`things_check_pickups` switches → if/else. +6 WAD-free (clamp) / +3 WAD-gated (R-2) asserts; AGNOS QEMU doom-smoke+ingame+aethersafha-present PASS. | — |
-| ~~**v0.33.5**~~ | ~~Gameplay-fidelity patch~~ **SHIPPED 2026-07-12** — **G-2** switch doors/lifts dispatched on the wrong sector (or inert on one-sided switch lines) → now act on the TAGGED sectors; back-sector block trimmed to manual DR/D1 doors + the newly-added D1 keyed open-stay 32/33/34 (13 shareware doors that were stuck closed); walk specials 90/121 moved to `doors_walk_trigger`; floor-lower specials 23/38/70/71/102 given a one-way `DS_FLOOR_LOWER` motion (were lower-wait-raise, re-sealing paths). **R-1** both-end clip clamp (A/B PPM byte-identical). **G-1** weapon-switch refire-cadence gate. **G-3** intermission/death min-display + sustained-release (repeat-delay-robust). **G-4** armor-class absorption. **G-6** melee sight re-check. **G-8** open-stay door sound spam. **G-12** sergeant SFX. +9 WAD-free / +8 WAD-gated asserts; design + adversarial-review workflows; AGNOS QEMU ×3 PASS; true-pin 6.4.55. **G-5 deferred** (escape-rule zero-band — see below). | — |
-| ~~**v0.33.6**~~ | ~~bsp upstream + pin~~ **SHIPPED 2026-07-12** — **RC-F2** fixed upstream in **bsp 1.2.1**: `asr()` now FLOORS negatives (was round-toward-zero → one-texel flat mis-wrap over negative world coords). doom shares bsp's `asr` engine-wide (all 95 sites); positive-case byte-identical → 9-map PPM A/B byte-identical. bsp suite 94→103; doom `[deps.bsp]` 1.2.0→1.2.1 (published, commit-pin `211b6c41…`) **+ toolchain pin 6.4.55→6.4.58** (lock regen 36/0, true-pin). 164/244 tests, fuzz ×4, AGNOS QEMU ×3 PASS. Binary 443,336 B (agnos 429,752, 6.4.58 codegen). | — |
-| ~~**v0.33.7**~~ | ~~Door/lift fidelity follow-ups~~ **SHIPPED 2026-07-12** — item 1 (doors open to LOWEST neighbor ceiling − 4, vanilla `P_FindLowestCeilingSurrounding`; `find_lowest_neighbor_ceil` replaces `find_highest_neighbor_ceil`), item 3 (W1/S1/D1 one-shot latch: per-linedef `linedef_used` + `special_is_once`; keyed D1 key-gated + tag-loop latch restricted to the S1 switch subset `special_is_switch_once` — a review-caught malformed-WAD keyless-latch progression-blocker, hardened), item 4/G-5 (escape-rule zero-band → on-line endpoint counts as crossing). +16 WAD-gated asserts; design + adversarial-review workflows; AGNOS QEMU PASS; true-pin 6.4.58. **Item 2 (blazing/turbo speed) DEFERRED → v0.34.x** (below). | — |
-| **v0.34.x** | **Blazing/turbo door-lift speed** (deferred from 0.33.7 item 2; registered-WAD fidelity) | 117/118 blazing doors, 122 blazing lift, 70/71 turbo floor-lower run at base DOOR_SPEED/LIFT_SPEED — needs a per-thinker speed field (thinker-layout change) + fast-speed constants. None appear in shareware (type 70 already runs at ~turbo), so it's unverifiable until a registered WAD path exists — do it there so it can be play-verified. | deferred (registered-WAD) |
-
-### 0.34.x patch band (2026-07-17 audit → new slots)
-
-Driven by [`docs/audit/2026-07-17-texture-lock-perf-agnos-e1m1.md`](../audit/2026-07-17-texture-lock-perf-agnos-e1m1.md)
-(four-agent round: texture world-lock root cause, measured perf prototype ladder, AGNOS input
-diagnosis, E1M1 fidelity field reports). Finding IDs (TX/OP/AG/EF) reference that doc. Ordered:
-field-visible correctness first, then the render rewrite, then perf (whose gates the rewrite
-would otherwise invalidate mid-band).
-
-| Slot | Theme | Contents | Status |
-|---|---|---|---|
-| ~~**v0.34.1**~~ | ~~E1M1 fidelity + input robustness (field-report patch)~~ **SHIPPED 2026-07-17** — **EF-1** removed the `thing_animate` tick-1 frame clobber (corpse decor no longer resurrects to standing "greenshirt" marines; 8 E1M1 phantoms; WAD-gated tick-1 frame assert added). **EF-2** `TF_AMBUSH`=64 from THINGS bit 0x08; `things_noise_alert` skips deaf monsters unless they see the shooter (E1M1 monsters hold posts through gunfire — the "missing zombies at the armor stair"). **FOV gate on the sight wake DEFERRED** → below (pairs with P_NewChaseDir wander). **EF-3** deathmatch-start type 11 skipped in SP → vanilla 91 things (was 96). **EF-4** `tick_get_count` null-guard + new `--ppm-tick N` mode. **AG-2/F-U6** AGNOS raw-kbscan per-poll make-latch (fast tap registers — AGNOS "input stuck" root cause AG-1) + persistent 0xE0 prefix carry; adversarial review caught + fixed a Pause-key (0xE1) spurious-fire the latch introduced. +11 WAD-gated asserts; design + adversarial-review workflows; binary 447,456→451,600 B (agnos 433,904). **AGNOS QEMU verified 2026-07-18**: direct-map render + held-key menu-drive PASS; AG-2 confirmed via an instrumented build (same-drain make+break sets `input_flags`); bare-tap game-start flakiness = QEMU USB delivery, not doom. | — |
-| ~~**v0.34.2**~~ | ~~Texture world-lock — walls (TX-1/TX-2 + TX-4)~~ **SHIPPED 2026-07-18** — the "changing view angle distorts texture" field report. **TX-1/TX-2**: per-column wall U + depth now from a ray↔seg intersection on the UNCLIPPED view-space endpoints (`r_table[col]` ray tangent → `sp` param → `depth`/`tex_u`), replacing the near-clip-corrupted screen-x lerp — worst world-lock slide **48.24→2.49 texels** (noise floor); reuses the audit-validated V4 (transcription proven by a static formula-match). **TX-4**: exact seg texel length via integer `isqrt` (fixed.cyr), replacing `fixed_approx_dist`'s +11.8% diagonal error (static stretch + seams; closes R-4). `wscale1/2`/drawseg-band/`seg_u_swapped` unchanged. +13 WAD-free asserts (181/288); 9-map A/B viewport-only (HUD byte-identical, no voids, colors unchanged); bench 2.419 ms (variance); AGNOS QEMU direct-map render PASS; clean adversarial review (2 INFO). Binary 451,600 B (agnos 433,920). | — |
-| ~~**v0.34.5**~~ | ~~Texture world-lock — masked + TX-3~~ **MASKED HALF SHIPPED 2026-07-25** — **TX-MASKED**: `render_masked_one` now runs the same world-anchored ray↔seg intersection as the wall pass (shared `render_ray_param`), fed by the UNCLIPPED endpoints + raw texel U the entry now carries. `MASKED_ENTRY` 120→**144 B** (not 152 — `sd_xoff` at base+64 was a pure dead store; `uow1/uow2` retired), offsets 0–40 frozen so `sprite.cyr` needed no edit. Measured on E1M1's barred alcove (sector 72, ld 298–303, BRNBIGL/C/R): worst \|ΔU\| **53 texels** on the seg straddling the eye plane, **1 texel** on the frontal control — same magnitude TX-1/TX-2 found for walls. Retired the dead `uow`/`seg_u_swapped` machinery in `render_seg`. +31 asserts incl. a mutation-proven 18-sentinel layout lock; bench variance-neutral. **TX-3 NOT shipped** → v0.34.6 below. | — |
-| ~~**v0.34.6**~~ | ~~TX-3 — wall texture-V anchored at the view centre~~ **SHIPPED 2026-07-25 (pulled into v0.34.5)** — V is now pinned to a world constant `v_mid = ((anchor_h + sd_yoff) << 16) - view_z` (vanilla `dc_texturemid`) evaluated per seg per section, with each column taking `v_mid + (y1 - HALF_HEIGHT) * ty_step`; the F06 native step is untouched. Measured at the E1M1 spawn: **unclamped columns max 0.999 rows** (the floor-truncation shimmer, never a full row) and **clamped columns match the clamp distance on 132/132 uppers and 155/155 mids** — a **pre-existing bug subsumed**: upper and one-sided-mid had no clamp compensation (the lower section and the masked pass did), so a clipped wall-top restarted the texture instead of continuing it. Both old compensations deleted rather than duplicated. Intended one-`ty_step` lower-wall shift (vanilla anchors at `back_floor_h`, we anchored a row below). Pegging preserved by construction AND by 15 mutation-proven asserts over all six section×pegging combinations. AGNOS pixel-diff vs Linux **100.00% exact**. | — |
-| ~~**v0.34.3**~~ | ~~Perf batch A — bench truth + caches~~ **SHIPPED 2026-07-18** — all byte-identical output. **OP-0** bench-truth (the bench timed an EMPTY world, ~1.85× understated; added spawned-world rows). **OP-1** sprite lump memo (**−1.52 ms**). **OP-3** plane-row/tex-column per-pixel hoists (**−0.92 ms**; the negated-V `+0xFFFF` bias is in). **OP-6** `wad_name_eq` packed-i64 compare (~33.7→~2-4 µs/scan; `wad_name_eq` DCE'd). **True E1M1 spawn frame 4.348 → 1.631 ms (−62.5%)**, same-compiler 6.4.58 A/B; empty-world `render_frame` 2.354→1.433. 9-map + 5-menu byte-identical A/B vs v0.34.2, 288/288, fuzz ×5, AGNOS render PASS, clean review. Binary 451,632 B (agnos 438,048). | — |
-| ~~**v0.34.4**~~ | ~~Perf batch B — texture + status caches~~ **SHIPPED 2026-07-18** — all byte-identical. **OP-2** composited-texture cache (`texture_get_column` **823→438 ns**, spawn frame −0.39 ms, pcache-overflow cliff gone; `anim_rotate_tex_3` lockstep pointer-rotation keeps animated textures correct — WAD-gated SLADRIP test + negative control; re-parse zero + width-cap/OOM fall-through). **OP-4** status_render patch cache (all HUD patches slurped once at `status_init_font`; **161→124 µs** + ~27 fewer syscalls/frame — the residual is the blit, not I/O, so the design's <30 target was optimistic). **True spawn frame 4.348→1.239 ms (−71% cumulative A+B).** +7 WAD-gated asserts; 295/295; byte-identical A/B; AGNOS render PASS. Binary 455,800 B (agnos 442,200). | — |
-| **v0.34.x** | **Perf batch C — the remaining OP items** (bench-gated) | **OP-7**/F12 sidedef/flat index caches (~50 µs; SLADRIP-anim-fix prerequisite). **OP-5** `thing_check_sight` scaling (41 µs × every idle monster × every tick — 8–15 ms/tick extrapolated on E1M7-class maps; the dense-map / AGNOS budget-killer): REJECT lump as (sector,sector) LOS pre-test + per-linedef bboxes at load + staggered idle wake — NOTE this can CHANGE monster wake behavior (not byte-identical) unless restricted to the pure bbox cull, so it needs its own gameplay gate, not just a PPM A/B. **OP-9** clip-band incremental stepping. **OP-10** palette→XRGB present LUT (off the render bench, on every presented frame). **~~OP-8** per-seg incremental stepping~~ **SHIPPED v0.34.6** — as the BIT-EXACT subset only: the six loop-invariant projection numerators + `ty_step` hoisted out of the column loops (byte-identical, **−46 µs / −3.6%** by interleaved A/B). The audit's original incremental-`rw_scale` design is **REFUTED for this engine** — TX-1/TX-2/TX-MASKED replaced exactly that screen-space interpolation with a per-column world-space ray-cast because interpolating near-clip-corrupted endpoints is what made textures swim (48 texels on walls, 53 on grates); reintroducing it would trade that correctness for a few µs. The remaining per-column divides are load-bearing, which is why the win lands at the low end of the −100–300 µs estimate. | queued, bench-gated |
-| **v0.34.6+** | **Deep fidelity (pre-existing 0.34.x items)** | RC-S6 real thing-z (render+physics; unblocks res-1 precise missile trace), P4 episode-complete screen (E1M8 → text/bunny + `D_VICTOR`), F06-1 LOW `tex_h>256` peg clamp (ride any slot), opt-in `asr()`→`>>>` migration (~95 sites, own build+test+fuzz gate), **EF-2 follow-up**: front-180° FOV gate on the STATE_SPAWN→SEE sight wake (deferred from v0.34.1 — an all-monster change that pairs with **P_NewChaseDir wander** from the 0.33.1 follow-ups; monsters would then wake only to what's in front, matching vanilla A_Look). | queued |
-
-> **AGNOS noted issue — RESOLVED BY DIAGNOSIS (2026-07-17, AG-1)**: there is **no kernel
-> keyboard regression**. QEMU reproduction on agnos HEAD *and* the exact 07-12 kernel: held
-> keys PASS into real in-game 3D; bare `sendkey` taps fail because doom's AGNOS input drain
-> collapses a make+break pair arriving in one `kbscan` poll to zero edges, and the effective
-> poll period inflated over a month (doom render growth + kernel per-frame additions) onto the
-> ~100 ms tap margin. The prior "in-game PASS" era (06-12 → 07-12) was false passes ("map: V="
-> prints at boot; the ≥8-colors gate matches TITLEPIC). Agnos-side actions (no kernel fix):
-> keep the held-key harness + robust gates, add a first-key intermediate screendump, promote
-> `doom-directmap-smoke.sh` as the canonical render gate. Doom-side: **AG-2** (v0.34.1).
-> state.md's "cause unidentified, agnos-side" framing corrected 2026-07-17.
-
-> **v0.28.11 (pre-PWAD hardening) — mostly SHIPPED as v0.33.8** (2026-07-12): ✅ the **BSP node-cycle
-> gap** (HIGH — `map_validate_bsp_acyclic`), ✅ **R-3** zero-seg subsector reject + `map_point_sector`
-> guards, ✅ **M-6/R-10** finish F17 (masked-seg + `render_draw_tex_column` loop clamps — the
-> frame-stall half; byte-identical A/B), ✅ **Fuzz-corpus refresh** (`fuzz/fuzz_texture.cyr`, structured
-> TEXTURE1/PNAMES decoder fuzzer), ✅ **CVE re-walk** (C3/H1 confirmed still-fixed@0.24.0). **Residual →
-> future**: **G-13** sector-0 degenerate-leaf → −1 + caller no-floor-context handling (0.33.8 returns
-> sector 0, a safe valid sector, since validation now rejects the malformed maps that reach it — the
-> correctness refinement needs a caller sweep); **R-5** patch-dim/height-delta overflow clamps (LOW,
-> malformed-WAD visuals only); **bench min>max formatter** (in the cyrius **stdlib** `lib/bench.cyr`,
-> not doom source — a cyrius-repo item).
->
-> **v0.34.x — deep renderer + game-state fidelity** (was folded under v0.29.x/unslotted):
-> **~~F06 / RC-W3~~ native-scale vertical texture mapping SHIPPED 0.34.0** — all four wall sections
-> step V by `fixed_div(FIXED_ONE, col_scale)` = vanilla `dc_iscale`; tall walls tile, short walls clip,
-> fitted walls byte-identical; **also resolved ~~F-R3~~/~~F-R4~~** (`ML_DONTPEGBOTTOM` now wired on the
-> one-sided-mid path + the masked-mid `base+112` flag that was written-but-never-read). Remaining v0.34.x
-> items (**RC-S6** real thing-z, **P4** episode-complete screen, the opt-in **`asr()`→`>>>` migration**,
-> and the **F06-1 LOW** `tex_h>256` peg clamp from the 0.34.0 cut) are now slotted in the
-> **[0.34.x patch band](#034x-patch-band-2026-07-17-audit--new-slots)** above (v0.34.5+). The 0.34.0
-> cut's "(b) agnos-side keyboard-into-menu" flag is **resolved by diagnosis** — see the AG-1 note under
-> that band (no kernel regression; harness tap-cadence + doom's drain-collapse + a month of
-> false-passing gates).
-
-| Slot | Theme | Status |
+| Blocker | Release | Why it is the blocker |
 |---|---|---|
-| ~~**v0.28.5**~~ | ~~Visplane pool rewrite (Black Book ch.9 / F08, subsumes F13)~~ **SHIPPED 0.32.0** (2026-07-08 — global `view_z` + real plane pool, −24% render_frame; the `test_each` refactor did NOT ride along, dropped from scope) | — |
-| **(unslotted)** | Wall-path correctness: closed-door black holes (E1M3/4/7), near-parallel one-sided wall drop (E1M9), SLADRIP anim no-op, FLAT_MAX full-IWAD truncation, vendored-bsp `asr()` trunc-vs-floor | new — 2026-06-12 floor-render review |
-| **(unslotted)** | Shooting cosmetics deferred from **0.30.0**: BEXP rocket-explosion frames (detonation is instant), ~~separate muzzle-flash overlay sprite~~ (**shipped 0.30.1**), full xdeath giblet animation on overkill (currently a faster death); precise missile-vs-wall trace (reuses `player_check_position`, so a rocket can clip on tall steps in 2.5D) | new — 2026-06-13 shooting overhaul |
-| **(unslotted)** | **Animated multi-frame muzzle flash** for chaingun (CHGFB0) + rocket (MISFB0–D0): the 0.30.1 flash overlay shows only frame A because those guns have a 2-frame animation (`weapon_fire_frame` only ever reaches 1). Needs an independent flash-frame counter in `weapon_tick` decoupled from `weapon_fire_max`. | new — 2026-06-13 0.30.1 review (confirmed cosmetic finding) |
-| **(unslotted)** | **Audio output hardening** (remaining; HW_PARAMS-fallback thresholds + ESTRPIPE recovery shipped 0.30.6; **distance/positional attenuation + stereo pan + Sound-menu live-preview/polish shipped 0.30.7**): (3) **Per-sound peak normalization** or a finer **master-gain curve** — soft lumps like `DSITEMUP` (±19) play ~6× quieter than gunfire; kept faithful for now (the `sfx_volume` gain + per-voice `lvol/rvol` are the hooks). (4) **48000 Hz fallback** — jack also accepts it; needs fractional 11025→48000 resample vs the clean 4× for 44100; **untestable on the dev box (does 44100), so deferred until a card that needs it appears** (reproduce-first). (5) **Device-pick virtual-card heuristic** — the capture-sibling test can pick snd-aloop/dummy over the real codec; **needs an upstream vani CARD_INFO API** (out of this repo's scope; `lib/vani-core.cyr` is a gitignored resolved artifact). (6) **ALSA-vs-PC-speaker double-fire gating** — `sound_*` (PC speaker) and ALSA both fire per event; gate the beep when `audio_dev!=0`. Deferred: `sound.cyr` is included before `audio.cyr` so it can't cleanly read `audio_dev` without a reorder/shared flag; low value (PC speaker usually silent). (7) **0.30.7 review cosmetic nits** (all INFO/LOW, no functional impact): `menu_handle_input` dec/inc tie-break at `sfx_volume==0` (gate `inc` on `dec==0`); drop the unreachable `sep`/`lvol`/`rvol` clamps in `audio_play_at`; far-channel `rsep=256-sep` vs original DOOM `254-sep` (1–2 unit pan offset); 1-LSB attenuation boundary step at `dist==160<<16`. | updated — 2026-06-29 0.30.7 (positional + menu polish shipped; remaining items need upstream/other-hardware, contradict faithful-loudness, or are cosmetic) |
-| ~~(unslotted)~~ | ~~**Render-consistency audit Bite A — quick wins**~~ **SHIPPED 0.32.0** (2026-07-08, all six: RC-S3 sprite-lookup gaps + corpse frames, RC-S4 `fixed_atan2` octants, RC-S5 screen-driven V scaler, RC-W5 masked reverse order, RC-W1 sky-vs-sky suppression, RC-W2 closed-portal solid promotion — each staged-PPM-verified, +21 regression asserts) | — |
-| ~~(unslotted)~~ | ~~**Render-consistency audit Bite C — gameplay sweep**~~ **SHIPPED 0.32.0** (2026-07-08: RC-G1 door-entombment reversal, RC-G2 trigger segment-span, RC-G3 real use-ray + blocking veto, RC-G4 closed-portal sight/hitscan, RC-G5 missile spawn check + splash LOS, RC-G7 alloc guards — +8 regression asserts, doors.cyr added to the test harness. **Release leftovers, same cut**: RC-G6 AGNOS menu edge-latch, F-R6 texture fill-mask, L8-lite monster thing-solidity). **Residuals**: monsters aren't obstruction-checked by closing doors (~~monster z/step parity~~ **SHIPPED 0.33.1** — the collision core now carries the mover's own floor + MF_DROPOFF); G8's L2 (speculative) / L5 BFG (unreachable in shareware) / L6b WILV (registered-only) | — |
-| ~~**v0.33.0**~~ | ~~Desktop rendering — native Wayland window backend~~ **SHIPPED 0.33.0** (2026-07-09): sovereign wl protocol (no libwayland/deps), puka-pattern seam, four `src/platform/` files behind `present_mode`; double-buffered present, full keyboard, xdg lifecycle + drag-resize + close, wire-parser hardening; fb0/AGNOS/`--ppm` byte-identical; 4 adversarially-reviewed bites; AGNOS QEMU PASS; window user-verified on Hyprland. See [`completed-phases.md`](completed-phases.md) + [proposal](../proposals/wayland-backend.md) + [audit](../audit/2026-07-09-wayland-backend.md). **Follow-ups** → below. | — |
-| **(follow-ups)** | **Wayland/desktop backend — post-0.33.0 follow-ups** — the seam is in; these extend it. Detailed in [§ Wayland backend follow-ups](#wayland-backend--follow-ups-post-0330) below (mouse/pointer input, GPU present via mabda, HiDPI/fractional scale, X11 backend, deeper wire hardening, aspect/fill scaling, resize-during-death). | queued — 2026-07-09 |
-| **(follow-ups)** | **0.33.1 field-patch follow-ups** (combat-aliveness pass; each deferred deliberately): (1) **Baron BAL7 fireballs** — barons stay melee-only because the shareware WAD has no BAL7 sprites; wire them when a registered-WAD path exists. (2) **Vanilla ledge-glide z semantics** — vanilla's tmfloorz keeps a mover at the HIGH floor until its bounding box clears the ledge line (you glide off and land 16+ units out); we z-snap instantly and cure the wedge with the player-only same-side escape rule instead. Faithful glide = track contacted-line floors in the z update. (3) **Sight/hitscan z-slope** — `thing_check_sight` is 2D: a monster fully below a window sill still "sees" over it; vanilla P_CrossSubsector checks the sight line's z-slope through each portal opening. Errs permissive today. (4) **Monster chase wander (P_NewChaseDir)** — chasers head straight at the player (atan2) with axis-slide fallback; vanilla's 8-direction chase with dogleg fallbacks rounds corners and paces on ledges. Dropoff-pinned pier monsters currently hold position and shoot (fine), but can't reposition along the pier. | queued — 2026-07-10 |
-| ~~**v0.28.6**~~ | ~~Sprite + masked-seg depth-aware clipping (F07 / F05b / F05)~~ **SHIPPED 0.32.0** (2026-07-08, Bite B — drawseg occlusion records + `render_clip_band_build`: RC-S1/RC-S2/RC-S9/RC-W6 fixed, plus RC-W9 screen-edge endpoint re-anchor found during implementation; staged-PPM verified incl. the audit barrel + E1M5 spectre) | — |
-| **v0.28.7** | Sky + wall-mapping parity (F09) | queued |
-| **v0.28.8** | Structural perf — sidedef/sector index + thing-sector caches (F12 / F15) | queued, bench-gated |
-| **v0.28.9–.11** | Original Black Book sub-audits: BSP+collision (.9), game-state (.10), security-refresh (.11) | queued |
-| **v0.28.x** | yukti `sys_stat` dup-fn cleanup | gated on yukti rebundle (likely moot) |
-| **v0.29.x** | O4 micro-perf pass — **F22 perspective-correct U/depth shipped early in 0.28.4**; deep-renderer fidelity (F06 native-scale midtex) re-slotted to **v0.34.x** | gated on Cyrius regalloc/IR perf arc = **v6.5.x — Performance-Quality** (NOT v6.4.x, which is ABI/Language-Features; corrected 2026-07-12) |
-| **v1.0.0** | Ship: full E1 + multiple display backends + AGNOS integration | future |
+| Episode end | **v0.35.2** | `level_advance` wraps E1M8 → E1M1 ([level.cyr:136](../../src/level.cyr#L136)) — there is no finale, so the game literally cannot be finished. |
+| X11 backend | **v0.37.0** | The only unmet "multiple display backends" item; fb0 / Wayland / AGNOS-setu all ship. |
 
-> **v0.28.0 shipped 2026-06-07** (graphics review/hardening/audit/performance) — moved to [`completed-phases.md`](completed-phases.md). At the user's direction this graphics pass *became* 0.28.0, and the previously-roadmapped Black Book audit + lingering 0.27.x housekeeping were pushed **behind** it (re-slotted below).
-
-### Wayland backend — follow-ups (post-0.33.0)
-
-v0.33.0 shipped the native Wayland window (sovereign wl protocol, `src/platform/{wayland/*,window.cyr}` behind
-the `win_*` seam + runtime `present_mode`; double-buffered CPU present, full keyboard, xdg lifecycle + drag-resize
-+ close; wire-parser security hardening). The seam is designed to grow — these extend it. None block anything;
-ordered roughly by user-facing value. References: [proposal](../proposals/wayland-backend.md),
-[security audit](../audit/2026-07-09-wayland-backend.md), `completed-phases.md` v0.33.x.
-
-| # | Item | Detail | Gated on / notes |
-|---|------|--------|------------------|
-| WF-1 | **Mouse / pointer input** (`wl_pointer`) | Bind `wl_pointer` off the seat, feed relative motion → turn (mouse-look) and buttons → fire/use. The only major input mode DOOM expects on a desktop that the keyboard-only backend lacks. Fits `input_poll_wayland` + a `win_next_pointer`-style seam addition. | New protocol surface (pointer enter/leave/motion/button/axis); relative-motion needs `zwp_relative_pointer` + `zwp_pointer_constraints` for proper mouse-look (pointer-lock). |
-| WF-2 | **GPU present via mabda** (`WIN_CAP_GPU`) | Today `win_present_begin` returns a CPU `wl_shm` buffer (`WIN_CAP_SHM`) and doom blits on the CPU. A `WIN_CAP_GPU` path (mabda, as puka plans) would upload the palette-expanded frame to a texture and let the GPU scale/present — the same seam, `win_caps` already distinguishes them. | Needs mabda as a dep (doom currently has none for display) + a dmabuf/EGL path; large. The CPU shm path stays the permanent no-GPU fallback. Mirrors puka's cut #2/#3. |
-| WF-3 | **HiDPI / fractional scale** | The buffer is 1× device pixels, so on a scale-2 (HiDPI) output the window renders physically small. Honor `wl_surface.set_buffer_scale` (integer) and/or `wp_fractional_scale_v1` + `wp_viewporter`, and read the output scale from `wl_output`. | `wl_output` + the fractional-scale/viewporter protocols; interacts with the integer-scale/letterbox math in `framebuf_wl_recompute`. |
-| WF-4 | **Aspect-correct / fill scaling option** | Present is integer-scale + black letterbox. DOOM's 320×200 is displayed 4:3 (non-square pixels) on real hardware; and users may prefer fill-to-window over letterbox. Offer aspect-correct (1.2× vertical) and/or fit-to-window (non-integer) modes. | A scaling-mode flag + the `framebuf_present_wayland` blit loop (non-integer needs per-row interpolation or accept nearest-neighbor). Cosmetic/fidelity. |
-| WF-5 | **X11 display backend** (native) | Fill the same `win_*` contract with a direct X11 protocol client (no Python bridge), so `present_mode` gains `PM_X11`. Currently the v1.0.0 "X11 display backend" item. | Direct X11 wire protocol (a second sovereign client, ~puka-sized). Keeps the v1.0.0 "multiple display backends" goal. |
-| WF-6 | **Deeper wire-parser hardening** | The remaining fixed-offset event handlers (`xdg_surface.configure` @+8, `xdg_wm_base.ping` @+8, `wl_seat.capabilities` @+8, `toplevel.configure` @+8/+12) read at most `o+12`, bounded by the `size>=8` gate + the 64-byte `wl_rbuf` read-slack — a hostile short message yields a wrong value, not an OOB fault. Add a per-event size table for strictness. | Low priority under the local-compositor threat model (a malicious compositor already owns the session — see [audit](../audit/2026-07-09-wayland-backend.md) W-6). Do it if an untrusted-compositor scenario ever matters. |
-| WF-7 | **Death-screen rescales on resize** (cosmetic) | The death-wait loop (`main.cyr`) pumps input (so a resize rebuilds buffers + re-blacks them) but has no `framebuf_flip`, so the red death frame freezes at the old size until respawn. Add a re-present in the death loop. | Cosmetic; both buffers are blacked on resize so no garbage shows. One-line-ish (`framebuf_flip()` in the death loop). |
-| WF-8 | **AGNOS desktop backend** (long-horizon) | Once AGNOS grows a compositor, the same `win_*` seam could back the microkernel's native window path — the contract is already platform-neutral (the puka `aethersafha`-crate framing). | Post-v1.0.0; gated on AGNOS having a display server at all. |
-
-### July Fable audit — deferred items (2026-07-04)
-
-The [July Fable full-project audit](july-fable-audit.md) drove the **v0.31.2 playability pass** (all Tier-1 gameplay F-G1–F-G6, HIGH memory-safety F-S1, leaks F-S2/F-S4, hardening F-S3/F-S5/F-S6, UI/input F-U1–F-U5/F-U7/F-U9/F-U10, sprite rotation F-R1) and the **v0.31.3 vanilla-fidelity + sky pass** (the gameplay-review MED gaps — melee p_random, pickup rules, player-vs-thing collision, secret sectors — plus **F-R2** sky pan and **F-U8** audio rate negotiation). Remaining deferred items each need hardware the dev box lacks, are entangled with a bigger render rewrite, or need AGNOS QEMU:
-
-| # | Item | Why deferred |
-|---|------|--------------|
-| ~~F-R2~~ | ~~Sky pans ~4× too slow~~ **SHIPPED 0.31.3** — 4-wraps-per-turn (ANGLETOSKYSHIFT), visually verified on E1M1's outdoor courtyard | — |
-| ~~F-U8~~ | ~~OUT_RATE 48000 vs "jack takes only 44100"~~ **SHIPPED 0.31.3** — 48000→44100 negotiated fallback, upsampler reads the negotiated rate (math-verified drift-free); stale comments reconciled. Audible confirmation on the jack pending a user `--audio-test` (the agent context can't open `/dev/snd`). | — |
-| ~~**F-R3**~~ | ~~One-sided walls ignore `ML_DONTPEGBOTTOM`~~ **SHIPPED 0.34.0** (with F06 native-scale V): the one-sided-mid path now bottom-anchors `mid_ystart = (tex_h - (ceil_h - floor_h) + yoff) << 16` when the flag is set. | — |
-| ~~**F-R4**~~ | ~~Masked-seg `dont_peg_bottom` stored but never read~~ **SHIPPED 0.34.0** (with F06): the masked-mid path now reads the `base+112` flag and bottom-pegs `ty_pos = (tex_h - (open_ceil - open_floor) + yoff) << 16`. (`sd_xoff` residual — verify it's applied; drop this note if so.) | — |
-| **F-R5** | 24-bpp / 8-bpp `/dev/fb0` panels handled by the 32-bpp blit (1-byte row overrun on 24-bpp) | Needs real non-32-bpp framebuffer hardware to verify (this box is 32-bpp / the `--ppm`+bridge path doesn't use the fb blit). |
-| ~~**F-R6**~~ | ~~Palette index 0 treated as transparent everywhere~~ **RESOLVED 0.32.0** (all halves: psprite blitter draws every in-post pixel; sprite dense buffer + `texture_get_column` both gained fill masks — grates get true post-gap transparency, walls stop punching pinholes at dark texels, the see-through gun is solid). | — |
-| **F-U6** | AGNOS `E0`/`E1` scancode prefix is a per-call local → split extended-key across polls sticks/misfires | AGNOS-only; needs QEMU verification (not gated this cut per the reproduce-first/QEMU-verify process). |
-
-### 2026-07-08 render-consistency audit (walls / flats / sprites + module sweep)
-
-Full findings + staged-viewpoint evidence + repro coordinates: [`docs/audit/2026-07-08-render-consistency.md`](../audit/2026-07-08-render-consistency.md). Twenty-one findings (8 NEW self-contained, 2 keystones re-confirmed with hard evidence, the rest cross-referenced to existing slots). Recommended sequencing:
-
-| Bite | Contents | Where it lands |
-|---|---|---|
-| **A — quick wins** | ~~RC-S3, RC-S4, RC-S5, RC-W5, RC-W1, RC-W2~~ | **SHIPPED 0.32.0** (2026-07-08) — all six staged-PPM-verified, +21 regression asserts |
-| **B — depth clipping keystone** | ~~RC-S1, RC-S2, RC-S9, RC-W6~~ | **SHIPPED 0.32.0** (2026-07-08) — drawseg records + per-column depth bands; masked segs merged into the sprite phase's painter's walk. Bonus: **RC-W9** (seg scale/U endpoints not re-anchored after screen-edge clamping — texture swim at edges + the E1M7 right-edge stripe band) found during implementation and fixed in the same cut. |
-| **— visplane keystone** | ~~RC-F1, RC-F4, RC-W8~~ | **SHIPPED 0.32.0** (2026-07-08) — global `view_z` (elevation renders across walls/flats/sprites) + R_FindPlane/R_CheckPlane/R_MakeSpans pool + both-sector portal clip; `render_frame` −24% |
-| **C — gameplay sweep** | ~~RC-G1–G5, G7~~ | **SHIPPED 0.32.0** (2026-07-08); RC-G6 stays QEMU-gated |
-| **D — parity polish** | ~~RC-W4, RC-F3, RC-S6/S7/S8 slices, RC-G8 bundle~~ | **SHIPPED 0.32.0** (2026-07-08: sky V anchored to the screen [the courtyard white-strip shear], flat V negated-worldY parity, projectile height+fullbright, THING_MAX sprite collection, MASKED_MAX warn, all 7 doable G8 LOWs, **plus the see-through-gun fix** — psprite/sprite blitters no longer treat palette index 0 as transparent). Residuals: RC-W3 native-scale V (0.29.x), F-R6 texture-path fill-mask (with the masked rewrite), real thing-z, G8's L2/L5/L8/L6b |
-
-The current arc is **v0.28.x — graphics** (review / hardening / parity / performance). The language-adoption arc (v0.27.x) is complete. v0.28.0 was anchored on a multi-agent audit of the render path (`docs/audit/2026-06-07-v0.28-graphics-hardening.md`); it shipped the memory-safety hardening + safe perf, and the parity items it surfaced now drive 0.28.5–0.28.11 (0.28.1–.4 were consumed by the AGNOS bring-up arc and the 0.28.4 gameplay-correctness cut). The O4-gated perf micro-pass and the deepest renderer-fidelity work remain at v0.29.x.
+Everything else below is quality, fidelity, robustness, or performance.
 
 ---
 
-## v0.28.x — Graphics arc
+## Near-term: the 0.34.x closeout band
 
-The graphics review/hardening/audit/performance pass **became v0.28.0** (shipped — see `completed-phases.md`). The previously-roadmapped DOOM Black Book audit (originally v0.25.0, re-anchored to v0.28.x) and the lingering language-arc housekeeping were pushed **behind** it, re-slotted below. Scope across the arc: close the render-path parity gaps the 0.28.0 audit surfaced, chapter-by-chapter against Fabien Sanglard's *Game Engine Black Book: DOOM* + the Unofficial DOOM Specs, with PPM diffs as ground truth. Finding IDs (Fnn) reference [`docs/audit/2026-06-07-v0.28-graphics-hardening.md`](../audit/2026-06-07-v0.28-graphics-hardening.md).
+Four patch cuts that finish the render/decoder/toolchain backlog. All are byte-identical or
+near-byte-identical, so they keep the cheap PPM-A/B gate that has caught real regressions all minor.
 
-### ~~v0.28.5 — Visplane pool rewrite (keystone parity)~~ SHIPPED 0.32.0 (2026-07-08)
+### v0.34.7 — Perf batch C closeout (+ the SLADRIP animation it unblocks)
 
-Implemented as DOOM's structure: `plane_get` (R_FindPlane + R_CheckPlane column-overlap split), per-column top/bottom spans, `render_plane_spans` (R_MakeSpans via `plane_spanstart`), `PLANE_MAX=128` + one-shot warn. **~24% faster** than the per-row pass it replaced (2.351 vs 3.075 ms `render_frame`, same compiler).
-
-| # | Item | Disposition |
-|---|------|-------------|
-| 1 | Visplane pool keyed by (height, flat, lightnum) | ✅ per-column `top[]`/`bottom[]`, same-key planes split on overlap (F08) |
-| 2 | Drop redundant per-cell flat/light re-stores | ✅ the row-union model is deleted outright (F13) |
-| 3 | `lib/test.cyr` `test_each` refactor (rides along) | ✂ dropped from scope — the suite grew targeted regression groups instead (115/167) |
-| 4 | Span shape + count vs reference | ✅ via staged-viewpoint PPM verification (courtyard bleed band gone, E1M3/E1M5 elevation renders) rather than a flag-gated span dump |
-| 5 | Global `viewz` replacing the per-seg `eye_h = front_floor + 41` model | ✅ `view_z` BSP-resolved per frame from the view coords; walls, masked segs, drawseg deltas, AND sprites project against it — world elevation renders; supersedes the 0.29.x `vp_ceil_h` stopgap (deleted) |
-| 6 | Portal clip updates bounded by BOTH sectors | ✅ opening top = lower ceiling, bottom = higher floor, in the seg clip update |
-
-### Wall-path correctness (surfaced by the 2026-06-12 floor-render review; re-diagnosed at the 0.29.4 cut)
-
-> **0.29.4 update (2026-06-12):** a multi-agent A/B-render workflow proved items **1 and 2 were MISATTRIBUTED** — both the closed-door "black holes" and the E1M9 "near-parallel drop" were **texture-resolution** bugs, *not* the geometry/draw defects hypothesized below. The geometry hypotheses (NEAR_CLIP degenerate depth, `fixed_mul(tx,PROJ_DIST)` 64-bit overflow, one-sided clip-drop) were all empirically refuted (toggling them does not move the black). Root causes were: PNAMES `strlen` over-read of non-null-terminated 8-byte patch names (161/350 → `patch_lumps=-1` → composite nothing → black) **and** patch-cache 8192-byte truncation of large patches. **Both fixed in 0.29.4** (all 4 sampled maps ≤0.1% viewport black). Items 6–7 are new survivors the spawn-view A/B did not exercise; items 3–5 stand.
-
-| # | Item | Evidence | Detail |
-|---|------|----------|--------|
-| 1 | ~~Closed-door faces render as black holes~~ **RESOLVED 0.29.4** | E1M3/E1M7 — BIGDOOR2 = patch `DOOR2_4` (17544 B) | NOT a geometry/draw bug — the patch cache truncated `DOOR2_4` past byte 8192 (cols 58–127 lost → black). Fixed by `PCACHE_DATA_SIZE` 8192→40960. |
-| 2 | ~~Near-view-parallel one-sided walls dropped entirely~~ **RESOLVED 0.29.4** | E1M9 spawn corridor (BROWN1) | NOT a geometry drop — the BROWN1 texture's patches are 8-char PNAMES names that `wad_name_eq`→`strlen` over-read and rejected → `patch_lumps=-1` → walls composited to all-black (looked like void). Fixed by null-terminating the PNAMES field in `texture_init`. |
-| 6 | ~~closed-sector portals never promoted to solid~~ **RESOLVED 0.32.0** (RC-W2) | E1M1 line 151 (BIGDOOR2) staged at (1420,−2496) ang 0 | The `clip_top==clip_bottom` see-through seam across closed doors is fixed: vanilla promotion test (`back_ceil<=back_floor \|\| back_ceil<=front_floor \|\| back_floor>=front_ceil`) marks the column solid, collapses the clip (occludes sprites too), and the upper/lower sections meet across the old seam row. Staged-PPM verified. |
-| 7 | ~~wall texture-U swap mirror~~ **RESOLVED 0.30.1** | reported as "walls warp when turning"; multi-agent-verified correct | the `sx1>sx2` swap in `render_seg` reordered `sx`/`ty` but not the texture-U endpoints, mirroring segs that project right-to-left (and flipping the instant a turn crossed the threshold). Fixed via a `seg_u_swapped` flag that swaps `u_left`/`u_right` in both the wall pass and `render_masked_segs`. |
-| 3 | SLADRIP wall animation is a no-op | `anim_rotate_tex_3` (texture.cyr) | rotates the 32-byte entry **including the name hash**, and `render_seg` re-resolves textures by name every frame — lookup follows the rotation, content never visibly changes; rotate `width/height/def_ptr` only (or resolve indices at map load — F12 cache) |
-| 4 | `FLAT_MAX = 64` silently truncates full-IWAD flats (shareware's 54 fit) | texture.cyr flat scan | full/registered IWADs exceed 64 → `flat_find = -1` fallback paths activate (gray vlines, scalelight-not-zlight shading); raise cap + log truncation |
-| 5 | Vendored bsp `asr()` is round-toward-zero, not floor | lib (bsp dep) | `fixed_to_int` inherits trunc semantics → one-texel flat mis-wrap over negative world coords + doubled texel band straddling world axes; fix upstream in bsp, bump pin |
-
-### ~~v0.28.6 — Sprite + masked-seg depth-aware clipping~~ SHIPPED 0.32.0 (2026-07-08, Bite B)
-
-Implemented as drawseg occlusion records (screen range, endpoint scales, solid flag, eye-relative opening deltas; `DS_MAX=512` + one-shot overflow warn) + `render_clip_band_build` (per-column visibility for a subject at any depth — only *nearer* drawsegs occlude). All four items landed:
-
-| # | Item | Disposition |
-|---|------|-------------|
-| 1 | Per-drawseg silhouettes (F07) | ✅ drawseg records; bands recomputed per subject from stored deltas × column scale (same projection the wall pass used) |
-| 2 | Masked-seg clip against wall silhouettes (F05b) | ✅ each masked entry clips per column vs nearer drawsegs (own scale lerped → oblique crossings resolve per-column) |
-| 3 | Masked-seg `clip_solid` over-paint guard (F05) | ✅ superseded — the depth test makes the "near grate / far wall" over-clip impossible by construction |
-| 4 | Sprite-vs-masked + sprite-vs-sprite ordering | ✅ masked segs sort far→near by midpoint depth and merge into the sprite pass's painter's walk; sprites keep their existing far→near sort |
-
-Bonus fix (RC-W9, found during implementation): seg scale/U interpolation endpoints are now re-anchored onto the clamped screen span — previously every seg crossing a screen edge compressed its depth/lighting/U line into the visible span (edge texture swim; the E1M7 right-edge stripe band).
-
-### v0.28.7 — Sky + wall-mapping parity
-
-| # | Item | Reference | Detail |
-|---|------|-----------|--------|
-| 0 | ~~Sky-to-sky upper-wall suppression~~ **SHIPPED 0.32.0** (RC-W1) | r_segs (`worldhigh = worldtop` when both ceilings sky) | The E1M1 courtyard STARTAN3 band is gone — both-ceilings-sky portals draw the band as sky via the shared `render_draw_sky_column`, V-anchored with the ceiling sky above. Staged-PPM verified. |
-| 1 | ~~Sky horizon anchoring + corrected angular scale~~ **V anchor SHIPPED 0.32.0** (absolute screen row 0); **U tan-distributed per-column table + 1:1 V scale SHIPPED 0.33.1** (`x_to_viewangle` filled in `tables_init`, `render_sky_u`; fixed the field-reported "mountains too high / sky slides on turns") | Black Book ch. 8 (R_DrawSkyColumn) | — |
-| 2 | Brightness / lighting A-B vs reference | Black Book ch. 8 (COLORMAP) | per-light-level PPM diff (carries the F25 verification forward) |
-| 3 | ~~Flat V axis parity~~ **SHIPPED 0.32.0** (`render_plane_row` samples negated world-Y — flats no longer vertically mirrored vs the reference) | Unofficial Specs / r_plane semantics | — |
-| 4 | Half-pixel (`FRACUNIT/2`) yslope + column-center offsets | Black Book ch. 9 | rows nearest the horizon get up to 1.5× distance; low visual impact (2026-06-12 review) |
-| 5 | F_SKY1 **floors** treated as sky (vanilla: any plane with `picnum == skyflatnum`) | r_plane semantics | rare but legal in PWADs (2026-06-12 review) |
-
-### v0.28.8 — Structural performance (O4-independent, bench-gated) — ABSORBED into the 0.34.x patch band (2026-07-17 audit)
+The last queued row of the 0.34.x band, and ready now. OP-7/OP-9/OP-10 are byte-identical by construction
+and share one gate.
 
 | # | Item | Detail |
 |---|------|--------|
-| 1 | ~~Per-sidedef texture + per-sector flat index cache at map load~~ | F12 → **OP-7, slotted v0.34.3** (measured smaller than assumed: ~50 µs/frame; still do — prerequisite for the SLADRIP anim fix) |
-| 2 | ~~Per-thing sector/floor-height cache~~ | F15 → **reframed under OP-5, v0.34.4** (refuted as a raw perf item, ~5–10 µs/frame; its real value is as the sector resolver for the REJECT-lump LOS pre-test) |
-| 3 | ~~Automap line pre-clip~~ | F26 — **refuted 2026-07-17** (confirmed negligible; automap not in the play loop) — dropped |
+| OP-7 | **Per-sidedef texture + per-sector flat index cache at map load** | `render_seg` calls `texture_find` by *name* for all three sidedef textures every seg every frame ([render.cyr:1075-1077](../../src/render.cyr#L1075)), and `flat_find` per sector ([:1094-1095](../../src/render.cyr#L1094)). Resolve at map load. ~50 µs. |
+| WP-3 | **SLADRIP wall animation is a visual no-op** | `anim_rotate_tex_3` memcpy's the whole entry **including the name**, and the lookup above re-resolves by name every frame — so the lookup follows the rotation and the content never visibly changes. **OP-7 is the prerequisite**: once indices are map-load-resolved, delete the name-hash rotation outright. **Corrected design** — the roadmap's old recorded fix ("rotate width/height/def_ptr only") is now WRONG: v0.34.4's OP-2 added a lockstep composite-cache rotation, so the moment the hash stops rotating those three `tex_comp_*` slots must be **invalidated, not rotated**, or the pairing inverts. Needs a WAD-gated assert that the served column *changes* across anim steps — the existing OP-2 test only asserts cached-vs-uncached equality and does **not** cover this. |
+| OP-5a | **`thing_check_sight` per-linedef bbox early reject** | The byte-identical half of OP-5: a pure early-reject that cannot change which linedefs block, so it ships under this batch's gate and gives v0.35.0 a measured baseline. |
+| OP-10 | **Palette→XRGB present LUT** | A 256-entry precomputed LUT replaces 3 `load8` + shifts per source pixel in `framebuf_blit` / `framebuf_present_wayland`. Off the render bench, on every presented frame — so it matters most on AGNOS. |
+| OP-9 | **Clip-band incremental stepping** | Lowest value in the batch. Drop it if the bench delta is inside variance. |
 
-### v0.28.9 — BSP + collision audit (original Black Book sub-phase)
+**Gate**: nothing blocks it. Exit: interleaved bench A/B (each item measured separately — a batch number
+hides a regression), 9-map + 5-menu PPM byte-identical at tick 0, tick-N PPM differing only for SLADRIP
+walls, all `tests/*.tcyr`, fuzz ×5, AGNOS QEMU pixel-diff 100%.
 
-| # | Item | Reference | Detail |
-|---|------|-----------|--------|
-| 1 | BSP traversal invariants | Black Book ch. 7 + bsp lib | `bsp_point_on_side` parity; front-to-back walk order |
-| 2 | Subsector containment | Black Book ch. 7 | every point in a subsector returns that subsector |
-| 3 | Wall-slide collision | Black Book ch. 12 | slide against angled walls matches reference |
-| 4 | Blockmap query correctness (+ C3 BLOCKMAP bounds) | Unofficial Specs §4.7 | cell-list parity on E1M6; re-verify the 2026-04-13 C3 finding |
+### v0.34.8 — Decoder robustness + the fuzz coverage v0.34.9 needs
 
-### v0.28.10 — Game state audit (original Black Book sub-phase)
-
-| # | Item | Reference | Detail |
-|---|------|-----------|--------|
-| 1 | ~~`R_DrawPSprite` weapon-sprite coords~~ **RESOLVED 0.30.1** | Black Book ch. 11 | psprite hotspot `sx=1−leftoffset / sy=16−topoffset` (was `253+loff/228+toff`, pistol-only by coincidence) — all weapons/frames now anchored; muzzle-flash overlay added. Bob still rides the same `weapon_bob_x/y` deltas. |
-| 2 | Episode-end intermission | Unofficial Specs §1.10 | E1M8 boss kill → text → bunny scroll |
-| 3 | Visplane budget under stress | Unofficial Specs §10.4 | E1M9 + max things: no overflow (bounded by the F08 pool) |
-
-### ~~v0.28.11 — Security audit refresh~~ SHIPPED as v0.33.8 (2026-07-12)
-
-Partly discharged early by 0.28.0 (F01/F02/F03/F19 patch-decode propagation + F17 OOB-write fix); the pre-PWAD remainder shipped as **v0.33.8**.
-
-| # | Item | Disposition |
-|---|------|-------------|
-| 0 | **BSP node-cycle gap** (HIGH — hostile cycle → unbounded BSP walk) | ✅ **0.33.8** — `map_validate_bsp_acyclic` (iterative DFS from root, rejects cycles/shared-subtrees at load) |
-| 0b | **R-3** zero-seg subsector / `map_point_sector` over-read | ✅ **0.33.8** — count==0 reject + descent cap + ss/seg/line bounds |
-| 0c | **M-6/R-10** frame-stall (unclamped masked/back-sector render loops) | ✅ **0.33.8** — masked-seg + `render_draw_tex_column` clamped up-front (byte-identical A/B) |
-| 1 | Re-walk the 2026-04-13 CVE checklist | ✅ **0.33.8** — C3 (BLOCKMAP) + H1 (WAD short-read zero-fill) confirmed still-fixed@0.24.0 (consolidated-audit sweep) |
-| 2 | Fuzz-corpus refresh (patch / TEXTURE1 decoders) | ✅ **0.33.8** — `fuzz/fuzz_texture.cyr` (structured TEXTURE1/PNAMES decoder fuzzer, coverage-verified) |
-| 3 | Bench formatter fix (`min > max` on sub-ms averages) | **deferred** — the formatter is in the cyrius **stdlib** `lib/bench.cyr` (not doom source); a cyrius-repo item |
-| 4 | **G-13** sector-0 degenerate-leaf → −1 + caller handling | **deferred** — 0.33.8 returns a safe sector 0; the correctness refinement needs a caller sweep (moot now validation rejects the malformed maps) |
-
-### Gated / watch (carried forward)
-
-- **yukti `sys_stat` dup-fn cleanup** — strike known-issue #2 once yukti re-bundles without `sys_stat`. Did not fire under 6.0.29 or 6.0.83; likely already moot. Gated on a yukti rebundle. Does not block any 0.28.x graphics slot.
-- **`texture.cyr` Result adoption** — `texture_get_column` typed errors; revisit alongside the 0.28.5 visplane rewrite.
-- **`lib/random.cyr`** (v5.9.x) — deterministic per-tick PRNG; not adopted unless wanted for intermission/menu polish.
-- **`#io` effect annotations** (v5.11.x) — defer until Cyrius pins the annotation surface as stable.
-- **mabda 3.0 fold / bayan-ganita carve** — doom uses no JSON/TOML, no-op for us.
-
----
-
-## v0.29.x — Performance pass (held against the Cyrius perf/regalloc arc = v6.5.x)
-
-Re-targeted from the original 0.27.0 thesis. Cyrius's compiler-optimization track moves
-cyrius-doom's hot paths. Hand-optimizing `fx_mul` / `asr` / column loops today would fight the
-codegen once the linear-scan register allocator lands and delivers its projected 2–3× on hot
-inner loops. **Gate corrected 2026-07-12**: the full IR/regalloc perf work is the cyrius **v6.5.x
-Performance-Quality** minor, not v6.4.x (6.4.x is the ABI/Language-Features minor — it shipped the
-async runtime, SIMD/f64 scalar returns, UEFI signing, and `>>>`, but the regalloc-substrate perf
-passes are explicitly v6.5.x per the cyrius roadmap "Deferral backlog — pinned order").
-
-| # | Item | Gated on | Detail |
-|---|------|----------|--------|
-| 1 | Cyrius peephole / strength-reduction wins | Upstream (partly landed across 6.3.x–6.4.x: redundant-reload elim, frame-trim) | Small runtime wins on math-dense loops — a free bump each time a pass lands. |
-| 2 | IR-driven DCE + const/dead-store elim (real binary shrink) | Upstream **v6.5.x** (IR substrate) | Today we NOP ~98 KB of dead code (same file size). Real DCE strips it — binary genuinely shrinks. |
-| 3 | Linear-scan regalloc (the single biggest win) | Upstream **v6.5.x — Performance-Quality** | `render_frame` projection: 2.1 ms → ≤1.0 ms. Column renderer, BSP walk, patch cache all benefit. |
-| 4 | Re-bench hot paths per upstream perf-phase landing | Pending | `bench-history.csv` row per phase, A/B before/after to confirm the compiler wins stick. |
-| 5 | Revisit manual patterns only after the regalloc lands | Pending | Any remaining 5–10 % wins from column-loop restructure are worth chasing then; before then, no. |
-| 6 | ~~Native-scale midtexture w/ peg anchoring~~ | **SHIPPED 0.34.0** | F06/RC-W3 — all four wall sections now step V by `fixed_div(FIXED_ONE, col_scale)` = `dc_iscale`; peg anchoring wired (F-R3/F-R4). **R-8** peg-offset follow-up may still apply — re-check against the shipped code. |
-| 7 | Perspective-correct U / depth across segs | ✅ **DONE — 0.28.4** | F22 — shipped: interpolate scale (∝ 1/z) for depth and u·scale for U, both ÷ the interpolated scale, in `render_seg` + `render_masked_segs`. |
-| 8 | `asr()` → native `>>>` migration | **cyrius 6.4.74** (`>>>` shipped at .46 but was const-fold-UNGUARDED until .74 — see the note at the top of this file) → **v0.34.x** | ~95 `asr()` call sites; native sign-preserving shift removes the helper-call overhead on every signed shift. Large mechanical change with its own build+test+fuzz gate — opt-in, not rushed. **Gate**: re-run `tests/regression_asr.tcyr`'s floor asserts with `>>>` substituted for `asr()` first — doom shares bsp 1.2.1's floor semantics and `>>>` must emit SAR, not truncate toward zero. Until it lands, `asr()` stays the rule. |
-
----
-
-## Music (v0.31.4 wired the base; fidelity follow-ups)
-
-`src/music.cyr` (v0.31.4) parses/sequences the MUS lumps and plays them through a simple
-sine+envelope synth. Follow-ups toward fidelity:
+Five findings that all live in the patch/post decoders and share one harness. **Ships before v0.34.9 by
+design**: that cut widens what the engine will admit, and the sprite/flat decoders have *no fuzz target at
+all* today — widening admission over unfuzzed decoders is the wrong order.
 
 | # | Item | Detail |
 |---|------|--------|
-| 1 | **OPL2 FM synthesis via `GENMIDI`** | Real DOOM timbre. The IWAD's `GENMIDI` lump (11908 B) maps GM instruments to 2-operator OPL2 patches; needs an OPL2 emulator (operator FM + envelope generators + feedback) + GENMIDI parsing. Large module — the biggest fidelity win. |
-| 2 | **MUS percussion (channel 15)** | v1 skips the drum channel. Map percussion notes to a noise/drum voice (or the OPL rhythm mode once #1 lands). E1M1 is drum-driven, so this is high-impact for feel. |
-| 3 | **Pitch bend + fine controllers** | v1 ignores pitch-bend (type 2) and most controllers (keeps volume + all-notes-off). Apply bend to the voice phase; honour expression/pan. |
-| 4 | **Per-map + intermission/victory tracks** | `D_INTER` (intermission), `D_VICTOR` (E1M8 end) tracks — wire them to the intermission/ending screens (map + title `D_INTRO` already wired). |
-| 5 | **Amplitude/level tuning** | `MUS_AMP_SHIFT` + `music_volume` default set blind (no audio on the dev box); tune on a real jack via `--music-test`. |
+| R-9 | **Post-walk safety caps are inconsistent across the four decoders** | 64 / 128 / 128 / 256 in status / render / sprite / texture. A legal 200-post column renders truncated in the HUD path and complete in the texture path. Unify on one shared constant. |
+| F06-1 | **`tex_h > TEX_COL_MAX` clamp** | **Re-rated up**: TX-3 gave the unclamped `texture_height` three anchor consumers via `render_vmid`, so the failure mode is now a whole-section wrong V anchor, not one blank column. One clamp at `texture_init`/`texture_height` closes all three. |
+| R-5 | **Patch-dim / height-delta upper clamps** | `pw`/`ph` are read raw from the WAD and `ph` is never validated. Memory-safe today via the `dy` guard; this is the cosmetic half. |
+| res-2 | **The sprite + flat decoders have no fuzz target** | Write both. Correct the roadmap/audit claim that the fuzz-corpus item shipped complete at 0.33.8 — `fuzz_texture.cyr` covers TEXTURE1/PNAMES only. |
+| P-8 | **`--ppm` opens /dev/fb0 anyway** | Screenshot mode still opens the panel read-write, ioctls it, and allocates a panel-sized scratch it never touches. Early-out `PM_PPM` the way `PM_WAYLAND` already does. |
+
+**Gate**: after v0.34.7 (shares `texture.cyr` — let the index-cache restructure land first so the clamps sit
+on the final shape). Exit: 7 fuzz targets green, PPM still exactly 192,015 B, 9-map byte-identical, and an
+`--ppm` run traced to prove zero fb0 syscalls.
+
+### v0.34.9 — Full-IWAD capacity (the gate-opener)
+
+**The highest-leverage item in the plan, and it had no roadmap row** — only its `FLAT_MAX` quarter was
+tracked. Four silent truncations plus one missing lump gate every registered-WAD item in this file:
+
+- `WAD_MAX_LUMPS = 2048`, silently clamped at [wad.cyr:126](../../src/wad.cyr#L126) — registered DOOM.WAD is
+  ~2306 lumps, so **the WAD does not even load intact**, with no warning.
+- `TEX_MAX = 128`, `PATCH_MAX = 350`, `FLAT_MAX = 64` — all silent.
+- **`TEXTURE2` is never looked up.** Registered IWADs put roughly half their wall textures there.
+
+Raise each cap (or size dynamically), `sakshi_warn` on truncation instead of clamping silently, and parse
+TEXTURE2 onto the TEXTURE1 table. Ship **before** a registered WAD is acquired — this is the single door
+behind five separate "registered-WAD-gated" items. Take `texture.cyr` Result adoption here too, since every
+error path in the file is being touched anyway.
+
+**Gate**: after v0.34.8. Exit: 9-map shareware PPM byte-identical (raising a cap must not move shareware
+output), plus a synthetic over-cap WAD proving the warn fires.
+
+### v0.34.10 — `asr()` → native `>>>` migration
+
+Mechanical, engine-wide, deliberately isolated in its own cut. **The gate is now clear**: cyrius 6.4.74
+added the const-fold guard `>>>` was missing between 6.4.46 and .74, and we pin 6.4.78.
+
+**HARD PRE-GATE before touching any of the 59 `src/` sites**: re-run `tests/regression_asr.tcyr`'s floor
+asserts with `>>>` substituted for `asr()`. doom shares bsp 1.2.1's floor semantics engine-wide; if `>>>`
+truncates toward zero instead of emitting SAR, the migration silently corrupts every negative-coordinate
+computation. `lib/bsp.cyr` stays as-is (vendored). Update CLAUDE.md's shift rule to name the new canonical
+form, and correct the two stale framings (the 6.4.74 gate, and the count: 59, not ~95).
+
+---
+
+## v0.35.x — The gameplay arc
+
+**Minor bump on purpose**: unlike everything above, these cuts are *not* byte-identical — they change what
+monsters do, where things sit in z, and how a level ends. The PPM A/B gate stops being sufficient here, so
+each release below names a gameplay gate instead.
+
+### v0.35.0 — Monster sight + AI
+
+| # | Item | Detail |
+|---|------|--------|
+| OP-5b | **REJECT-lump LOS pre-test + staggered idle wake** | The behavior-changing half. **Re-rated to the front of the perf work**: v0.34.1's `TF_AMBUSH` gate keeps deaf monsters asleep through gunfire, so nearly every E1M1-UV monster now sits in `STATE_SPAWN` paying the full per-linedef sight scan every tick — the only remaining item that can breach the 22 ms budget on a dense map. |
+| RC-G1 | **Monsters aren't obstruction-checked by closing doors** | Only the player is. The per-thing sector resolver OP-5b builds is what this needs — `doors.cyr` even says in-comment that it was riding the since-refuted F15. |
+| EF-2 | **Front-180° FOV gate on the `STATE_SPAWN`→SEE wake** | Deferred from v0.34.1; matches vanilla `A_Look`. Monsters would then wake only to what is in front of them. |
+| F331-4 | **`P_NewChaseDir` 8-direction chase** | Chasers currently head straight at the player via `fixed_atan2` with a single axis-slide fallback; vanilla's 8-direction walk with dogleg fallbacks rounds corners and paces on ledges. Pairs with the FOV gate — both change every monster. |
+
+**Gate**: after v0.34.7 (OP-5a baseline) and v0.34.10 (do not migrate shifts under a live AI rewrite). Exit
+is a **gameplay** gate: a scripted E1M1 engagement with recorded wake/chase/attack counts, plus a bench run
+proving the sight cost actually fell.
+
+### v0.35.1 — Real thing-z
+
+| # | Item | Detail |
+|---|------|--------|
+| RC-S6 | **Things have no z** | Sprites and physics use the sector floor height. Populate and read a real z; `sprite.cyr` stops BSP-resolving `thing_floor` per frame; the `+= 32` projectile-height hack goes. |
+| F331-3 | **Sight / hitscan z-slope** | `thing_check_sight` is 2D — a monster fully below a window sill still "sees" over it. Errs permissive today. |
+| — | **Precise missile-vs-wall trace** | z-aware, replacing the `player_check_position` approximation that lets a rocket clip on tall steps in 2.5D. |
+| F331-2 | **Vanilla ledge-glide z** | tmfloorz contacted-line tracking replacing the instant z-snap + drop-off escape-rule cure. Lowest value of the four; drop if the cut gets heavy. |
+
+**Gate**: after v0.35.0. Exit: mutation-proven thing-struct layout asserts (the v0.34.5 `MASKED_ENTRY`
+sentinel pattern — a missed offset here is silent corruption), plus a WAD-gated regression that a monster
+below a sill no longer sees over it.
+
+### v0.35.2 — Episode end ⭐ *critical path*
+
+| # | Item | Detail |
+|---|------|--------|
+| P4 | **E1M8 boss kill → finale** | Text screen, then the bunny scroll. Replaces the E1M1 wrap at [level.cyr:136](../../src/level.cyr#L136). |
+| MUSIC-4 | **`D_VICTOR` + `D_INTER`** | Per-map and `D_INTRO` are already wired; these two screens have no track. |
+| v1.0.0-1 | **Verify "playable start-to-finish"** | A scripted E1M1→E1M8 pty playthrough under skill_normal that reaches the finale. This *is* the v1.0.0 item-1 evidence. |
+
+**Gate**: nothing blocks it — schedulable any time after v0.34.7.
+
+### v0.35.3 — Combat cosmetics + two dormant one-liners
+
+BEXP rocket-explosion frames (detonation is instant today) · full xdeath giblet animation on overkill ·
+animated multi-frame muzzle flash (chaingun/rocket show only frame A — needs a flash counter decoupled from
+`weapon_fire_max`) · **G-11** BFG is collectible but unselectable (fix ships here; play-verification is
+registered-WAD gated) · **G-10** diagonal movement calls `doors_walk_trigger` twice with identical arguments.
+
+**Gate**: after v0.35.1. Exit: staged-viewpoint PPMs at successive ticks per animation; a WAD-free assert
+that a diagonal step produces exactly one trigger call.
+
+### v0.35.4 — Audio + music fidelity
+
+**MUSIC-2** MUS percussion (channel 15 is dropped entirely — E1M1's track is drum-driven, so this is the
+high-impact one) · **MUSIC-3** pitch bend + expression/pan controllers · **AUDIO-6** gate the PC-speaker
+beep when `audio_dev != 0` (resolve the `sound.cyr`/`audio.cyr` include-order constraint with a shared flag)
+· **AUDIO-7** the four 0.30.7 cosmetic nits.
+
+**Gate**: none. Exit: `fuzz_mus` over the new paths + a deterministic PCM dump of E1M1's track.
+
+### v0.35.5 — Lighting + plane parity
+
+Closes the last of the v0.28.7 sub-audit: **brightness/lighting A-B vs the COLORMAP reference** (write the
+per-light-level PPM diff to `docs/audit/`) · **RC-S8** sprite dimming still uses an ad-hoc `/96` ramp
+instead of the vanilla scalelight/zlight model the walls already use · half-pixel (`FRACUNIT/2`) yslope +
+column-center offsets · **F_SKY1 floors** treated as sky (rare but legal in PWADs).
+
+**Gate**: after v0.34.7.
+
+### v0.35.6 — Engine-invariant audit (verification-first)
+
+The original Black Book sub-audits, deliberately run **after** the gameplay arc so they assert the shipped
+engine rather than one mid-rewrite: BSP traversal invariants (`bsp_point_on_side` parity, front-to-back walk
+order) · subsector containment sweep · wall-slide collision parity · blockmap cell-list parity on E1M6 (the
+C3 bounds half shipped in 0.33.8 — only the parity half remains) · visplane budget stress (E1M9 + max
+things, `plane_dropped` stays 0) · **G-13** sector-0 degenerate leaf → −1 plus the caller sweep the
+containment audit produces.
+
+**Gate**: after v0.35.1. Exit: new assert groups per item — this cut's deliverable *is* tests.
+
+---
+
+## v0.35.7–v0.38.0 — Desktop, input, and synthesis
+
+Ordered so the `win_*` seam churns exactly once: scaling → pointer → X11.
+
+| Release | Theme | Contents |
+|---|---|---|
+| **v0.35.7** | Desktop present polish | **WF-4** aspect-correct (1.2× vertical) + fill-to-window modes · **WF-3** HiDPI / fractional scale (`set_buffer_scale`, `wp_fractional_scale_v1` + viewporter) · **WF-7** re-present in the death-wait loop so the death frame rescales · **WF-6** per-event size table for the remaining fixed-offset wire handlers. Independent of the entire gameplay arc. |
+| **v0.36.0** | **Mouse / pointer input** (WF-1) | The last input mode DOOM expects on a desktop. `wl_pointer` off the seat → turn/fire/use through the existing bitmask flags; a `win_next_pointer` seam entry (fb0/AGNOS/PPM return no-pointer); `zwp_relative_pointer` + `zwp_pointer_constraints` for real mouse-look; a sensitivity option following the Sound-menu live-preview pattern. **After v0.35.7** — the seam must be settled first. |
+| **v0.37.0** ⭐ | **Native X11 backend** (WF-5) | *Critical path.* `src/platform/x11/{wire,client}.cyr` mirroring the wayland/ split; MIT-SHM or PutImage present; `PM_X11` in `PresentMode`; full keyboard + the pointer seam from v0.36.0; lifecycle incl. focus clearing the input latches the way Wayland and setu already do. Closes the v1.0.0 "multiple display backends" item. |
+| **v0.38.0** | **OPL2 FM synthesis via GENMIDI** | The biggest remaining fidelity win and a genuinely large module: GENMIDI parsing (GM → 2-op OPL2 patches incl. the percussion bank), an OPL2 emulator (operator FM, ADSR, feedback) in pure 16.16, routing the MUS sequencer into OPL channels, and OPL rhythm mode replacing v0.35.4's noise-voice stand-in. **After v0.35.4.** |
 
 ---
 
 ## v1.0.0 — Ship
 
-| # | Item | Status | Detail |
-|---|------|--------|--------|
-| 1 | Plays E1M1–E1M9 (shareware) | Renders all 9 maps; full gameplay loop wired | Reframe as "playable start-to-finish under skill_normal" |
-| 2 | X11 display backend (native) | Not started | Direct X11 protocol, no Python bridge — fills the same `win_*` seam as Wayland (WF-5 in the Wayland follow-ups) |
-| 3 | Wayland display backend | ✅ **SHIPPED 0.33.0** (2026-07-09) | puka-pattern sovereign Wayland client; see completed-phases |
-| 4 | Runs on AGNOS kernel | Not started | Kernel framebuffer + PS/2 |
-| 5 | Runs on Linux /dev/fb0 | Not started | Userspace fallback |
-| 6 | In AGNOS initrd | Not started | Boot → shell → doom |
+**Blocked only on v0.35.2 and v0.37.0.** Checklist items 4 (runs on AGNOS), 5 (runs on /dev/fb0) and 6 (in
+the AGNOS initrd) already ship — correct them to ✅ with their evidence at tag time, and fold item 2 (X11)
+into v0.37.0 as one row rather than two.
+
+Ship criteria: a full E1M1→E1M8 playthrough under skill_normal on **each** of the four backends (fb0,
+Wayland, X11, AGNOS/setu); the full CLAUDE.md closeout pass (every `tests/*.tcyr`, bench vs the prior
+closeout, `CYRIUS_DCE=1` NOP-sled recorded, security re-scan, clean-from-scratch build); and tag-time doc
+truth across VERSION, `cyrius.cyml`, the CHANGELOG header, `state.md`, `completed-phases.md` and the tag.
 
 ---
 
-## Future
+## Holding groups — blocked, not scheduled
 
-| Item | Detail |
-|------|--------|
-| Wolfenstein 3D mode | Raycaster renderer using Black Book patterns |
-| GPU rendering via mabda | wgpu backend for hardware acceleration |
-| Network multiplayer | Peer-to-peer via majra |
-| PWAD support | Custom maps/mods |
-| Full DOOM.WAD | Episodes 2–3 (registered version) |
+These are **not** interleaved above on purpose: each needs something that does not exist yet, and mixing
+them into the release plan is what made the previous roadmap unreadable.
+
+### HOLD-A — registered-WAD gated
+
+Needs a registered DOOM.WAD on the box **and** v0.34.9 shipped. Neither alone is sufficient — without the
+capacity lift the WAD does not load intact.
+
+Blazing/turbo door + lift speed (specials 117/118/122/70/71 run at base speed; needs a per-thinker speed
+field) · **F331-1** Baron BAL7 fireballs (shareware has no BAL7 sprites, so barons stay melee-only) ·
+**G-11** BFG play-verification (thing type 2006 is registered-only) · **RC-G8 L6b** WILV intermission level
+names past episode 1 · episodes 2–3, which are the first real exercise of every cap raised in v0.34.9.
+
+### HOLD-B — hardware gated
+
+**F-R5** 24-bpp / 8-bpp `/dev/fb0` panels hit the 32-bpp blit (1-byte row overrun on 24-bpp) — needs a
+non-32-bpp panel · **AGNOS blit#39 vsync watch** — the per-frame present has no timing guard; if the kernel
+ever blocks to vblank on real iron the frame budget changes · **MUSIC-5** `MUS_AMP_SHIFT`/`music_volume` are
+blind defaults, need a real jack · **AUDIO-5** device-pick heuristic identifies the analog codec purely by
+"device 0 has a capture sibling", which snd-aloop/dummy can win (also upstream-gated).
+
+### HOLD-C — upstream gated
+
+**v0.29.x items 1–4** — the deep perf pass is gated on cyrius **v6.5.x Performance-Quality** (peephole /
+strength reduction, IR-driven DCE for a *real* binary shrink — today `CYRIUS_DCE=1` only NOPs ~100 KB in
+place — and linear-scan regalloc, the single biggest projected win) · bench formatter `min > max` lives in
+the cyrius stdlib · `#io` effect annotations await a stable annotation surface · **WF-2** GPU present needs
+the mabda dep + a dmabuf/EGL path.
+
+### HOLD-D — post-v1.0.0
+
+PWAD support (needs its own P(-1) security pass on malicious-PWAD vectors) · network multiplayer via majra ·
+Wolfenstein 3D raycaster mode · WF-2 GPU present if mabda ever lands.
+
+---
+
+## Dropped — do not re-add
+
+Listed once so they stop costing review attention every cut.
+
+| Item | Why |
+|---|---|
+| **yukti `sys_stat` dup-fn cleanup** | REFUTED — the stdlib list has no yukti; vani is vendored. Never fired under any pin. |
+| **mabda 3.0 fold / bayan-ganita carve** | REFUTED — doom uses no JSON/TOML. No-op. |
+| **F26 automap line pre-clip** | Refuted 2026-07-17 — measured negligible; the automap is not in the play loop. |
+| **`lib/random.cyr` adoption** | Opt-in only, never wanted; doom's `p_random` is vanilla-faithful by design. |
+| **48000 Hz audio fallback** | Already shipped — 48000 is the preferred rate with a working fractional upsampler. |
+| **Per-sound peak normalization** | Contradicts the deliberate faithful-loudness choice. |
+| **v0.28.8 as a slot** | Superseded — absorbed into the OP items (F12→OP-7, F15→OP-5's resolver, F26 dropped). |
+
+> **Correction worth keeping**: v0.29.x item 7 (F22 perspective-correct U/depth) was marked DONE-in-0.28.4,
+> but that implementation **no longer exists** — TX-1/TX-2 deleted exactly that screen-space lerp in v0.34.2
+> and replaced it with a per-column world-space ray-cast. The *property* holds; the cited code does not.
 
 ---
 

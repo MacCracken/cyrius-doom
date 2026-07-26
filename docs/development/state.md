@@ -98,7 +98,7 @@ Frame-time budget: 22 ms per tick @ 35 Hz. Current: ~12× headroom.
 
 ## In-flight slot map
 
-Current arc: **v0.28.x graphics** (review/hardening/parity/performance). The v0.27.x language-adoption arc is complete; the perf micro-pass remains re-targeted to v0.29.x (gated on Cyrius O4 regalloc, v6.4.x).
+Current arc: **v0.34.x closeout** → **v0.35.x gameplay**. [`roadmap.md`](roadmap.md) was reorganized at the v0.34.6 cut into **16 pinned releases** (v0.34.7 → v1.0.0) plus four labelled holding groups; the old "v0.28.x graphics arc" framing is retired (0.28.5/.6/.11 all shipped long ago under other version numbers). **Critical path to v1.0.0 is two releases**: v0.35.2 (episode-end — `level_advance` still wraps E1M8→E1M1, so the game cannot be finished) and v0.37.0 (native X11 — the only unmet display-backend item). The deep perf pass stays gated on cyrius **v6.5.x** Performance-Quality.
 
 | Slot | Status | What |
 |---|---|---|
