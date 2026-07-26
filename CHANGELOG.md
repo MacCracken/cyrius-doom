@@ -7,11 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.34.5] - 2026-07-25 — texture world-lock completed (masked + vertical) + toolchain/dep refresh
+## [0.34.6] - 2026-07-25 — vertical texture world-lock (TX-3), intermission layout, OP-8
 
-Both halves of the texture world-lock work — **TX-MASKED** (grates/two-sided midtextures) and
-**TX-3** (vertical V anchor) — plus the toolchain and vendored-dep refresh, an intermission-layout
-fix from the field, and three defects the new toolchain's diagnostics surfaced.
+Completes the texture world-lock started in v0.34.5: TX-MASKED fixed the horizontal axis on
+masked midtextures, **TX-3** fixes the vertical axis on all four wall sections. Plus the
+field-reported intermission title overlap (and the vanilla "entering" second line), and **OP-8**,
+the byte-identical half of the per-column arithmetic reduction.
 
 ### Fixed
 
@@ -61,6 +62,83 @@ fix from the field, and three defects the new toolchain's diagnostics surfaced.
   *second copy* of the layout that had drifted — it never drew the level name at all. The draw is now
   split into `level_intermission_draw()` and both paths call it, so the screenshot renders the real
   screen and the two cannot diverge again.
+
+### Changed
+
+- **OP-8 — hoisted the loop-invariant half of the per-column height projections** in both the
+  wall pass and the masked pass. `screen_y` needs
+  `fixed_div(fixed_mul(H<<16 - eye, PROJ_DIST), depth)`, but only `depth` varies per column, so
+  `fixed_mul(H<<16 - eye, PROJ_DIST)` is a per-seg constant — six of them (front/back ceiling and
+  floor, plus the masked opening's two). `ty_step` likewise moved from once-per-drawn-section to
+  once per column. **Bit-exact**: identical operands in identical order, just evaluated once
+  instead of 2,637 times — and the 9-map + 5-menu A/B is byte-identical, as it must be.
+  **Measured −46 µs (−3.6%)** on the true spawn frame, by interleaved A/B (4 pairs, post-change
+  wins every pair; best-of-mins 1.286 → 1.240 ms).
+
+  **What OP-8 deliberately does NOT do, and why.** The audit sketched it as vanilla's incremental
+  `rw_scale += rw_scalestep` across the seg. That design is **refuted for this engine**:
+  TX-1/TX-2/TX-MASKED replaced exactly that kind of screen-space interpolation with a per-column
+  world-space ray-cast, precisely because interpolating between near-clip-corrupted endpoints is
+  what made textures swim (48 texels on walls, 53 on grates). Reintroducing an incremental scale
+  would trade the correctness this minor just bought for a few µs. The remaining per-column
+  divides — the ray-cast, `col_scale`, and the four projections — are load-bearing. This is why
+  the measured win lands at the low end of the audit's −100–300 µs estimate.
+
+- **`level_next_map()` split out of `level_advance()`** so the intermission can name the level
+  being entered off the same rule that performs the move. Two copies of that table would drift and
+  the screen would confidently announce the wrong level. Behaviour-preserving, including the
+  unknown-episode case (returns `cur_map` unchanged, as before).
+
+### Performance
+
+- **OP-8: −46 µs (−3.6%) on the true spawn frame, byte-identical.** Interleaved A/B, 4 pairs,
+  post-change wins **every** pair; best-of-mins **1.286 → 1.240 ms**, `render_frame` ~1.11 → ~1.04 ms.
+- **TX-3 itself is variance-neutral**: 1.288 ms (post-TX-MASKED) → 1.284 ms. It adds a multiply-add
+  per drawn section but hoists `texture_height` and the pegging branches out of the column loop.
+- Binary **455,824 B** (agnos **442,352 B**); NOP-sled 535 fns / 100,688 B.
+- **Read the paired A/B, not the absolute row.** The dev box picked up other users mid-cut (load
+  0.7 → 2.6), which moves absolute readings by more than this change is worth: the same binary
+  measured 1.240 ms quiet and 1.273–1.333 ms loaded. `bench-history.csv`'s 0.34.6 row is the best of
+  three runs (a loaded box only ever inflates), and is **not** comparable to 0.34.5's row, which was
+  taken quiet. The interleaved A/B is immune to this by construction, which is why the −46 µs claim
+  rests on it.
+
+### Verification
+
+- **TX-3 A/B**: viewport-only, 4.5–16% of viewport per map, HUD and all 5 menus **byte-identical**,
+  distinct-colour counts unchanged, and **184 fewer black pixels** overall (E1M5 alone drops 192) —
+  the clipped-column fix removes void, it does not add it.
+- **OP-8 A/B**: 9 maps + 5 menus + the intermission screen **byte-identical**, as a bit-exact hoist
+  must be. That is the whole gate for it — a single differing pixel would mean the hoist changed
+  rounding somewhere.
+- **Tests 227 WAD-free / 341 full.** The TX-3 group asserts the pegging equivalence for all six
+  section×pegging combinations by reconstructing the *old* `ystart` from the new `v_mid` at the
+  exactly-projected wall-top row, plus that a clipped start row *advances* V rather than restarting
+  it. **Mutation-proven**: inverting one anchor's pegging sense fails 4 asserts.
+- All three `tests/*.tcyr` green (227 / 18 / 12), fuzz ×5 clean, `cyrius deps --verify` **36/0**,
+  clean-from-scratch resolve + `CYRIUS_DCE=1` build, both targets.
+- **AGNOS QEMU `doom-directmap-smoke.sh` PASS on the final binary**, and a 4×-block pixel-diff of the
+  AGNOS screendump against the Linux `--ppm` is **100.00% exact — 0 of 64,000 pixels differ**
+  (viewport and HUD both 100%). All three render changes are target-agnostic.
+- The `--ppm` intermission screen is now part of the captured regression set. It renders the real
+  `level_intermission_draw()`, so the title block and the next-level name are gated by an image
+  diff — which is exactly what was missing when the overlap shipped.
+
+### Deferred
+
+- **Clip-band subject scale** still uses the lerped `scale1/scale2` while the masked pass's own
+  per-column scale is the ray-cast value, so a grate can be marginally mis-occluded at its near end.
+  → OP-9.
+- **`level_next_map()` has no unit test** — covering it means pulling `level.cyr` (and transitively
+  `menu.cyr`) into the WAD-free harness. Its output is now visible on the captured intermission
+  image instead, which is the cheaper gate.
+
+## [0.34.5] - 2026-07-25 — masked-midtexture world-lock + toolchain/dep refresh
+
+The masked half of the texture world-lock work, the toolchain and vendored-dep refresh, and
+three latent defects the new toolchain's diagnostics surfaced. Shipped as commit `12f6682`.
+
+### Fixed
 
 - **TX-MASKED — grates and two-sided midtextures swam against the world exactly as walls did
   before v0.34.2.** `render_masked_one` still derived per-column depth and texture-U by lerping the
@@ -165,48 +243,28 @@ fix from the field, and three defects the new toolchain's diagnostics surfaced.
 
 ### Performance
 
-- **Variance-neutral across both changes; no perf claim in either direction.**
-  `render_frame+sprites_spawned` best-of-mins: **1.298 ms** before TX-MASKED → **1.288 ms** after →
-  **1.284 ms** after TX-3 (3-4 runs each, quiet box). `render_frame` 1.112 ms, `texture_get_column`
-  474 ns, `fixed_mul` 6 ns. Work is added and removed on both sides: TX-MASKED's shared
-  `render_ray_param` costs one call per wall column but retires 2 multiplies + 2 lerps per seg and a
-  `fixed_div` per masked column; TX-3 adds a multiply-add per drawn section but hoists
-  `texture_height` and the pegging branches out of the column loop entirely.
-  Binary **455,824 B** (agnos **442,352 B**); NOP-sled 535 fns / 100,688 B.
+- **Variance-neutral; no perf claim.** `render_frame+sprites_spawned` best-of-mins **1.298 ms**
+  before → **1.288 ms** after. The shared `render_ray_param` costs one call per wall column but the
+  retired `uow` machinery removes 2 multiplies + 2 lerps per seg and a `fixed_div` per masked column.
+  Binary **455,816 B** (agnos **442,344 B**).
 
 ### Verification
 
-- **9-map + 5-menu `--ppm` A/B vs the 6.4.58 baseline**: HUD **100% byte-identical** on every capture,
-  all 5 menus byte-identical, 7 of 9 maps byte-identical at spawn, E1M6 2 px, E1M9 213 px
-  (0.40% of viewport) with **8 fewer black pixels** — spawn views mostly don't face a grate, and where
-  they do the change removes void rather than adding it. Distinct-colour counts unchanged everywhere
-  (no palette corruption).
+- **Pin bump alone: all 14 `--ppm` captures byte-identical** to the 6.4.58 baseline.
+- **After TX-MASKED**: HUD 100% byte-identical on every capture, all 5 menus byte-identical, 7 of 9
+  maps byte-identical at spawn, E1M6 2 px, E1M9 213 px (0.40% of viewport) with **8 fewer black
+  pixels**; distinct-colour counts unchanged everywhere.
 - The **+822 black pixels** in the staged near-clip view are **see-through slots, not voids**:
-  BRNBIGC is 128×128 with wide diagonal *transparent* stripes (verified by compositing the texture
-  straight out of the WAD's TEXTURE1/PNAMES/patch lumps), so a corrected U range legitimately exposes
-  more gap.
-- **TX-3 A/B**: viewport-only, 4.5-16% of viewport per map, HUD and all 5 menus **byte-identical**,
-  distinct-colour counts unchanged, and **184 fewer black pixels** overall (E1M5 alone drops 192) —
-  the clipped-column fix removes void, it does not add it.
-- **Tests 227 WAD-free / 341 full** (+46 over v0.34.4). An 18-sentinel **layout lock** round-tripped
-  through the real `render_store_masked` (a missed offset is silent memory corruption, not a compile
-  error); `render_ray_param` contract asserts (centre ray → seg midpoint, `[0,1]` clamping,
-  `den == 0` no div-by-zero, depth floored to near-clip behind the eye); and the TX-3 pegging
-  equivalence for all six section×pegging combinations. **Both new groups are mutation-proven** —
-  swapping two adjacent writer offsets fails exactly the two matching layout asserts, and inverting
-  one anchor's pegging sense fails 4 pegging asserts.
-- All three `tests/*.tcyr` green (227 / 18 / 12), fuzz ×5 clean (1000 / 50000 / 2000 / 1000 / 1000),
-  `cyrius deps --verify` **36/0**, both targets build clean.
-- **AGNOS QEMU `doom-directmap-smoke.sh` PASS on the final binary**, and a 4×-block pixel-diff of the
-  AGNOS screendump against the Linux `--ppm` is **100.00% exact — 0 of 64,000 pixels differ**
-  (viewport and HUD both 100%). Both render changes are target-agnostic.
+  BRNBIGC is 128×128 with wide diagonal *transparent* stripes, verified by compositing the texture
+  straight out of the WAD's TEXTURE1/PNAMES/patch lumps.
+- **Tests 212 WAD-free / 326 full.** 18-sentinel masked-layout lock (a missed offset is silent
+  memory corruption, not a compile error) + `render_ray_param` contract asserts. **Mutation-proven**:
+  swapping two adjacent writer offsets fails exactly the two matching asserts.
+- Fuzz ×5 clean, `cyrius deps --verify` **36/0**, **AGNOS QEMU direct-map render PASS** on the final
+  0.34.5 binary.
 
 ### Deferred
 
-- **OP-8 (per-seg incremental V stepping) is now unblocked** — the audit sequenced it after TX-3
-  because both restructure the same per-column V-step. → roadmap.
-- **Vanilla `WI_drawEL` also stacks the NEXT level's name under "ENTERING"**; we draw the label
-  alone, so there is nothing to overlap, but the second line is still missing. → roadmap.
 - **Clip-band subject scale** still uses the lerped `scale1/scale2` while the masked pass's own
   per-column scale is now the ray-cast value, so a grate can still be marginally mis-occluded at its
   near end. Cheap follow-up; recorded against OP-9.

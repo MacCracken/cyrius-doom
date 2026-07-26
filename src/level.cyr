@@ -115,28 +115,35 @@ fn level_exit_secret(): i64 {
     return 0;
 }
 
-# Advance to next map
-fn level_advance(): i64 {
+# Which map the pending exit leads to, WITHOUT advancing. Split out of
+# level_advance so the intermission can NAME the level being entered (vanilla
+# WI_drawEL) off the same rule that actually performs the move — two copies of
+# this table would drift, and the screen would confidently announce the wrong
+# level.
+fn level_next_map(): i64 {
     if (secret_exit_flag == 1) {
         # Secret exit: E1M3→E1M9, E2M5→E2M9, E3M6→E3M9
-        cur_map = 9;
-    } else {
-        if (cur_map == 9) {
-            # From secret level, go to next normal level
-            # E1M9→E1M4, E2M9→E2M6, E3M9→E3M7
-            if (cur_episode == 1) { cur_map = 4; }
-            if (cur_episode == 2) { cur_map = 6; }
-            if (cur_episode == 3) { cur_map = 7; }
-        } else {
-            if (cur_map == 8) {
-                # E1M8 = boss level, episode complete
-                # For now, wrap back to E1M1
-                cur_map = 1;
-            } else {
-                cur_map += 1;
-            }
-        }
+        return 9;
     }
+    if (cur_map == 9) {
+        # From secret level, go to next normal level
+        # E1M9→E1M4, E2M9→E2M6, E3M9→E3M7
+        if (cur_episode == 1) { return 4; }
+        if (cur_episode == 2) { return 6; }
+        if (cur_episode == 3) { return 7; }
+        return cur_map;              # unknown episode: unchanged, as before
+    }
+    if (cur_map == 8) {
+        # E1M8 = boss level, episode complete
+        # For now, wrap back to E1M1
+        return 1;
+    }
+    return cur_map + 1;
+}
+
+# Advance to next map
+fn level_advance(): i64 {
+    cur_map = level_next_map();
     next_level_flag = 0;
     secret_exit_flag = 0;
     return 0;
@@ -282,10 +289,22 @@ fn level_intermission_draw(): i64 {
     menu_draw_lump("WITIME", 50, sy + sp * 3);
     wi_draw_time(level_time, 200, sy + sp * 3);
 
-    # "Entering" label. Vanilla WI_drawEL also stacks the NEXT level's name
-    # under this one; we have no next-name draw yet, so the label stands alone
-    # and there is nothing here to overlap.
-    menu_draw_lump_centered("WIENTER", sy + sp * 4 + 10);
+    # "Entering" + the NEXT level's name below it (vanilla WI_drawEL: the label
+    # centred at the block top, then the level name centred below, offset by 5/4
+    # of the LEVEL-NAME patch height — the name's own height, not the label's).
+    # Same stacking rule as the FINISHED block above.
+    var ent_y = sy + sp * 4 + 10;
+    menu_draw_lump_centered("WIENTER", ent_y);
+    var nx_name = lv_name_buf();
+    memcpy(nx_name, "WILV0", 5);
+    store8(nx_name + 5, 48 + level_next_map() - 1);
+    store8(nx_name + 6, 0);
+    var nxw, nxh = menu_lump_wh(nx_name);
+    # No lump (registered-only WILVxx past episode 1) → draw nothing rather than
+    # stacking a missing patch, exactly as menu_draw_lump_centered would.
+    if (nxh > 0) {
+        menu_draw_lump_centered(nx_name, ent_y + (5 * nxh) / 4);
+    }
     return 0;
 }
 

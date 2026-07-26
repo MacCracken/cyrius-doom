@@ -1247,6 +1247,27 @@ fn render_seg(seg_idx): i64 {
     if (d_bfloor > d_open_bot) { d_open_bot = d_bfloor; }
     render_store_drawseg(sx1, sx2, wscale1, wscale2, ds_solid, d_open_top, d_open_bot);
 
+    # OP-8: hoist the loop-invariant half of the height projections.
+    #   screen_y = HALF_HEIGHT - fixed_to_int(fixed_div(fixed_mul(H<<16 - eye, PROJ_DIST), depth))
+    # Only `depth` varies per column, so `fixed_mul(H<<16 - eye, PROJ_DIST)` is a
+    # per-seg constant. Hoisting it leaves ONE fixed_div per projection per column
+    # and is BIT-EXACT — identical operands in identical order, evaluated once
+    # instead of 2,637 times.
+    #
+    # NOTE what OP-8 deliberately does NOT do. The audit's original sketch was
+    # vanilla's incremental `rw_scale += rw_scalestep` across the seg. That is now
+    # REFUTED for this engine: TX-1/TX-2/TX-MASKED replaced exactly that kind of
+    # screen-space interpolation with a per-column world-space ray-cast, because
+    # interpolating between near-clip-corrupted endpoints is what made textures
+    # swim (48 texels on walls, 53 on grates). Reintroducing an incremental scale
+    # would trade the correctness this minor just bought for ~µs. The remaining
+    # per-column divides (the ray-cast, col_scale, and the four projections) are
+    # load-bearing; only the invariants come out.
+    var pn_ceil = fixed_mul((ceil_h << 16) - eye_h, PROJ_DIST);
+    var pn_floor = fixed_mul((floor_h << 16) - eye_h, PROJ_DIST);
+    var pn_bceil = fixed_mul((back_ceil_h << 16) - eye_h, PROJ_DIST);
+    var pn_bfloor = fixed_mul((back_floor_h << 16) - eye_h, PROJ_DIST);
+
     # TX-3: anchor texture-V at the VIEW CENTRE (vanilla dc_texturemid) instead
     # of the wall-top row.
     #
@@ -1309,10 +1330,11 @@ fn render_seg(seg_idx): i64 {
         # Project floor and ceiling heights to screen Y
         # screen_y = HALF_HEIGHT - (height - eye_height) * PROJ_DIST / depth
         # (eye_h hoisted above the loop — it is per-seg, not per-column)
-        var ceil_screen = HALF_HEIGHT - fixed_to_int(
-        fixed_div(fixed_mul((ceil_h << 16) - eye_h, PROJ_DIST), depth));
-        var floor_screen = HALF_HEIGHT - fixed_to_int(
-        fixed_div(fixed_mul((floor_h << 16) - eye_h, PROJ_DIST), depth));
+        var ceil_screen = HALF_HEIGHT - fixed_to_int(fixed_div(pn_ceil, depth));
+        var floor_screen = HALF_HEIGHT - fixed_to_int(fixed_div(pn_floor, depth));
+        # OP-8: one fixed_div per section per column, and ty_step once per column
+        # instead of once per drawn section (it depends only on col_scale).
+        var ty_step = fixed_div(FIXED_ONE, col_scale);
 
         # Clamp to clip region — BOTH ends (audit R-1). Vanilla R_RenderSegLoop
         # bounds every section by both ceilingclip AND floorclip; clamping only the
@@ -1391,10 +1413,8 @@ fn render_seg(seg_idx): i64 {
         var tex_u = fixed_to_int(v4u);
 
         if (is_twosided != 0) {
-            var back_ceil_screen = HALF_HEIGHT - fixed_to_int(
-            fixed_div(fixed_mul((back_ceil_h << 16) - eye_h, PROJ_DIST), depth));
-            var back_floor_screen = HALF_HEIGHT - fixed_to_int(
-            fixed_div(fixed_mul((back_floor_h << 16) - eye_h, PROJ_DIST), depth));
+            var back_ceil_screen = HALF_HEIGHT - fixed_to_int(fixed_div(pn_bceil, depth));
+            var back_floor_screen = HALF_HEIGHT - fixed_to_int(fixed_div(pn_bfloor, depth));
 
             # Closed-portal gap coverage (RC-W2): once the portal is promoted
             # to solid, the upper and lower sections must meet with no
@@ -1444,7 +1464,6 @@ fn render_seg(seg_idx): i64 {
                             # dc_iscale, depth-only), NOT tex_h/section-height which
                             # squashed the whole texture into the section. Tall walls
                             # now tile (render_draw_tex_column %th), short walls clip.
-                            var ty_step = fixed_div(FIXED_ONE, col_scale);
                             # TX-3: V from the per-seg world anchor (upper_vmid,
                             # which already carries the DONTPEGTOP choice) rather
                             # than pinned to the floored ceil_screen row.
@@ -1464,7 +1483,6 @@ fn render_seg(seg_idx): i64 {
                 if (lower_tex >= 0) {
                     var lh = floor_screen - back_floor_screen;
                     if (lh > 0) {
-                        var ty_step = fixed_div(FIXED_ONE, col_scale);   # native scale (F06)
                         # TX-3: V from the per-seg world anchor. This also SUBSUMES
                         # the old closed-gap/clamp compensation (`lower_ystart +=
                         # (lower_y1 - (back_floor_screen + 1)) * ty_step`) — deriving
@@ -1511,7 +1529,6 @@ fn render_seg(seg_idx): i64 {
             if (mid_tex >= 0) {
                 var wh = floor_screen - ceil_screen;
                 if (wh > 0) {
-                    var ty_step = fixed_div(FIXED_ONE, col_scale);   # native scale (F06)
                     # TX-3: V from the per-seg world anchor (mid_vmid already
                     # carries the F06 DONTPEGBOTTOM floor-anchor choice) rather
                     # than pinned to the floored ceil_screen row.
@@ -1787,6 +1804,11 @@ fn render_masked_one(mi): i64 {
     var m_vmid = render_vmid(render_anchor_mid(open_ceil, open_floor, tex_h, m_dpb),
     myoff, eye_h);
 
+    # OP-8: same loop-invariant hoist as the wall pass — only `depth` varies per
+    # column, so the projection numerators are per-entry constants. Bit-exact.
+    var pn_otop = fixed_mul((open_ceil << 16) - eye_h, PROJ_DIST);
+    var pn_obot = fixed_mul((open_floor << 16) - eye_h, PROJ_DIST);
+
     for (var col = sx1; col <= sx2; col += 1) {
         var band_t = load64(rc_band_top + col * 8);
         var band_b = load64(rc_band_bot + col * 8);
@@ -1803,10 +1825,8 @@ fn render_masked_one(mi): i64 {
         var col_scale = fixed_div(PROJ_DIST, depth);
         if (col_scale <= 0) { col_scale = 1; }
 
-        var open_top = HALF_HEIGHT - fixed_to_int(
-        fixed_div(fixed_mul((open_ceil << 16) - eye_h, PROJ_DIST), depth));
-        var open_bot = HALF_HEIGHT - fixed_to_int(
-        fixed_div(fixed_mul((open_floor << 16) - eye_h, PROJ_DIST), depth));
+        var open_top = HALF_HEIGHT - fixed_to_int(fixed_div(pn_otop, depth));
+        var open_bot = HALF_HEIGHT - fixed_to_int(fixed_div(pn_obot, depth));
 
         if (open_top >= open_bot) { continue; }
         var wh = open_bot - open_top;
