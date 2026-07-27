@@ -78,6 +78,10 @@ fn load_map(reset_player): i64 {
         sakshi_error("cannot load map", 15);
         return -1;
     }
+    # OP-7: freeze this map's sidedef-texture / sector-flat indices now that both
+    # the WAD texture table and the map are parsed, so the render path stops
+    # resolving them by name every seg every frame. Must run AFTER map_load.
+    texture_build_map_caches();
     map_print_stats();
     map_find_player_start();
     if (reset_player == 1) {
@@ -142,7 +146,7 @@ fn doom_main(): i64 {
     # non-identity arena top (0x3FC00000); no warm-up needed.
     alloc_init();
     args_init();
-    sakshi_info("cyrius-doom v0.34.6", 19);
+    sakshi_info("cyrius-doom v0.34.7", 19);
 
     # WAD path: argv[1] on Linux. On agnos, agnsh `run /bin/doom` passes no argv
     # beyond the path, so default to /DOOM1.WAD (staged on the ext2 root).
@@ -246,9 +250,14 @@ fn doom_main(): i64 {
         var arg = argv(ai);
         if (streq(arg, "--ppm") == 1) { ppm_mode = 1; }
         if (streq(arg, "--ppm-menu") == 1) { ppm_menu = 1; }
-        # EF-4: --ppm-tick N runs N world ticks (things_tick) before the game
-        # screenshot, so the PPM gate can see first-tick regressions the tick-0
-        # shot is blind to (e.g. EF-1 corpse-decor frame clobber). Implies --ppm.
+        # EF-4: --ppm-tick N runs N world ticks before the game screenshot, so
+        # the PPM gate can see first-tick regressions the tick-0 shot is blind to
+        # (e.g. EF-1 corpse-decor frame clobber). Implies --ppm.
+        # v0.34.7: a "world tick" here now runs the SAME set the game loop runs —
+        # doors_tick + things_tick + texture_animate. It previously ran only
+        # things_tick, i.e. a third of a tick, so the harness structurally could
+        # not observe door motion or wall/flat animation; that is why the SLADRIP
+        # no-op survived every PPM gate the project has.
         # Defaults to 4 ticks; an optional following integer overrides.
         if (streq(arg, "--ppm-tick") == 1) {
             ppm_mode = 1;
@@ -414,7 +423,11 @@ fn doom_main(): i64 {
             player_x = view_x;
             player_y = view_y;
             tick_init();
-            for (var pt = 0; pt < ppm_tick_n; pt += 1) { things_tick(); }
+            for (var pt = 0; pt < ppm_tick_n; pt += 1) {
+                doors_tick();
+                things_tick();
+                texture_animate();
+            }
         }
         render_frame();
         sprite_render_all();

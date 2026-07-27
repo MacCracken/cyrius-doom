@@ -7,6 +7,84 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.34.7] - 2026-07-26 — perf batch C closeout: map-load index caches (−58% render_frame)
+
+The last queued row of the 0.34.x band. Five changes, **all byte-identical output**, verified by a
+9-map + 5-menu + intermission `--ppm` A/B against v0.34.6 and by each item being benched
+**separately** — a batch number would have hidden which one actually paid.
+
+### Changed
+
+- **OP-7 / F12 — per-sidedef texture + per-sector flat indices resolved once at map load.
+  `render_frame` 1.032 ms → 428 µs (−58%); true spawn frame 1.22 ms → 618 µs (−49%).**
+  `render_seg` resolved all three sidedef textures **by name** — hash the 8-byte name, then linear-scan
+  `tex_table` — for every seg, every frame, plus two `flat_find` scans per sector. The names never
+  change after map load. Now frozen into parallel index arrays by `texture_build_map_caches()`, called
+  from `load_map` after `map_load` (it lives in texture.cyr rather than map.cyr because map.cyr is
+  included first and cannot call `texture_find`).
+  **The audit estimated ~50 µs for this; it is worth ~600.** The estimate came from a sample of 273
+  `texture_find` calls/frame at 126 ns; the real spawn frame pays five lookups per rendered seg. This
+  is why the gate requires per-item measurement.
+- **WP-3 — SLADRIP wall animation was a visual no-op for the entire life of the engine, and OP-7
+  fixes it.** `anim_rotate_tex_3` rotates whole table entries — **name hash included** — so a by-name
+  lookup followed the rotation straight to wherever its content had moved and the wall never changed.
+  With the index frozen at load, slot *k* serves whatever content the rotation moves into it and the
+  frames advance. **No change to `anim_rotate_tex_3` was needed**: the roadmap's recorded fix ("rotate
+  width/height/def_ptr only") and the audit's variant ("stop rotating the hash, invalidate the OP-2
+  composite slots") both describe a *different* repair that is now unnecessary — v0.34.4's composite
+  lockstep is already correct under a frozen index, because content and its cached composite move
+  together while the index simply reads whichever slot it named.
+- **OP-5a — per-linedef bounding boxes for `thing_check_sight`. `things_tick` 19.0 → 12.3 µs (−35%).**
+  The sight test ran a full segment-intersection (6 `fixed_mul` + 2 `fixed_div`) against **every**
+  linedef, per sight check, per idle monster, per tick — and since v0.34.1's `TF_AMBUSH` gate keeps
+  deaf monsters asleep through gunfire, nearly every monster now sits in `STATE_SPAWN` paying it
+  forever. Bboxes are built once at map load (post-validation) and the ray's own bbox is hoisted; a
+  disjoint box cannot contain a segment intersection, so the reject is **bit-exact** — touching boxes
+  are not rejected, so a grazing hit still reaches the exact test. This is the byte-identical half of
+  OP-5; the behaviour-changing half (REJECT lump, staggered wake) stays at v0.35.0.
+- **OP-10 — palette→XRGB8888 LUT.** All three present paths (fb0, agnos `blit#39`, Wayland shm)
+  expanded each source pixel with 3 `load8` + two shifts + three ors. The palette is set exactly once,
+  at boot from PLAYPAL, so the 256-entry expansion is precomputed in `framebuf_set_palette` (and
+  rebuilt there, so a future palette swap stays correct by construction). **No benchmark number is
+  claimed**: the bench has no present-path row, so this is argued from operation count — 64,000 pixels
+  per presented frame — not measured. That blind spot is the same class OP-0 found in v0.34.3 and is
+  now recorded against the bench harness rather than left implicit.
+- **OP-9 — subject-scale hoist in `render_clip_band_build`. −5 µs (−0.8%), consistent across 3 pairs.**
+  The inner loop recomputed the subject's per-column scale once per *(drawseg × column)* although it
+  depends only on the column; it is now precomputed once per call. Bit-exact. The drawseg's own
+  `ds_scale` is deliberately left as a per-column `fixed_div` + lerp — stepping *that* incrementally
+  accumulates rounding and is not bit-exact, the same trap OP-8's original sketch fell into in v0.34.6.
+
+### Fixed
+
+- **`--ppm-tick N` advanced only a third of a world tick.** It ran `things_tick()` alone, while the
+  game loop runs `doors_tick()` + `things_tick()` + `texture_animate()`. The harness was therefore
+  structurally unable to observe door motion or wall/flat animation — **which is why the SLADRIP no-op
+  survived every PPM gate this project has ever run**. It now runs the same set the game loop does.
+
+### Verification
+
+- **9 maps + 5 menus + the intermission screen byte-identical** vs v0.34.6, at tick 0 *and* at tick 24
+  (three animation steps). Each of the five items was also A/B'd byte-identical on its own.
+- **Per-item bench isolation** (interleaved, quiet box, 3 runs each): A = v0.34.6 1.219/1.224/1.233 ms
+  → B = +OP-7 619/622/620 µs → C = +OP-5a 619/620/619 µs (off the render bench by construction) →
+  D = +OP-10 617/646/617 µs (present path, off the bench) → E = +OP-9 613.3/613.8/613.3 µs.
+- **Tests 227 WAD-free / 349 full** (+4 over v0.34.6). The new WP-3 group asserts *both* halves —
+  that a by-name lookup **moves** across a rotation (the old no-op) and that a frozen index **serves
+  different pixels** (the fix) — plus a render-path guard that `sidedef_tex_mid` is stable across a
+  rotation and rebuilt across a map reload. Either half alone is vacuous.
+- Fuzz ×5 clean; `cyrius deps --verify` 36/0; both targets build clean. Binary 455,824 → **459,984 B**
+  (agnos 442,352 → **446,512**) — the index/bbox/LUT arrays.
+- **AGNOS QEMU direct-map PASS on the final binary + 4×-block pixel-diff vs Linux `--ppm` 100.00%
+  exact (0 of 64,000 px).** That path runs `framebuf_blit_agnos`, so it exercises the OP-10 LUT.
+
+### Known gap
+
+- **No animated texture or flat is visible from any of the 9 spawn viewpoints** (E1M1's blue pool is
+  FLAT14, not NUKAGE), so the tick-24 PPM sweep cannot see SLADRIP even with the harness fixed. The
+  animation is gated by the WAD-gated unit group instead. A staged viewpoint onto a SLADRIP wall would
+  close this properly — recorded for the next fidelity cut.
+
 ## [0.34.6] - 2026-07-25 — vertical texture world-lock (TX-3), intermission layout, OP-8
 
 Completes the texture world-lock started in v0.34.5: TX-MASKED fixed the horizontal axis on

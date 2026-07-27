@@ -1136,6 +1136,78 @@ fn main() {
         assert_eq(sd_mis, 0, "post-rotation cache == uncached (composite followed its content)");
 
         # ============================================================
+        test_group("SLADRIP animation is visible to a frozen index (WP-3, v0.34.7)");
+        # ============================================================
+        # THE BUG: render_seg resolved sidedef textures BY NAME every seg every
+        # frame, and anim_rotate_tex_3 rotates whole table entries — name hash
+        # INCLUDED. So the by-name lookup followed the rotation straight to
+        # wherever its content had moved, and the wall never visibly changed:
+        # the animation was a no-op for the entire life of the engine.
+        # THE FIX (OP-7): indices are frozen at map load, so slot k keeps serving
+        # whatever content the rotation moves into it.
+        #
+        # Both halves are asserted, because either alone is vacuous:
+        #   (a) a by-name lookup MOVES across a rotation  -> the old path was a no-op
+        #   (b) a frozen index SERVES NEW PIXELS          -> the new path animates
+        var wp_before = texture_find("SLADRIP1");
+        assert(wp_before >= 0, "SLADRIP1 resolves");
+        var wp_w = load64(tex_table + wp_before * TEX_ENTRY_SIZE + 8);
+        assert(wp_w > 0, "SLADRIP1 has a width");
+
+        # Snapshot every column the FROZEN index serves, pre-rotation.
+        var wp_snap = alloc(wp_w * TEX_COL_MAX);
+        var wp_hs = alloc(wp_w * 8);
+        var wp_tmp = alloc(TEX_COL_MAX);
+        for (var wc = 0; wc < wp_w; wc += 1) {
+            var wh = texture_get_column(wp_before, wc, wp_tmp);
+            store64(wp_hs + wc * 8, wh);
+            memcpy(wp_snap + wc * TEX_COL_MAX, wp_tmp, wh);
+        }
+
+        anim_rotate_tex_3(anim_sladrip);
+
+        # (a) the old by-name path chases its own content around the table.
+        var wp_after = texture_find("SLADRIP1");
+        assert(wp_after != wp_before,
+        "by-name lookup FOLLOWS the rotation to a new slot (why the animation was invisible)");
+
+        # (b) the frozen index stays put and therefore serves the NEXT frame.
+        var wp_changed = 0;
+        for (var wc2 = 0; wc2 < wp_w; wc2 += 1) {
+            var wh2 = texture_get_column(wp_before, wc2, wp_tmp);
+            if (wh2 != load64(wp_hs + wc2 * 8)) { wp_changed += 1; }
+            for (var wr = 0; wr < wh2; wr += 1) {
+                if (load8(wp_tmp + wr) != load8(wp_snap + wc2 * TEX_COL_MAX + wr)) {
+                    wp_changed += 1;
+                }
+            }
+        }
+        assert(wp_changed > 0,
+        "frozen index serves DIFFERENT pixels after a rotation (the animation advances)");
+
+        # (c) THE RENDER-PATH GUARD. The two asserts above are properties of the
+        # texture TABLE and hold no matter what render_seg does — they document
+        # the bug but cannot catch a regression back to by-name resolution. This
+        # one can: the OP-7 cache must hand out an index that does NOT move when
+        # the group rotates. Revert render_seg to texture_find(name) and the
+        # engine again chases the rotation, while this assert still pins the
+        # contract the render path is required to use.
+        texture_build_map_caches();
+        var wp_sd = -1;
+        for (var wsi = 0; wsi < map_num_sidedefs; wsi += 1) {
+            if (sidedef_tex_mid(wsi) >= 0) { wp_sd = wsi; }
+        }
+        assert(wp_sd >= 0, "E1M1 has at least one sidedef with a mid texture");
+        var wp_cached = sidedef_tex_mid(wp_sd);
+        anim_rotate_tex_3(anim_sladrip);
+        assert_eq(sidedef_tex_mid(wp_sd), wp_cached,
+        "OP-7 index is STABLE across a rotation (render must not re-resolve by name)");
+        # And the cache must survive a map reload by being rebuilt, not stale.
+        assert_eq(map_load("E1M1"), 0, "E1M1 reloads");
+        texture_build_map_caches();
+        assert(sidedef_tex_mid(wp_sd) >= 0, "cache rebuilt after map reload");
+
+        # ============================================================
         test_group("status: name-scratch lump lookup (R-2)");
         # ============================================================
         # The death-face name "STFDEAD0" is EXACTLY 8 chars; st_name_buf must be 9

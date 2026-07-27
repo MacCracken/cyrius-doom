@@ -39,6 +39,10 @@ enum FbIoctl {
 # Heap pointers (allocated in framebuf_init)
 var screen_buf = 0;
 var palette = 0;
+# OP-10 palette->XRGB8888 LUT (built by framebuf_build_pal_lut). Declared here
+# with the other globals because Cyrius is single-pass and framebuf_init
+# references it above the LUT's own section.
+var pal_xrgb = 0;
 
 var fb_fd = -1;
 var pipe_fd = -1;
@@ -70,6 +74,9 @@ var fb_yoff   = 0;        # top letterbox, rows
 fn framebuf_init(): i64 {
     screen_buf = alloc(64000);
     if (palette == 0) { palette = alloc(768); }
+    # boot_init sets the palette (and builds the LUT) before this runs; the guard
+    # keeps the present paths safe if that order ever changes.
+    if (pal_xrgb == 0) { framebuf_build_pal_lut(); }
 
     #ifdef CYRIUS_TARGET_AGNOS
     # DESKTOP first: try the aethersafha compositor and present as a WINDOW over setu.
@@ -185,9 +192,33 @@ fn framebuf_init(): i64 {
     return 0;
 }
 
+# OP-10: palette -> XRGB8888 lookup table. All three present paths (fb0, agnos
+# blit#39, Wayland shm) expanded each source pixel with 3 load8 + two shifts +
+# three ors. The palette is set exactly once, at boot from PLAYPAL, so the whole
+# 256-entry expansion is precomputed there instead — 64,000 pixels/frame saved on
+# every presented frame. Off the render bench entirely, and it matters most on
+# AGNOS where framebuf_blit_agnos IS the per-frame present cost.
+# Rebuilt by framebuf_set_palette, so a future palette swap (damage/pickup tints
+# are not implemented today) stays correct by construction.
+
+fn framebuf_build_pal_lut(): i64 {
+    if (pal_xrgb == 0) { pal_xrgb = alloc(256 * 4); }
+    if (pal_xrgb == 0) { return -1; }
+    if (palette == 0) { return -1; }
+    for (var i = 0; i < 256; i += 1) {
+        var po = i * 3;
+        var r = load8(palette + po);
+        var g = load8(palette + po + 1);
+        var b = load8(palette + po + 2);
+        store32(pal_xrgb + i * 4, 0xFF000000 | (r << 16) | (g << 8) | b);
+    }
+    return 0;
+}
+
 fn framebuf_set_palette(data): i64 {
     if (palette == 0) { palette = alloc(768); }
     memcpy(palette, data, 768);
+    framebuf_build_pal_lut();
     return 0;
 }
 
@@ -276,8 +307,8 @@ fn framebuf_blit(): i64 {
                     dx += 2;
                 }
             } else {
-                # 32bpp XRGB8888, little-endian byte order B,G,R,X.
-                var p32 = 0xFF000000 | (r << 16) | (g << 8) | b;
+                # 32bpp XRGB8888, little-endian byte order B,G,R,X (OP-10 LUT).
+                var p32 = load32(pal_xrgb + load8(src_row + sx) * 4);
                 for (var rx = 0; rx < fb_scale; rx += 1) {
                     store32(dx, p32);
                     dx += bpp_bytes;
@@ -304,11 +335,7 @@ fn framebuf_blit_agnos(): i64 {
         var src_row = screen_buf + sy * SCREEN_WIDTH;
         var dst = fb_buf + sy * SCREEN_WIDTH * 4;
         for (var sx = 0; sx < SCREEN_WIDTH; sx += 1) {
-            var po = load8(src_row + sx) * 3;
-            var r = load8(palette + po);
-            var g = load8(palette + po + 1);
-            var b = load8(palette + po + 2);
-            store32(dst + sx * 4, 0xFF000000 | (r << 16) | (g << 8) | b);
+            store32(dst + sx * 4, load32(pal_xrgb + load8(src_row + sx) * 4));
         }
     }
     return 0;
@@ -352,13 +379,9 @@ fn framebuf_present_wayland(): i64 {
         var first = dst + dy0 * pitch + wl_xoff * 4;
         var dx = first;
         for (var sxi = 0; sxi < SCREEN_WIDTH; sxi += 1) {
-            var po = load8(src_row + sxi) * 3;
-            var r = load8(palette + po);
-            var g = load8(palette + po + 1);
-            var b = load8(palette + po + 2);
-            # XRGB8888, byte order B,G,R,X on LE — identical to framebuf_blit;
-            # r/g/b are 0..255 so the shifts are logical-correct (no asr needed).
-            var p32 = 0xFF000000 | (r << 16) | (g << 8) | b;
+            # XRGB8888, byte order B,G,R,X on LE — identical to framebuf_blit,
+            # now via the OP-10 palette LUT (see framebuf_build_pal_lut).
+            var p32 = load32(pal_xrgb + load8(src_row + sxi) * 4);
             for (var rx = 0; rx < wl_scale; rx += 1) {
                 store32(dx, p32);
                 dx += 4;

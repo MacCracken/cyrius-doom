@@ -597,3 +597,88 @@ fn flat_get_pixel(flat_idx, x, y): i64 {
     y &= 63;
     return load8(flat_cache + flat_idx * FLAT_SIZE + y * 64 + x);
 }
+
+# ================================================================
+# OP-7 / F12 — per-sidedef texture + per-sector flat index cache
+# ================================================================
+# `render_seg` used to resolve all three sidedef textures BY NAME every seg,
+# every frame (`texture_find` hashes the 8-byte name then linear-scans
+# `tex_table`), plus two `flat_find` scans per sector. The names never change
+# after map load, so the scans are pure repeated work — ~50 µs/frame, and more
+# on AGNOS where every cycle is scarcer.
+#
+# Resolved once per map load instead. Built from texture.cyr (which owns
+# tex_table/flat_names) rather than map.cyr, because map.cyr is included FIRST
+# and cannot call texture_find; `load_map` sequences map_load -> this.
+#
+# THIS IS ALSO THE SLADRIP ANIMATION FIX. `anim_rotate_tex_3` rotates whole
+# table entries — content AND the name hash at offset 0 — so a by-name lookup
+# followed the rotation and always landed back on the same content: the wall
+# animation was a visual no-op. With the index frozen at load time, slot k keeps
+# serving whatever content the rotation has moved into it, so the frames finally
+# advance on screen. The existing composite-cache lockstep in anim_rotate_tex_3
+# stays exactly as-is and stays correct: content and its cached composite move
+# together, and the frozen index simply reads whichever slot it named.
+var sd_tex_upper = 0;
+var sd_tex_lower = 0;
+var sd_tex_mid = 0;
+var sec_flat_floor = 0;
+var sec_flat_ceil = 0;
+
+fn texture_build_map_caches(): i64 {
+    if (sd_tex_upper == 0) { sd_tex_upper = alloc(MAP_MAX_SIDEDEFS * 8); }
+    if (sd_tex_lower == 0) { sd_tex_lower = alloc(MAP_MAX_SIDEDEFS * 8); }
+    if (sd_tex_mid == 0)   { sd_tex_mid   = alloc(MAP_MAX_SIDEDEFS * 8); }
+    if (sec_flat_floor == 0) { sec_flat_floor = alloc(MAP_MAX_SECTORS * 8); }
+    if (sec_flat_ceil == 0)  { sec_flat_ceil  = alloc(MAP_MAX_SECTORS * 8); }
+    if (sd_tex_upper == 0) { return -1; }
+    if (sd_tex_lower == 0) { return -1; }
+    if (sd_tex_mid == 0) { return -1; }
+    if (sec_flat_floor == 0) { return -1; }
+    if (sec_flat_ceil == 0) { return -1; }
+
+    for (var i = 0; i < map_num_sidedefs; i += 1) {
+        var b = map_sidedefs + i * MAP_SIDEDEF_SIZE;
+        store64(sd_tex_upper + i * 8, texture_find(b + 16));
+        store64(sd_tex_lower + i * 8, texture_find(b + 24));
+        store64(sd_tex_mid + i * 8, texture_find(b + 32));
+    }
+    for (var s = 0; s < map_num_sectors; s += 1) {
+        store64(sec_flat_floor + s * 8, flat_find(map_sector_floor_tex(s)));
+        store64(sec_flat_ceil + s * 8, flat_find(map_sector_ceil_tex(s)));
+    }
+    return 0;
+}
+
+# Accessors. Out-of-range or pre-build reads return -1 — the same "no texture"
+# value texture_find/flat_find return, which every caller already handles.
+fn sidedef_tex_upper(idx): i64 {
+    if (sd_tex_upper == 0) { return -1; }
+    if (idx < 0) { return -1; }
+    if (idx >= map_num_sidedefs) { return -1; }
+    return load64(sd_tex_upper + idx * 8);
+}
+fn sidedef_tex_lower(idx): i64 {
+    if (sd_tex_lower == 0) { return -1; }
+    if (idx < 0) { return -1; }
+    if (idx >= map_num_sidedefs) { return -1; }
+    return load64(sd_tex_lower + idx * 8);
+}
+fn sidedef_tex_mid(idx): i64 {
+    if (sd_tex_mid == 0) { return -1; }
+    if (idx < 0) { return -1; }
+    if (idx >= map_num_sidedefs) { return -1; }
+    return load64(sd_tex_mid + idx * 8);
+}
+fn sector_flat_floor(idx): i64 {
+    if (sec_flat_floor == 0) { return -1; }
+    if (idx < 0) { return -1; }
+    if (idx >= map_num_sectors) { return -1; }
+    return load64(sec_flat_floor + idx * 8);
+}
+fn sector_flat_ceil(idx): i64 {
+    if (sec_flat_ceil == 0) { return -1; }
+    if (idx < 0) { return -1; }
+    if (idx >= map_num_sectors) { return -1; }
+    return load64(sec_flat_ceil + idx * 8);
+}

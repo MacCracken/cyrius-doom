@@ -667,17 +667,29 @@ fn render_store_drawseg(sx1, sx2, scale1_val, scale2_val, solid, d_top, d_bot): 
 # in rc_band_top/rc_band_bot (band empty when top > bot).
 var rc_band_top = 0;
 var rc_band_bot = 0;
+var rc_subj = 0;   # OP-9: per-column subject scale, precomputed per call
 
 fn render_clip_band_build(x1, x2, subj_s1, subj_s2): i64 {
     if (rc_band_top == 0) {
         rc_band_top = alloc(2560);
         rc_band_bot = alloc(2560);
     }
+    if (rc_subj == 0) { rc_subj = alloc(2560); }
+    var sspan = x2 - x1;
+    # OP-9: the subject's per-column scale depends only on x, but the old inner
+    # loop recomputed it once per (drawseg x column) — a fixed_div + fixed_lerp
+    # paid ds_count times over for the same answer. Precompute it per column
+    # here, once per call. BIT-EXACT: identical expression, identical inputs.
+    # (The drawseg's own ds_scale stays a per-column fixed_div + lerp: stepping
+    # that incrementally would accumulate rounding and is NOT bit-exact, so it is
+    # deliberately left alone — same call the audit's OP-8 sketch got wrong.)
     for (var x = x1; x <= x2; x += 1) {
         store64(rc_band_top + x * 8, 0);
         store64(rc_band_bot + x * 8, SCREEN_HEIGHT - 1);
+        var sfrac0 = 0;
+        if (sspan > 0) { sfrac0 = fixed_div((x - x1) << 16, sspan << 16); }
+        store64(rc_subj + x * 8, fixed_lerp(subj_s1, subj_s2, sfrac0));
     }
-    var sspan = x2 - x1;
     var subj_min = subj_s1;
     if (subj_s2 < subj_min) { subj_min = subj_s2; }
 
@@ -706,9 +718,7 @@ fn render_clip_band_build(x1, x2, subj_s1, subj_s2): i64 {
             var dfrac = 0;
             if (dspan > 0) { dfrac = fixed_div((x - dx1) << 16, dspan << 16); }
             var ds_scale = fixed_lerp(s1, s2, dfrac);
-            var sfrac = 0;
-            if (sspan > 0) { sfrac = fixed_div((x - x1) << 16, sspan << 16); }
-            var subj_scale = fixed_lerp(subj_s1, subj_s2, sfrac);
+            var subj_scale = load64(rc_subj + x * 8);
             # Per-column depth test: only a NEARER seg occludes the subject.
             if (ds_scale <= subj_scale) { continue; }
             if (solid == 1) {
@@ -1072,9 +1082,13 @@ fn render_seg(seg_idx): i64 {
 
     # Look up sidedef textures
     var sd_base = map_sidedefs + sidedef_idx * MAP_SIDEDEF_SIZE;
-    var mid_tex = texture_find(sd_base + 32);
-    var upper_tex = texture_find(sd_base + 16);
-    var lower_tex = texture_find(sd_base + 24);
+    # OP-7: indices frozen at map load (texture_build_map_caches) — these used to
+    # be three name-hash + linear-scan lookups per seg per frame. This is also
+    # what makes the SLADRIP wall animation visible: a by-name lookup followed
+    # anim_rotate_tex_3's whole-entry rotation and never changed content.
+    var mid_tex = sidedef_tex_mid(sidedef_idx);
+    var upper_tex = sidedef_tex_upper(sidedef_idx);
+    var lower_tex = sidedef_tex_lower(sidedef_idx);
     var sd_xoff = map_sidedef_xoff(sidedef_idx);
     var sd_yoff = map_sidedef_yoff(sidedef_idx);
 
@@ -1091,8 +1105,8 @@ fn render_seg(seg_idx): i64 {
     var floor_base_pal = 128;
 
     # Floor/ceiling flat texture indices
-    var floor_flat = flat_find(map_sector_floor_tex(sector_idx));
-    var ceil_flat = flat_find(map_sector_ceil_tex(sector_idx));
+    var floor_flat = sector_flat_floor(sector_idx);
+    var ceil_flat = sector_flat_ceil(sector_idx);
 
     # Check for sky ceiling (F_SKY1)
     var is_sky = 0;

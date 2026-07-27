@@ -35,25 +35,9 @@ Everything else below is quality, fidelity, robustness, or performance.
 
 ## Near-term: the 0.34.x closeout band
 
-Four patch cuts that finish the render/decoder/toolchain backlog. All are byte-identical or
+Three patch cuts that finish the render/decoder/toolchain backlog. All are byte-identical or
 near-byte-identical, so they keep the cheap PPM-A/B gate that has caught real regressions all minor.
-
-### v0.34.7 — Perf batch C closeout (+ the SLADRIP animation it unblocks)
-
-The last queued row of the 0.34.x band, and ready now. OP-7/OP-9/OP-10 are byte-identical by construction
-and share one gate.
-
-| # | Item | Detail |
-|---|------|--------|
-| OP-7 | **Per-sidedef texture + per-sector flat index cache at map load** | `render_seg` calls `texture_find` by *name* for all three sidedef textures every seg every frame ([render.cyr:1075-1077](../../src/render.cyr#L1075)), and `flat_find` per sector ([:1094-1095](../../src/render.cyr#L1094)). Resolve at map load. ~50 µs. |
-| WP-3 | **SLADRIP wall animation is a visual no-op** | `anim_rotate_tex_3` memcpy's the whole entry **including the name**, and the lookup above re-resolves by name every frame — so the lookup follows the rotation and the content never visibly changes. **OP-7 is the prerequisite**: once indices are map-load-resolved, delete the name-hash rotation outright. **Corrected design** — the roadmap's old recorded fix ("rotate width/height/def_ptr only") is now WRONG: v0.34.4's OP-2 added a lockstep composite-cache rotation, so the moment the hash stops rotating those three `tex_comp_*` slots must be **invalidated, not rotated**, or the pairing inverts. Needs a WAD-gated assert that the served column *changes* across anim steps — the existing OP-2 test only asserts cached-vs-uncached equality and does **not** cover this. |
-| OP-5a | **`thing_check_sight` per-linedef bbox early reject** | The byte-identical half of OP-5: a pure early-reject that cannot change which linedefs block, so it ships under this batch's gate and gives v0.35.0 a measured baseline. |
-| OP-10 | **Palette→XRGB present LUT** | A 256-entry precomputed LUT replaces 3 `load8` + shifts per source pixel in `framebuf_blit` / `framebuf_present_wayland`. Off the render bench, on every presented frame — so it matters most on AGNOS. |
-| OP-9 | **Clip-band incremental stepping** | Lowest value in the batch. Drop it if the bench delta is inside variance. |
-
-**Gate**: nothing blocks it. Exit: interleaved bench A/B (each item measured separately — a batch number
-hides a regression), 9-map + 5-menu PPM byte-identical at tick 0, tick-N PPM differing only for SLADRIP
-walls, all `tests/*.tcyr`, fuzz ×5, AGNOS QEMU pixel-diff 100%.
+(v0.34.7, perf batch C, shipped 2026-07-26 — see [`completed-phases.md`](completed-phases.md).)
 
 ### v0.34.8 — Decoder robustness + the fuzz coverage v0.34.9 needs
 
@@ -173,6 +157,11 @@ instead of the vanilla scalelight/zlight model the walls already use · half-pix
 column-center offsets · **F_SKY1 floors** treated as sky (rare but legal in PWADs).
 
 **Gate**: after v0.34.7.
+
+**Also carries a v0.34.7 leftover**: no animated texture or flat is visible from any of the 9 spawn
+viewpoints (E1M1's blue pool is FLAT14, not NUKAGE), so the SLADRIP animation fixed in v0.34.7 is
+gated by WAD-gated unit asserts rather than the PPM sweep. Stage a viewpoint onto a SLADRIP wall
+here, where staged-viewpoint work already lives, and add it to the captured set.
 
 ### v0.35.6 — Engine-invariant audit (verification-first)
 

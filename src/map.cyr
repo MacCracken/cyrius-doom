@@ -334,6 +334,49 @@ fn map_load(map_name): i64 {
         return -1;
     }
 
+    # OP-5a: per-linedef bounding boxes, built once here (post-validation, so the
+    # vertex indices are known good) for thing_check_sight's early reject.
+    map_build_linedef_bboxes();
+
+    return 0;
+}
+
+# ================================================================
+# OP-5a — per-linedef bounding boxes
+# ================================================================
+# `thing_check_sight` walks EVERY linedef and runs a full segment-intersection
+# test (6 fixed_mul + 2 fixed_div) on each. That cost is paid per sight check,
+# per idle monster, per tick — and since v0.34.1's TF_AMBUSH gate keeps deaf
+# monsters asleep through gunfire, nearly every monster on a map now sits in
+# STATE_SPAWN paying it forever. A bbox that cannot overlap the sight ray cannot
+# contain an intersection, so rejecting it is BIT-EXACT: it skips only linedefs
+# the full test would have rejected anyway.
+#
+# Four i64 per linedef: minx, miny, maxx, maxy (16.16, same units as vertices).
+var ld_bbox = 0;
+
+fn map_build_linedef_bboxes(): i64 {
+    if (ld_bbox == 0) { ld_bbox = alloc(MAP_MAX_LINEDEFS * 32); }
+    if (ld_bbox == 0) { return -1; }
+    for (var i = 0; i < map_num_linedefs; i += 1) {
+        var v1 = map_linedef_v1(i);
+        var v2 = map_linedef_v2(i);
+        var x1 = map_vertex_x(v1);
+        var y1 = map_vertex_y(v1);
+        var x2 = map_vertex_x(v2);
+        var y2 = map_vertex_y(v2);
+        var lo_x = x1;
+        var hi_x = x2;
+        if (x2 < x1) { lo_x = x2; hi_x = x1; }
+        var lo_y = y1;
+        var hi_y = y2;
+        if (y2 < y1) { lo_y = y2; hi_y = y1; }
+        var b = ld_bbox + i * 32;
+        store64(b, lo_x);
+        store64(b + 8, lo_y);
+        store64(b + 16, hi_x);
+        store64(b + 24, hi_y);
+    }
     return 0;
 }
 

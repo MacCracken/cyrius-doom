@@ -391,7 +391,26 @@ fn thing_check_sight(mx, my, tx, ty): i64 {
     var dx = tx - mx;
     var dy = ty - my;
 
+    # OP-5a: the sight ray's own bounding box, hoisted once. A linedef whose bbox
+    # is disjoint from this one cannot contain an intersection with the SEGMENT,
+    # so the early reject below is bit-exact — it drops only linedefs the full
+    # 6-mul/2-div test would have rejected anyway. Touching boxes are NOT
+    # rejected (>=/<=), so a grazing hit still reaches the exact test.
+    var ray_lox = mx;
+    var ray_hix = tx;
+    if (tx < mx) { ray_lox = tx; ray_hix = mx; }
+    var ray_loy = my;
+    var ray_hiy = ty;
+    if (ty < my) { ray_loy = ty; ray_hiy = my; }
+
     for (var i = 0; i < map_num_linedefs; i += 1) {
+        if (ld_bbox != 0) {
+            var bb = ld_bbox + i * 32;
+            if (load64(bb + 16) < ray_lox) { continue; }
+            if (load64(bb) > ray_hix) { continue; }
+            if (load64(bb + 24) < ray_loy) { continue; }
+            if (load64(bb + 8) > ray_hiy) { continue; }
+        }
         var flags = map_linedef_flags(i);
         # One-sided lines always block. Two-sided lines block only when the
         # portal is CLOSED — a shut door/lift (RC-G4): sight AND hitscan
