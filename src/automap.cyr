@@ -30,11 +30,11 @@ fn automap_toggle(): i64 {
 
 # Transform world coords to screen coords
 fn am_screen_x(wx): i64 {
-    return HALF_WIDTH + asr(fixed_mul(wx - automap_cx, automap_scale), 16);
+    return HALF_WIDTH + ((fixed_mul(wx - automap_cx, automap_scale)) >>> (16));
 }
 
 fn am_screen_y(wy): i64 {
-    return HALF_HEIGHT - asr(fixed_mul(wy - automap_cy, automap_scale), 16);
+    return HALF_HEIGHT - ((fixed_mul(wy - automap_cy, automap_scale)) >>> (16));
 }
 
 # Draw a line using Bresenham's algorithm
@@ -80,8 +80,8 @@ fn am_draw_player(): i64 {
     var cos = fixed_cos(player_angle);
     var sin = fixed_sin(player_angle);
 
-    var fx = px + asr(cos * arrow_len, 16);
-    var fy = py - asr(sin * arrow_len, 16);
+    var fx = px + ((cos * arrow_len) >>> (16));
+    var fy = py - ((sin * arrow_len) >>> (16));
 
     # Arrow head
     am_draw_line(px, py, fx, fy, 112);
@@ -90,10 +90,10 @@ fn am_draw_player(): i64 {
     var wing_len = 5;
     var lang = angle_add(player_angle, 640);
     var rang = angle_sub(player_angle, 640);
-    var lx = px + asr(fixed_cos(lang) * wing_len, 16);
-    var ly = py - asr(fixed_sin(lang) * wing_len, 16);
-    var rx = px + asr(fixed_cos(rang) * wing_len, 16);
-    var ry = py - asr(fixed_sin(rang) * wing_len, 16);
+    var lx = px + ((fixed_cos(lang) * wing_len) >>> (16));
+    var ly = py - ((fixed_sin(lang) * wing_len) >>> (16));
+    var rx = px + ((fixed_cos(rang) * wing_len) >>> (16));
+    var ry = py - ((fixed_sin(rang) * wing_len) >>> (16));
 
     am_draw_line(fx, fy, lx, ly, 112);
     am_draw_line(fx, fy, rx, ry, 112);

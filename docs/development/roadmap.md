@@ -33,25 +33,22 @@ Everything else below is quality, fidelity, robustness, or performance.
 
 ---
 
-## Near-term: the 0.34.x closeout band
+## The 0.34.x closeout band — COMPLETE
 
-One patch cut left in the band. (v0.34.7 perf batch C, v0.34.8 decoder robustness and v0.34.9
-full-IWAD capacity shipped 2026-07-26/27 — see [`completed-phases.md`](completed-phases.md).)
+All four cuts shipped 2026-07-26/27, every one byte-identical: **v0.34.7** perf batch C,
+**v0.34.8** decoder robustness, **v0.34.9** full-IWAD capacity, **v0.34.10** the `asr()` → `>>>`
+migration. Band totals: `render_frame` **1.032 ms → 369 µs (−64%)**, true spawn frame
+**1.22 ms → 542 µs (−56%)**. Detail in [`completed-phases.md`](completed-phases.md).
 
-**HOLD-A is now unblocked by half.** v0.34.9 was the shared prerequisite behind every
-registered-WAD-gated item; those five still need a registered IWAD on the box, but the engine side
-is done and the caps no longer truncate.
+**Two holds moved as a result:**
+- **HOLD-A is unblocked on the engine side.** v0.34.9 was the shared prerequisite behind all five
+  registered-WAD items — the caps no longer truncate and `TEXTURE2` is parsed. They now need only a
+  registered IWAD on the box.
+- **HOLD-C loses one item.** The `asr()`→`>>>` migration was the last thing gated on a toolchain
+  capability; the remaining upstream holds are all cyrius **v6.5.x** perf-arc work.
 
-### v0.34.10 — `asr()` → native `>>>` migration
-
-Mechanical, engine-wide, deliberately isolated in its own cut. **The gate is now clear**: cyrius 6.4.74
-added the const-fold guard `>>>` was missing between 6.4.46 and .74, and we pin 6.4.78.
-
-**HARD PRE-GATE before touching any of the 59 `src/` sites**: re-run `tests/regression_asr.tcyr`'s floor
-asserts with `>>>` substituted for `asr()`. doom shares bsp 1.2.1's floor semantics engine-wide; if `>>>`
-truncates toward zero instead of emitting SAR, the migration silently corrupts every negative-coordinate
-computation. `lib/bsp.cyr` stays as-is (vendored). Update CLAUDE.md's shift rule to name the new canonical
-form, and correct the two stale framings (the 6.4.74 gate, and the count: 59, not ~95).
+**Next up is the gameplay arc**, and it changes character: everything above was byte-identical and
+gated on a PPM A/B. Nothing below is.
 
 ---
 
@@ -70,7 +67,9 @@ each release below names a gameplay gate instead.
 | EF-2 | **Front-180° FOV gate on the `STATE_SPAWN`→SEE wake** | Deferred from v0.34.1; matches vanilla `A_Look`. Monsters would then wake only to what is in front of them. |
 | F331-4 | **`P_NewChaseDir` 8-direction chase** | Chasers currently head straight at the player via `fixed_atan2` with a single axis-slide fallback; vanilla's 8-direction walk with dogleg fallbacks rounds corners and paces on ledges. Pairs with the FOV gate — both change every monster. |
 
-**Gate**: after v0.34.7 (OP-5a baseline) and v0.34.10 (do not migrate shifts under a live AI rewrite). Exit
+**Gate**: both preconditions are now met — v0.34.7 landed the OP-5a bbox baseline and v0.34.10 finished
+the shift migration (the point was not to rewrite AI under a moving shift semantics). **This is the
+next cut.** Exit
 is a **gameplay** gate: a scripted E1M1 engagement with recorded wake/chase/attack counts, plus a bench run
 proving the sight cost actually fell.
 

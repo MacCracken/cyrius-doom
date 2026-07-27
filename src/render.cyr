@@ -360,7 +360,7 @@ fn render_draw_weapon(light_level): i64 {
     var wlight = light_level;
     if (map_num_sectors > 0) {
         var wsector = player_find_sector();
-        if (wsector >= 0) { wlight = 31 - asr(map_sector_light(wsector), 3); }
+        if (wsector >= 0) { wlight = 31 - ((map_sector_light(wsector)) >>> (3)); }
     }
     if (weapon_fire_frame > 0) { wlight = 0; }
     if (wlight < 0) { wlight = 0; }
@@ -443,7 +443,7 @@ fn render_init_light_tables(): i64 {
         for (var j = 0; j < MAXLIGHTZ; j += 1) {
             # scale = (160 << 16) / ((j+1) << LIGHTZSHIFT)
             var scale = fixed_div(160 << 16, (j + 1) << LIGHTZSHIFT);
-            var idx = asr(scale, LIGHTSCALESHIFT);
+            var idx = ((scale) >>> (LIGHTSCALESHIFT));
             if (idx < 0) { idx = 0; }
             var level = startmap - idx / DISTMAP;
             if (level < 0) { level = 0; }
@@ -459,7 +459,7 @@ fn render_wall_light(lightnum, scale): i64 {
     if (scalelight == 0) { return 0; }
     if (lightnum < 0) { lightnum = 0; }
     if (lightnum >= LIGHTLEVELS) { lightnum = LIGHTLEVELS - 1; }
-    var idx = asr(scale, LIGHTSCALESHIFT);
+    var idx = ((scale) >>> (LIGHTSCALESHIFT));
     if (idx < 0) { idx = 0; }
     if (idx >= MAXLIGHTSCALE) { idx = MAXLIGHTSCALE - 1; }
     return load64(scalelight + (lightnum * MAXLIGHTSCALE + idx) * 8);
@@ -470,7 +470,7 @@ fn render_flat_light(lightnum, dist): i64 {
     if (zlight == 0) { return 0; }
     if (lightnum < 0) { lightnum = 0; }
     if (lightnum >= LIGHTLEVELS) { lightnum = LIGHTLEVELS - 1; }
-    var idx = asr(dist, LIGHTZSHIFT);
+    var idx = ((dist) >>> (LIGHTZSHIFT));
     if (idx < 0) { idx = 0; }
     if (idx >= MAXLIGHTZ) { idx = MAXLIGHTZ - 1; }
     return load64(zlight + (lightnum * MAXLIGHTZ + idx) * 8);

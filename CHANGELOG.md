@@ -7,6 +7,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.34.10] - 2026-07-27 — `asr()` → native `>>>` (fixed_mul −33%, frame −12%)
+
+Closes the 0.34.x band. Purely mechanical, **byte-identical at tick 0 and tick 24**, and the last
+item that was waiting on a toolchain capability.
+
+### Changed
+
+- **All 96 `asr()` call sites in `src/` migrated to the native `>>>` arithmetic right shift.**
+  `asr()` was a *function call* synthesising a sign-preserving shift because Cyrius `>>` is logical.
+  Measured in isolation the helper costs **5.27 ns** against **1.66 ns** for the native operator —
+  and `fixed_mul` is literally `asr(a * b, 16)`, i.e. one multiply plus that call.
+  Result, by interleaved A/B (4 pairs, post wins every pair):
+  - **`fixed_mul` 6 ns → 4 ns (−33%)**
+  - **true spawn frame 615 → 542 µs (−12%)**, best-of-mins
+  - `render_frame` 428 → **369 µs**
+- **`asr()` itself is untouched** — it lives in the vendored `lib/bsp.cyr` and bsp's own internals
+  use it. The two remain semantically identical, which the tests now assert directly.
+- **CLAUDE.md's shift rule is inverted accordingly**: `>>>` is the canonical form and `asr()` is the
+  retired helper. The rule carries the gate that made this possible — `>>>` was
+  **const-fold-UNGUARDED in cyrius 6.4.46–6.4.73**, so migrating shift code on an older pin would
+  have silently folded expressions like `x >>> 1 + 1` to a wrong constant. Only 6.4.74+ is safe.
+
+### Verification
+
+- **Pre-gate first, before touching any site**: `>>>` was proven to *floor* negatives exactly as
+  bsp's `asr()` does (`-1000000 >>> 16 == -16`, not `-15`). Had it truncated toward zero, the
+  migration would have silently corrupted every negative-coordinate computation in the engine —
+  flats mis-wrapping by a texel over negative world coords, with nothing failing loudly.
+- **The whole engine now rests on that property, so it is pinned permanently**:
+  `tests/regression_asr.tcyr` gains 15 asserts — the same floor cases as the `asr()` group, plus
+  four asserting `>>>` and `asr()` agree pairwise. Suite 18 → **33**.
+- **Byte-identical** across 9 maps + 5 menus + intermission at tick 0, *and* at tick 24 (which
+  exercises the `things` / `doors` / animation shift paths the static shot cannot reach).
+- The rewrite is fully parenthesised — `asr(E, N)` → `((E) >>> (N))` — so operator precedence cannot
+  change meaning at any site, and the byte-identical A/B is the proof it did not.
+- Tests **227 / 349 / 33 / 12**; fuzz ×7 clean; deps 36/0; binary **464,352 B** (agnos 450,864,
+  both unchanged — the helper was already inlined away in size terms). **AGNOS QEMU direct-map PASS
+  + pixel-diff vs Linux 100.00% exact.**
+
+### The 0.34.x band, closed
+
+Four cuts, every one byte-identical:
+
+| | `render_frame` | true spawn frame |
+|---|---|---|
+| v0.34.6 (band start) | 1.032 ms | 1.22 ms |
+| v0.34.7 — OP-7 map-load index caches | 428 µs | 618 µs |
+| v0.34.8 — decoder robustness | *(no perf change)* | — |
+| v0.34.9 — full-IWAD capacity | *(no perf change)* | — |
+| **v0.34.10 — `>>>` migration** | **369 µs** | **542 µs** |
+| **band total** | **−64%** | **−56%** |
+
+Plus: the SLADRIP animation fixed after being a no-op for the engine's entire life, the fuzz suite
+×5 → ×7 with both new targets coverage-probed, four silent capacity truncations lifted (the WAD
+directory clamped at 2048 against registered DOOM.WAD's ~2306 — it never loaded intact), `TEXTURE2`
+parsed for the first time, and `--ppm` stopped opening the developer's live framebuffer device.
+
 ## [0.34.9] - 2026-07-27 — full-IWAD capacity: stop guessing, size from the WAD
 
 The gate-opener. Four silent truncations plus one lump this engine never looked for were, between

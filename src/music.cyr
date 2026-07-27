@@ -161,7 +161,7 @@ fn music_note_on(chan, note, vol): i64 {
     if (note < 0) { note = 0; }
     if (note > 127) { note = 127; }
     var cv = load64(music_chan_vol + chan * 8);
-    var combined = asr(vol * cv, 7);           # note*chan volume, 0..127
+    var combined = ((vol * cv) >>> (7));           # note*chan volume, 0..127
     if (combined > 127) { combined = 127; }
 
     var slot = -1;
@@ -245,8 +245,8 @@ fn music_process_batch(): i64 {
         }
         var b = load8(music_score + music_pos);
         music_pos += 1;
-        var last = asr(b, 7) & 1;
-        var typ = asr(b, 4) & 7;
+        var last = ((b) >>> (7)) & 1;
+        var typ = ((b) >>> (4)) & 7;
         var chan = b & 15;
 
         if (typ == 0) {                       # release note
@@ -344,13 +344,13 @@ fn music_render_sample(): i64 {
             # Advance phase, sample the sine table.
             var ph = (load64(mv_phase + v * 8) + load64(mv_inc + v * 8)) & MUS_PHASE_MASK;
             store64(mv_phase + v * 8, ph);
-            var idx = asr(ph, 16);
+            var idx = ((ph) >>> (16));
             if (idx < 0) { idx = 0; }
             if (idx > 1023) { idx = 1023; }
             var sv = load64(sine_table + idx * 8);
             # gain = env(0..65536 -> 0..256) * vol(0..127)
-            var gain = asr(env, 8) * load64(mv_vol + v * 8);
-            mix += asr(sv * gain, MUS_AMP_SHIFT);
+            var gain = ((env) >>> (8)) * load64(mv_vol + v * 8);
+            mix += ((sv * gain) >>> (MUS_AMP_SHIFT));
         }
     }
     return mix;

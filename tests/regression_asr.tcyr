@@ -44,6 +44,35 @@ fn main() {
     assert_eq(asr(0 - 1, 1), 0 - 1, "-1>>1 = -1 (floor; trunc gave 0)");
     assert_eq(asr(0 - 7, 2), 0 - 2, "-7>>2 = -2 (floor; trunc gave -1)");
 
+    test_group("native >>> floors negatives (v0.34.10 migration gate)");
+    # v0.34.10 replaced all 96 asr() call sites in src/ with the native `>>>`
+    # operator. The ENTIRE engine's negative-coordinate math now depends on `>>>`
+    # emitting SAR (floor) rather than truncating toward zero — if a future
+    # toolchain regressed that, flats would mis-wrap by a texel over negative
+    # world coords and nothing else would fail loudly. cyrius only gained a
+    # const-fold guard for `>>>` in 6.4.74 (it was unguarded from 6.4.46), which
+    # is why the migration waited for the 6.4.78 pin.
+    #
+    # These mirror the asr() cases above EXACTLY: same inputs, same expectations.
+    # asr() itself stays in lib/bsp.cyr (vendored, and bsp's own internals use
+    # it), so both must agree — asserted pairwise below.
+    assert_eq((0 - 1000000) >>> 16, 0 - 16, "-1000000 >>> 16 = -16 (floor)");
+    assert_eq((0 - 3) >>> 1, 0 - 2, "-3 >>> 1 = -2 (floor)");
+    assert_eq((0 - 1) >>> 1, 0 - 1, "-1 >>> 1 = -1 (floor)");
+    assert_eq((0 - 7) >>> 2, 0 - 2, "-7 >>> 2 = -2 (floor)");
+    assert_eq((0 - 100) >>> 1, 0 - 50, "-100 >>> 1 = -50");
+    assert_eq((0 - 256) >>> 4, 0 - 16, "-256 >>> 4 = -16");
+    assert_eq((0 - 65536) >>> 16, 0 - 1, "-65536 >>> 16 = -1");
+    assert_eq(256 >>> 4, 16, "256 >>> 4 = 16 (positive unchanged)");
+    assert_eq(65536 >>> 16, 1, "65536 >>> 16 = 1");
+    assert_eq(0 >>> 8, 0, "0 >>> 8 = 0");
+    assert_eq(1 >>> 0, 1, "1 >>> 0 = 1 (zero-bit shift)");
+    # The two must remain interchangeable — the migration's core assumption.
+    assert_eq((0 - 1000000) >>> 16, asr(0 - 1000000, 16), ">>> == asr (-1000000, 16)");
+    assert_eq((0 - 3) >>> 1, asr(0 - 3, 1), ">>> == asr (-3, 1)");
+    assert_eq((0 - 7) >>> 2, asr(0 - 7, 2), ">>> == asr (-7, 2)");
+    assert_eq(12345 >>> 5, asr(12345, 5), ">>> == asr (positive)");
+
     test_group("fixed_to_int negative round-trip");
     var neg5 = fixed_from_int(0 - 5);
     assert_eq(fixed_to_int(neg5), 0 - 5, "to_int(from_int(-5)) = -5");

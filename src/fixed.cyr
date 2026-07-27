@@ -24,11 +24,11 @@ enum Angle {
 # from drifting and avoids the duplicate-symbol error on 0.26.0+.
 
 fn fixed_from_int(n): i64 { return n << 16; }
-fn fixed_to_int(f): i64 { return asr(f, 16); }
-fn fixed_round(f): i64 { return asr(f + FIXED_HALF, 16); }
+fn fixed_to_int(f): i64 { return ((f) >>> (16)); }
+fn fixed_round(f): i64 { return ((f + FIXED_HALF) >>> (16)); }
 
 fn fixed_mul(a, b): i64 {
-    return asr(a * b, 16);
+    return ((a * b) >>> (16));
 }
 
 fn fixed_div(a, b): i64 {
@@ -62,8 +62,8 @@ fn angle_sub(a, b): i64 { return (a - b) & ANG_MASK; }
 fn fixed_approx_dist(dx, dy): i64 {
     var adx = fixed_abs(dx);
     var ady = fixed_abs(dy);
-    if (adx > ady) { return adx + asr(ady, 1); }
-    return ady + asr(adx, 1);
+    if (adx > ady) { return adx + ((ady) >>> (1)); }
+    return ady + ((adx) >>> (1));
 }
 
 # Integer square root (floor) of a non-negative value (TX-4). Newton iteration,
@@ -74,10 +74,10 @@ fn fixed_approx_dist(dx, dy): i64 {
 fn isqrt(n): i64 {
     if (n < 2) { if (n < 0) { return 0; } return n; }
     var x = n;
-    var y = asr(x + 1, 1);
+    var y = ((x + 1) >>> (1));
     while (y < x) {
         x = y;
-        y = asr(x + n / x, 1);
+        y = ((x + n / x) >>> (1));
     }
     return x;
 }

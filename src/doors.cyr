@@ -468,10 +468,10 @@ fn doors_use(): i64 {
 
         # Ray/segment intersection, reduced-precision form as
         # thing_check_sight: t1 = param along the use ray, t2 along the line.
-        var denom = fixed_mul(asr(udx, 8), asr(ldy, 8)) - fixed_mul(asr(udy, 8), asr(ldx, 8));
+        var denom = fixed_mul(((udx) >>> (8)), ((ldy) >>> (8))) - fixed_mul(((udy) >>> (8)), ((ldx) >>> (8)));
         if (denom == 0) { continue; }
-        var t1_num = fixed_mul(asr(lx1 - player_x, 8), asr(ldy, 8)) - fixed_mul(asr(ly1 - player_y, 8), asr(ldx, 8));
-        var t2_num = fixed_mul(asr(lx1 - player_x, 8), asr(udy, 8)) - fixed_mul(asr(ly1 - player_y, 8), asr(udx, 8));
+        var t1_num = fixed_mul(((lx1 - player_x) >>> (8)), ((ldy) >>> (8))) - fixed_mul(((ly1 - player_y) >>> (8)), ((ldx) >>> (8)));
+        var t2_num = fixed_mul(((lx1 - player_x) >>> (8)), ((udy) >>> (8))) - fixed_mul(((ly1 - player_y) >>> (8)), ((udx) >>> (8)));
         var t1 = fixed_div(t1_num, denom);
         var t2 = fixed_div(t2_num, denom);
         if (t1 <= 0) { continue; }
@@ -632,14 +632,14 @@ fn doors_walk_trigger(old_x, old_y, new_x, new_y): i64 {
         var lx2 = map_vertex_x(v2);
         var ly2 = map_vertex_y(v2);
 
-        var mx = asr(lx1 + lx2, 1);
-        var my = asr(ly1 + ly2, 1);
+        var mx = ((lx1 + lx2) >>> (1));
+        var my = ((ly1 + ly2) >>> (1));
         if (fixed_approx_dist(mx - new_x, my - new_y) > 128 << 16) { continue; }
 
         var ldx = lx2 - lx1;
         var ldy = ly2 - ly1;
-        var os = asr(old_x - lx1, 8) * asr(ldy, 8) - asr(old_y - ly1, 8) * asr(ldx, 8);
-        var ns = asr(new_x - lx1, 8) * asr(ldy, 8) - asr(new_y - ly1, 8) * asr(ldx, 8);
+        var os = ((old_x - lx1) >>> (8)) * ((ldy) >>> (8)) - ((old_y - ly1) >>> (8)) * ((ldx) >>> (8));
+        var ns = ((new_x - lx1) >>> (8)) * ((ldy) >>> (8)) - ((new_y - ly1) >>> (8)) * ((ldx) >>> (8));
 
         var crossed = 0;
         if (os >= 0 && ns < 0) { crossed = 1; }
@@ -656,10 +656,10 @@ fn doors_walk_trigger(old_x, old_y, new_x, new_y): i64 {
         var wt = fixed_div(os, t_den);
         var cxp = old_x + fixed_mul(wt, new_x - old_x);
         var cyp = old_y + fixed_mul(wt, new_y - old_y);
-        var pdx = asr(cxp - lx1, 8);
-        var pdy = asr(cyp - ly1, 8);
-        var ldx8 = asr(ldx, 8);
-        var ldy8 = asr(ldy, 8);
+        var pdx = ((cxp - lx1) >>> (8));
+        var pdy = ((cyp - ly1) >>> (8));
+        var ldx8 = ((ldx) >>> (8));
+        var ldy8 = ((ldy) >>> (8));
         var wdot = pdx * ldx8 + pdy * ldy8;
         if (wdot < 0) { continue; }
         var wlen2 = ldx8 * ldx8 + ldy8 * ldy8;

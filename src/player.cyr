@@ -240,10 +240,10 @@ fn move_check_linedef(cx, cy, cfloor, nx, ny, radius, i, allow_drop): i64 {
     var pdx = nx - lx1;
     var pdy = ny - ly1;
 
-    var len_sq = fixed_mul(asr(ldx, 8), asr(ldx, 8)) + fixed_mul(asr(ldy, 8), asr(ldy, 8));
+    var len_sq = fixed_mul(((ldx) >>> (8)), ((ldx) >>> (8))) + fixed_mul(((ldy) >>> (8)), ((ldy) >>> (8)));
     if (len_sq <= 0) { return 1; }
 
-    var dot = fixed_mul(asr(pdx, 8), asr(ldx, 8)) + fixed_mul(asr(pdy, 8), asr(ldy, 8));
+    var dot = fixed_mul(((pdx) >>> (8)), ((ldx) >>> (8))) + fixed_mul(((pdy) >>> (8)), ((ldy) >>> (8)));
     var t = fixed_div(dot, len_sq);
     t = fixed_clamp(t, 0, FIXED_ONE);
 
@@ -270,15 +270,15 @@ fn move_check_linedef(cx, cy, cfloor, nx, ny, radius, i, allow_drop): i64 {
         if (allow_drop == 1) {
             var cpdx = cx - lx1;
             var cpdy = cy - ly1;
-            var cdot = fixed_mul(asr(cpdx, 8), asr(ldx, 8)) + fixed_mul(asr(cpdy, 8), asr(ldy, 8));
+            var cdot = fixed_mul(((cpdx) >>> (8)), ((ldx) >>> (8))) + fixed_mul(((cpdy) >>> (8)), ((ldy) >>> (8)));
             var ct = fixed_div(cdot, len_sq);
             ct = fixed_clamp(ct, 0, FIXED_ONE);
             var ccx = lx1 + fixed_mul(ct, ldx);
             var ccy = ly1 + fixed_mul(ct, ldy);
             var cdist = fixed_approx_dist(cx - ccx, cy - ccy);
             if (cdist < radius) {
-                var side_c = fixed_mul(asr(cx - lx1, 8), asr(ldy, 8)) - fixed_mul(asr(cy - ly1, 8), asr(ldx, 8));
-                var side_n = fixed_mul(asr(nx - lx1, 8), asr(ldy, 8)) - fixed_mul(asr(ny - ly1, 8), asr(ldx, 8));
+                var side_c = fixed_mul(((cx - lx1) >>> (8)), ((ldy) >>> (8))) - fixed_mul(((cy - ly1) >>> (8)), ((ldx) >>> (8)));
+                var side_n = fixed_mul(((nx - lx1) >>> (8)), ((ldy) >>> (8))) - fixed_mul(((ny - ly1) >>> (8)), ((ldx) >>> (8)));
                 var crossing = 0;
                 if (side_c > 0 && side_n < 0) { crossing = 1; }
                 if (side_c < 0 && side_n > 0) { crossing = 1; }

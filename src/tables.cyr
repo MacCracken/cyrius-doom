@@ -33,7 +33,7 @@ fn p_random_seed(s): i64 { rng_state = s; return 0; }
 fn p_random(): i64 {
     rng_state = rng_state * 1103515245 + 12345;
     # Bits 16..23 — the low byte of an LCG has poor entropy, so shift first.
-    return asr(rng_state, 16) & 255;
+    return ((rng_state) >>> (16)) & 255;
 }
 
 # Returns a pseudo-random value in 0..n-1 (0 if n <= 0).
@@ -52,7 +52,7 @@ fn p_random_range(n): i64 {
 fn atan_octant(r): i64 {
     var quad = fixed_mul(r, 65536 - r);
     var units = 128 * r + fixed_mul(2915838, quad);
-    return asr(units + 32768, 16);
+    return ((units + 32768) >>> (16));
 }
 
 fn tables_init(): i64 {

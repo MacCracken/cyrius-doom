@@ -71,7 +71,7 @@ sh scripts/run.sh
 ```
 src/
   main.cyr        — entry, game loop (35Hz tick), --ppm screenshot mode
-  fixed.cyr       — 16.16 fixed-point math, asr() for logical-shift workaround
+  fixed.cyr       — 16.16 fixed-point math, native `>>>` arithmetic right shift
   tables.cyr      — 1024-entry sine table (Bhaskara I), atan2, trig wrappers
   wad.cyr         — WAD parser (IWAD/PWAD, directory, lump read/cache)
   framebuf.cyr    — 320x200 palette-indexed framebuffer, PPM output
@@ -111,7 +111,15 @@ Dep pins (bsp / vani versions) and module/lib counts live in [`state.md`](docs/d
 - **Correctness is the optimum sovereignty** — wrong code doesn't own anything; bugs own you. Verify before claiming.
 - **22 ms frame budget @ 35 Hz** — never skip benchmarks on changes to the render path. Measure before and after.
 - **Fuzz early** — `fuzz/fuzz_wad.cyr` + `fuzz/fuzz_fixed.cyr` have found bugs unit tests missed. Run before claiming robustness.
-- **`asr()` everywhere on signed shifts** — Cyrius `>>` is logical. Every right-shift on a signed value must use `asr()`.
+- **`>>>` everywhere on signed shifts** — Cyrius `>>` is LOGICAL, so a signed right-shift must use
+  the native arithmetic shift `>>>` (floors negatives, = C's signed `>>`). *Changed at v0.34.10*: all
+  96 sites migrated off the `asr()` helper, which cost a function call per shift — `fixed_mul`, which
+  is literally one multiply plus that shift, went **6 ns → 4 ns** and the spawn frame **−12%**.
+  `asr()` still exists in the vendored `lib/bsp.cyr` (bsp's own internals use it) and remains
+  semantically identical; `tests/regression_asr.tcyr` asserts the two agree, because the whole
+  engine's negative-coordinate math now rests on `>>>` emitting SAR.
+  **Gate before ever changing this**: `>>>` was const-fold-UNGUARDED in cyrius 6.4.46–6.4.73; only
+  6.4.74+ is safe. Do not migrate shift code on an older pin.
 - **Lazy init guards** — `if (ptr == 0) { ptr = alloc(N); }` — prevents double-alloc and null deref. Pattern lives in framebuf / texture / masked-segs.
 - **Enum for constants** — saves `gvar_toks` slots (cycc limit: 4,096 initialized globals). Use `var` only for mutable state.
 - **Initialized-globals counting rule** — *corrected 2026-07-25 (cycc 6.4.74); the old wording here
@@ -134,7 +142,7 @@ Dep pins (bsp / vani versions) and module/lib counts live in [`state.md`](docs/d
 - Do not include WAD files in the repo (gitignored)
 - Do not copy id Software source — clean-room from documented specs only
 - Do not use floating point — all math is 16.16 fixed-point
-- Do not use bare `>>` on signed values — use `asr()`
+- Do not use bare `>>` on signed values — use `>>>` (native arithmetic shift; `asr()` is the retired helper)
 - Do not skip fuzz testing before claiming robustness
 - Do not allocate `var buf[N]` for buffers > 100 bytes — use `alloc()` (cycc 256 KB output limit)
 - Do not hardcode toolchain versions in CI YAML — `cyrius = "X.Y.Z"` in `cyrius.cyml` is the only source of truth
@@ -199,7 +207,7 @@ Dep pins (bsp / vani versions) and module/lib counts live in [`state.md`](docs/d
 
 ## Cyrius Conventions
 
-- **16.16 fixed-point math** — no FPU; `fx_mul` / `fx_div` / `asr` are the workhorses.
+- **16.16 fixed-point math** — no FPU; `fixed_mul` / `fixed_div` / `>>>` are the workhorses.
 - **No libc** — direct syscalls via `lib/io.cyr`.
 - **Heap-allocated large buffers** — `alloc()` for anything > 100 bytes; `var buf[N]` bloats the binary.
 - **Enum-packed constants** — see `MapMax` / `MapSize` / `MapLineFlag` / `Fixed` / `Angle` / `ViewConst` / `WeaponConst` for the pattern.

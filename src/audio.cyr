@@ -435,15 +435,15 @@ fn audio_play_at(lump_name, sx, sy): i64 {
     # sep: 0 = hard left, 128 = center, 256 = hard right. Swing 96 (< 128) keeps
     # even side sounds partly present on the far channel.
     var s = fixed_sin(fixed_atan2(dy, dx) - player_angle);   # [-65536, 65536]
-    var sep = 128 - asr(s * 96, 16);
+    var sep = 128 - ((s * 96) >>> (16));
     if (sep < 0) { sep = 0; }
     if (sep > 256) { sep = 256; }
 
     # Equal-power-ish pan law (matches the original): each channel attenuates by
     # the square of its distance from that side.
-    var lvol = vol - asr(vol * sep * sep, 16);
+    var lvol = vol - ((vol * sep * sep) >>> (16));
     var rsep = 256 - sep;
-    var rvol = vol - asr(vol * rsep * rsep, 16);
+    var rvol = vol - ((vol * rsep * rsep) >>> (16));
     if (lvol < 0) { lvol = 0; }
     if (rvol < 0) { rvol = 0; }
 
@@ -478,8 +478,8 @@ fn audio_mix_chunk(): i64 {
                     # /256). A centered full voice (lvol==rvol==256) leaves the
                     # sample unchanged -> bit-identical to the old mono mix.
                     var samp = load8(load64(audio_chan_data + c * 8) + cpos) - 128;
-                    accl = accl + asr(samp * load64(audio_chan_lvol + c * 8), 8);
-                    accr = accr + asr(samp * load64(audio_chan_rvol + c * 8), 8);
+                    accl = accl + ((samp * load64(audio_chan_lvol + c * 8)) >>> (8));
+                    accr = accr + ((samp * load64(audio_chan_rvol + c * 8)) >>> (8));
                     store64(audio_chan_pos + c * 8, cpos + 1);
                 }
             }
@@ -494,8 +494,8 @@ fn audio_mix_chunk(): i64 {
         var s16l = 0;
         var s16r = 0;
         if (sfx_volume > 0) {
-            s16l = asr((accl << 8) * (sfx_volume + 1), 4);
-            s16r = asr((accr << 8) * (sfx_volume + 1), 4);
+            s16l = (((accl << 8) * (sfx_volume + 1)) >>> (4));
+            s16r = (((accr << 8) * (sfx_volume + 1)) >>> (4));
         }
         # Music: one mono source sample from the MUS synth, summed into the same
         # output at its own master volume (music_volume). Called exactly once per
@@ -505,7 +505,7 @@ fn audio_mix_chunk(): i64 {
         # byte-identical to before.
         var msamp = music_render_sample();
         if (music_volume > 0) {
-            var mscaled = asr(msamp * (music_volume + 1), 4);
+            var mscaled = ((msamp * (music_volume + 1)) >>> (4));
             s16l = s16l + mscaled;
             s16r = s16r + mscaled;
         }

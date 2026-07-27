@@ -440,7 +440,7 @@ fn sprite_render_all(): i64 {
     }
     for (var mi = 0; mi < masked_count; mi += 1) {
         var mbase = masked_segs + mi * MASKED_ENTRY_SIZE;
-        var mid_scale = asr(load64(mbase + 32) + load64(mbase + 40), 1);
+        var mid_scale = ((load64(mbase + 32) + load64(mbase + 40)) >>> (1));
         if (mid_scale <= 0) { mid_scale = 1; }
         store64(masked_morder + mi * 8, mi);
         store64(masked_mdepth + mi * 8, fixed_div(PROJ_DIST, mid_scale));
