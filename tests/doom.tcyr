@@ -123,6 +123,35 @@ fn main() {
     assert_eq(isqrt(256 * 256), 256, "len(256,0) = 256 (axis-aligned exact)");
 
     # ============================================================
+    test_group("front-180 FOV gate (EF-2, v0.35.0)");
+    # ============================================================
+    # Vanilla A_Look only wakes a monster to something in its FRONT 180 degrees.
+    # doom woke on bare line-of-sight from any direction, so walking up behind a
+    # sleeping monster woke it as reliably as walking up in front.
+    #
+    # Unit-tested rather than probe-tested on purpose: a point behind a monster
+    # is usually ALSO sight-blocked, so a staged engagement never evaluates this
+    # predicate at all — it would look "verified" while never running.
+    # BAM angles: ANG360 = 1024, 0 = +x (east), ANG90 = 256 = +y.
+    # Monster at the origin facing EAST (ang 0):
+    assert_eq(ai_in_front(0, 0, 0, 100 << 16, 0), 1, "east-facing sees due east");
+    assert_eq(ai_in_front(0, 0, 0, 0 - (100 << 16), 0), 0, "east-facing is blind due west");
+    assert_eq(ai_in_front(0, 0, 0, 0, 100 << 16), 1, "east-facing sees due north (edge of arc)");
+    assert_eq(ai_in_front(0, 0, 0, 0, 0 - (100 << 16)), 1, "east-facing sees due south (edge)");
+    assert_eq(ai_in_front(0, 0, 0, 70 << 16, 70 << 16), 1, "east-facing sees NE");
+    assert_eq(ai_in_front(0, 0, 0, 0 - (70 << 16), 70 << 16), 0, "east-facing blind NW");
+    assert_eq(ai_in_front(0, 0, 0, 0 - (70 << 16), 0 - (70 << 16)), 0, "east-facing blind SW");
+    # Monster facing NORTH (ang 256):
+    assert_eq(ai_in_front(256, 0, 0, 0, 100 << 16), 1, "north-facing sees due north");
+    assert_eq(ai_in_front(256, 0, 0, 0, 0 - (100 << 16)), 0, "north-facing blind due south");
+    # Monster facing WEST (ang 512) — the wrap case the fold has to get right:
+    assert_eq(ai_in_front(512, 0, 0, 0 - (100 << 16), 0), 1, "west-facing sees due west");
+    assert_eq(ai_in_front(512, 0, 0, 100 << 16, 0), 0, "west-facing blind due east");
+    # Angle outside [0, ANG360) must normalise, not fall through:
+    assert_eq(ai_in_front(1024, 0, 0, 100 << 16, 0), 1, "ang == ANG360 behaves as 0");
+    assert_eq(ai_in_front(0 - 768, 0, 0, 0, 100 << 16), 1, "negative angle normalises");
+
+    # ============================================================
     test_group("masked entry layout lock (TX-MASKED, v0.34.5)");
     # ============================================================
     # v0.34.5 grew MASKED_ENTRY 120 -> 144 B to carry the UNCLIPPED view-space
@@ -1064,6 +1093,53 @@ fn main() {
 
         var door3 = texture_find("DOOR3");
         assert(door3 >= 0, "DOOR3 found");
+
+        # ============================================================
+        test_group("REJECT pre-test never disagrees with real sight (OP-5b)");
+        # ============================================================
+        # v0.35.0 skips the full per-linedef sight walk when the WAD's REJECT
+        # matrix says two sectors provably cannot see each other. A set bit is
+        # authoritative, so the skip is behaviour-preserving — but ONLY if the
+        # matrix agrees with the engine's own geometry. A wrong "blocked" bit
+        # would make a monster permanently blind, and nothing else would fail.
+        #
+        # Assert the one-directional invariant that matters: wherever REJECT says
+        # BLOCKED, the real walk must also say blocked. (The converse is not
+        # required — REJECT is allowed to say "maybe" and be wrong that way,
+        # which just costs a scan.)
+        assert_eq(map_load("E1M1"), 0, "E1M1 loads for the REJECT check");
+        var rj_pairs = 0;
+        var rj_blocked = 0;
+        var rj_disagree = 0;
+        var rj_n = map_num_sectors;
+        if (rj_n > 40) { rj_n = 40; }          # bound the O(n^2) sweep
+        for (var ra = 0; ra < rj_n; ra += 1) {
+            for (var rb = 0; rb < rj_n; rb += 1) {
+                rj_pairs += 1;
+                if (map_reject_blocks(ra, rb) == 1) {
+                    rj_blocked += 1;
+                    # Sample a point in each sector via its first seg's vertex —
+                    # a real in-sector point, not a synthetic one.
+                    var pax = sector_sample_x(ra);
+                    var pay = sector_sample_y(ra);
+                    var pbx = sector_sample_x(rb);
+                    var pby = sector_sample_y(rb);
+                    if (pax != 0 || pay != 0) {
+                        if (pbx != 0 || pby != 0) {
+                            if (thing_check_sight(pax, pay, pbx, pby) == 1) {
+                                rj_disagree += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert(rj_pairs > 0, "REJECT sweep examined sector pairs");
+        assert_eq(rj_disagree, 0,
+        "REJECT never claims BLOCKED where the real sight walk says visible");
+        # Self-check: the sweep must actually have found blocked pairs, or the
+        # assert above is vacuous (the same zero-coverage trap as fuzz_flat).
+        assert(rj_blocked > 0, "the REJECT sweep found blocked pairs (not vacuous)");
 
         # ============================================================
         test_group("OP-2 animated-texture composite invalidation (v0.34.4)");

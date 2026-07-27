@@ -7,6 +7,87 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.35.0] - 2026-07-27 — monster sight + wake: REJECT, stagger, and the front-180 gate
+
+Opens the gameplay arc. The 0.34.x band was gated on byte-identical pixels; this cut changes what
+monsters **do**, so it introduces the gate the rest of the arc will use — a deterministic behaviour
+fingerprint — and is measured against it.
+
+**Scope note, stated plainly**: the roadmap grouped four items here. This cut ships the two that are
+one subject — *how a monster decides it has seen you* (OP-5b, EF-2). The other two, RC-G1 and
+F331-4, are about *how a monster moves*, need their own gameplay evidence, and are re-slotted to
+v0.35.1. Bundling them would have put four behaviour changes behind one fingerprint diff, where any
+unexpected delta is ambiguous about which item caused it.
+
+### Added
+
+- **`--ai-probe N` / `--ai-at X Y` — a behaviour gate for the whole gameplay arc.** Runs N world
+  ticks and prints a deterministic fingerprint: wake / chase / melee / ranged / sight-call /
+  sight-true / move-blocked / reject-skip / fov-reject counts, plus a per-state monster census and a
+  position dump. `--ai-at` stages an engagement, which is necessary because **no monster on E1M1,
+  E1M3, E1M5, E1M7 or E1M9 has line of sight from the map's own spawn point** — the counters are all
+  zero there, so a probe without it measures only idle cost.
+- The probe needed its own integer parser: the stdlib `str_to_int` does not stop at the argv
+  boundary (argv strings are contiguous, so `3008` followed by `-4256` came back as `30084256` with
+  the sign dropped).
+
+### Changed
+
+- **OP-5b — idle monsters no longer re-scan the whole map every tick. `things_tick` 12.3 → 4.6 µs
+  (−63%), and −76% against the v0.34.6 band start.** The baseline probe showed the problem exactly:
+  `sight_calls == monsters × ticks`, with `sight_true == 0` for all of it (E1M5: 91 × 350 = 31,850
+  full per-linedef walks in 10 s, none of which ever found anything). Two changes:
+  - **The WAD's REJECT lump is now loaded and used** as vanilla does — an O(1) "these two sectors
+    provably cannot see each other" pre-test before any line walk. doom had never read it. A set bit
+    is authoritative, so the skip is behaviour-preserving; every read is guarded, and a WAD with a
+    missing or short REJECT simply falls back to the full walk.
+  - **Idle look-scans are staggered** across `AI_LOOK_PERIOD` (4) ticks by thing index. Vanilla's
+    A_Look runs on a monster's own state cadence; doom had no equivalent, so every sleeping monster
+    scanned on the *same* tick and the worst tick cost N full scans.
+
+  Measured idle sight calls over 350 ticks:
+
+  | map | before | after | |
+  |---|---|---|---|
+  | E1M1 | 2,100 | **349** | −83% |
+  | E1M3 | 25,900 | **4,552** | −82% |
+  | E1M5 | 31,850 | **4,113** | −87% |
+  | E1M7 | 29,400 | **3,765** | −87% |
+  | E1M9 | 25,200 | **2,885** | −89% |
+
+  Staged engagements keep the same behaviour: E1M1 wakes 3→3 / chases 3→3, E1M5 wakes 2→2 /
+  chases 2→2 / melee 40→40, and both end with an identical per-state census. **The one intended
+  cost**: a wake can land up to `AI_LOOK_PERIOD-1` ticks (~0.09 s) later than before, which shifts
+  attack cadence slightly — visible in E1M1's melee 16→9 / ranged 6→7 split over the same window.
+  That timing shift is precisely why this is the behaviour-changing half of OP-5 and was not allowed
+  into v0.34.7's byte-identical batch.
+- **EF-2 — monsters no longer see through the back of their own heads.** Vanilla `A_Look` wakes a
+  monster only to something in its **front 180°**; doom woke on bare line-of-sight from any
+  direction, so walking up behind a sleeping monster woke it exactly as reliably as walking up in
+  front. Deferred from v0.34.1, shipped here because it is the same decision as OP-5b. Noise still
+  wakes from any direction (`things_noise_alert`, still subject to v0.34.1's `TF_AMBUSH` deaf
+  check) — that is vanilla, and it is why shooting still pulls monsters that are facing away.
+- **A per-thing sector resolver** (`thing_sector`, cached and invalidated on move) backs the REJECT
+  pre-test. It is held in a parallel array rather than in the thing struct: offsets 0..120 are all
+  taken at stride 128, so adding a field would be the layout-change class that v0.34.5 needed 18
+  sentinel asserts to make safe. RC-G1 needs exactly this resolver, which is why it was built here.
+
+### Verification
+
+- **Tests 240 WAD-free / 366 full** (+13 / +17). Two new groups, both mutation-proven:
+  - **REJECT agreement** — sweeps sector pairs and asserts that wherever REJECT says *blocked*, the
+    real per-linedef walk agrees. A wrong "blocked" bit would make a monster permanently blind and
+    nothing else would fail. Includes a non-vacuity assert that the sweep actually found blocked
+    pairs.
+  - **`ai_in_front`** — the FOV predicate, extracted specifically so it could be unit-tested.
+    A point behind a monster is usually *also* sight-blocked, so a staged engagement never evaluates
+    the predicate at all: probe-testing it would have looked verified while never running it.
+    Covers all four cardinal facings, both diagonals, the arc edges, and angle normalisation.
+    Mutations (widening the arc to 360°, dropping the negative-angle normalise) fail 5 and 4 asserts.
+- **Render output byte-identical** across 5 maps — this cut touches AI, not rendering, and the PPM
+  gate confirms it stayed out of the render path.
+- Fuzz ×7 clean; deps 36/0; binary 472,920 B. **AGNOS QEMU direct-map PASS.**
+
 ## [0.34.10] - 2026-07-27 — `asr()` → native `>>>` (fixed_mul −33%, frame −12%)
 
 Closes the 0.34.x band. Purely mechanical, **byte-identical at tick 0 and tick 24**, and the last

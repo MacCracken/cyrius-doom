@@ -35,6 +35,10 @@ var map_num_things = 0;
 
 # BLOCKMAP for fast collision
 var map_blockmap = 0;
+# REJECT: sector-visibility bit matrix (see map_load). map_reject_ok gates every
+# read so a WAD without a usable REJECT simply falls back to the full line walk.
+var map_reject = 0;
+var map_reject_ok = 0;
 var map_bm_originx = 0;
 var map_bm_originy = 0;
 var map_bm_cols = 0;
@@ -310,6 +314,33 @@ fn map_load(map_name): i64 {
         store64(base + 32, read_le16(src + 8));
     }
 
+    # REJECT (marker + 9) — the sector-visibility bit matrix, numsectors^2 bits,
+    # row-major, bit set = those two sectors provably CANNOT see each other.
+    # Vanilla uses it as an O(1) pre-test in P_CheckSight before any line walk.
+    # doom has never loaded it, so every sight check paid a full linedef scan
+    # even between sectors the WAD itself says are mutually invisible.
+    # Optional: a WAD may ship a zero-filled or absent REJECT (meaning "no
+    # information"), which is why every use is guarded on map_reject != 0 and a
+    # short lump disables it rather than truncating.
+    map_reject = 0;
+    map_reject_ok = 0;
+    lump_idx = marker + 9;
+    if (lump_idx < wad_numlumps) {
+        var rj_size = wad_lump_size(lump_idx);
+        var need = (map_num_sectors * map_num_sectors + 7) / 8;
+        if (rj_size >= need) {
+            if (need > 0) {
+                if (need <= 1048576) {
+                    map_reject = alloc(need);
+                    if (map_reject != 0) {
+                        wad_read_lump_into(lump_idx, map_reject, need);
+                        map_reject_ok = 1;
+                    }
+                }
+            }
+        }
+    }
+
     # BLOCKMAP (marker + 10) — grid for fast collision. Fixed 64 KB buffer,
     # lazily allocated once (RC-G7 — a per-map alloc(lump_size) leaked the
     # old buffer every reload) and a hard size bound (the vanilla BLOCKMAP
@@ -552,6 +583,51 @@ fn map_print_stats(): i64 {
 # floor height — the collision step check used to read the player's z for
 # every mover, freezing chases near ledges whenever the player stood on
 # different ground.
+# REJECT pre-test: 1 = sectors a and b PROVABLY cannot see each other, so the
+# caller can skip the line walk entirely. 0 = no information (either the WAD has
+# no usable REJECT, the indices are out of range, or the bit is clear) — the
+# caller must then do the real check. Never returns 1 speculatively: a wrong 1
+# would make a monster permanently blind.
+# A representative point inside sector `sec`, taken from the midpoint of the
+# first linedef that faces it, nudged toward the sector side. Used by the
+# REJECT-agreement test to probe real geometry rather than synthetic points.
+# Returns (0,0) when the sector has no facing linedef.
+fn sector_sample_x(sec): i64 {
+    for (var i = 0; i < map_num_linedefs; i += 1) {
+        var rs = map_linedef_side_right(i);
+        if (rs < 0) { continue; }
+        if (map_sidedef_sector(rs) != sec) { continue; }
+        var v1 = map_linedef_v1(i);
+        var v2 = map_linedef_v2(i);
+        return (map_vertex_x(v1) + map_vertex_x(v2)) / 2;
+    }
+    return 0;
+}
+
+fn sector_sample_y(sec): i64 {
+    for (var i = 0; i < map_num_linedefs; i += 1) {
+        var rs = map_linedef_side_right(i);
+        if (rs < 0) { continue; }
+        if (map_sidedef_sector(rs) != sec) { continue; }
+        var v1 = map_linedef_v1(i);
+        var v2 = map_linedef_v2(i);
+        return (map_vertex_y(v1) + map_vertex_y(v2)) / 2;
+    }
+    return 0;
+}
+
+fn map_reject_blocks(a, b): i64 {
+    if (map_reject_ok == 0) { return 0; }
+    if (a < 0) { return 0; }
+    if (b < 0) { return 0; }
+    if (a >= map_num_sectors) { return 0; }
+    if (b >= map_num_sectors) { return 0; }
+    var bit = a * map_num_sectors + b;
+    var byte = load8(map_reject + (bit >>> 3));
+    if ((byte & (1 << (bit & 7))) != 0) { return 1; }
+    return 0;
+}
+
 fn map_point_sector(px, py): i64 {
     if (map_num_nodes == 0) { return 0; }
     var node_idx = map_num_nodes - 1;

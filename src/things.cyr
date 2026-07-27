@@ -112,6 +112,10 @@ enum ThingCat {
 
 enum ThingLayout {
     THING_SIZE = 128;
+    # OP-5b stagger period: an idle monster runs its look scan on one tick in
+    # AI_LOOK_PERIOD, phased by thing index so the load spreads instead of every
+    # monster scanning on the same tick.
+    AI_LOOK_PERIOD = 4;
     THING_MAX = 512;
 }
 var things = 0;
@@ -149,6 +153,40 @@ enum RangedConst {
 }
 
 # Field accessors
+# Per-thing sector (OP-5b). Resolved via the BSP and cached so neither the
+# REJECT pre-test nor RC-G1's door-obstruction check re-walks the tree per
+# monster per tick. Held in a PARALLEL array rather than in the thing struct:
+# offsets 0..120 are all taken and the stride is 128, so adding a field would be
+# a layout change — the class of change v0.34.5 had to pin with 18 sentinel
+# asserts to make safe. A side array costs one allocation and no blast radius.
+# RC-G1 needs exactly this resolver, which is why it rides this cut.
+var thing_sec_cache = 0;
+
+fn thing_sector(idx): i64 {
+    if (thing_sec_cache == 0) {
+        thing_sec_cache = alloc(THING_MAX * 8);
+        if (thing_sec_cache == 0) { return map_point_sector(thing_x(idx), thing_y(idx)); }
+        for (var k = 0; k < THING_MAX; k += 1) { store64(thing_sec_cache + k * 8, 0 - 1); }
+    }
+    if (idx < 0) { return 0 - 1; }
+    if (idx >= THING_MAX) { return 0 - 1; }
+    var c = load64(thing_sec_cache + idx * 8);
+    if (c >= 0) { return c; }
+    var sec = map_point_sector(thing_x(idx), thing_y(idx));
+    store64(thing_sec_cache + idx * 8, sec);
+    return sec;
+}
+
+# Called whenever a thing moves — the cached sector is only valid for the
+# position it was resolved at.
+fn thing_invalidate_sector(idx): i64 {
+    if (thing_sec_cache == 0) { return 0; }
+    if (idx < 0) { return 0; }
+    if (idx >= THING_MAX) { return 0; }
+    store64(thing_sec_cache + idx * 8, 0 - 1);
+    return 0;
+}
+
 fn thing_x(idx): i64 { return load64(things + idx * THING_SIZE); }
 fn thing_y(idx): i64 { return load64(things + idx * THING_SIZE + 8); }
 fn thing_angle(idx): i64 { return load64(things + idx * THING_SIZE + 24); }
@@ -168,8 +206,8 @@ fn thing_frame(idx): i64 { return load64(things + idx * THING_SIZE + 112); }
 fn thing_set_frame(idx, f): i64 { store64(things + idx * THING_SIZE + 112, f); return 0; }
 fn thing_aux(idx): i64 { return load64(things + idx * THING_SIZE + 120); }
 fn thing_set_aux(idx, v): i64 { store64(things + idx * THING_SIZE + 120, v); return 0; }
-fn thing_set_x(idx, v): i64 { store64(things + idx * THING_SIZE, v); return 0; }
-fn thing_set_y(idx, v): i64 { store64(things + idx * THING_SIZE + 8, v); return 0; }
+fn thing_set_x(idx, v): i64 { store64(things + idx * THING_SIZE, v); thing_invalidate_sector(idx); return 0; }
+fn thing_set_y(idx, v): i64 { store64(things + idx * THING_SIZE + 8, v); thing_invalidate_sector(idx); return 0; }
 fn thing_set_angle(idx, v): i64 { store64(things + idx * THING_SIZE + 24, v); return 0; }
 
 # ================================================================
@@ -388,6 +426,7 @@ fn things_spawn_from_map(): i64 {
 # Simplified: check if any one-sided linedef blocks the line.
 
 fn thing_check_sight(mx, my, tx, ty): i64 {
+    ai_stat_sight_calls += 1;
     var dx = tx - mx;
     var dy = ty - my;
 
@@ -460,6 +499,7 @@ fn thing_check_sight(mx, my, tx, ty): i64 {
         }
     }
 
+    ai_stat_sight_true += 1;
     return 1;
 }
 
@@ -596,6 +636,115 @@ fn thing_move_clear(self_idx, nx, ny): i64 {
     return 1;
 }
 
+# ================================================================
+# AI behaviour counters (v0.35.0)
+# ================================================================
+# The 0.34.x band was gated on byte-identical PPM output. The gameplay arc
+# cannot be: these cuts change what monsters DO. So behaviour gets its own
+# fingerprint — deterministic counters over a fixed tick budget, compared
+# before/after. Increments sit on state transitions and sight calls, not in any
+# per-linedef loop, so the cost is noise.
+var ai_stat_reject_skips = 0; # idle scans skipped by the REJECT pre-test
+var ai_stat_fov_rejects = 0;  # sight-visible but outside the front 180 (EF-2)
+var ai_tick_counter = 0;      # advances once per things_tick, drives the stagger
+var player_sector = 0;        # resolved once per tick, not per monster
+var ai_stat_wakes = 0;        # STATE_SPAWN -> SEE
+var ai_stat_chases = 0;       # SEE -> CHASE
+var ai_stat_melee = 0;        # CHASE -> ATTACK (melee wind-up armed)
+var ai_stat_ranged = 0;       # ranged attack released
+var ai_stat_sight_calls = 0;  # thing_check_sight invocations
+var ai_stat_sight_true = 0;   # ... that returned "visible"
+var ai_stat_move_blocked = 0; # chase move fully blocked (held position)
+
+# EF-2: is (tx,ty) within the front 180 degrees of a thing at (mx,my) facing
+# `ang`? Pure, so it is unit-testable — the staged probes cannot reach this
+# reliably (a behind-the-monster point is usually also sight-blocked, so the
+# gate is never evaluated) and an untested angle predicate is exactly the kind
+# of thing that silently inverts.
+# Angles are BAM-style: ANG360 = 1024 units, 0 = +x.
+fn ai_in_front(ang, mx, my, tx, ty): i64 {
+    var d = ang - fixed_atan2(ty - my, tx - mx);
+    # Normalise into [0, ANG360) before folding, so a negative difference or one
+    # past a full turn cannot slip through the fold below.
+    d = d % ANG360;
+    if (d < 0) { d += ANG360; }
+    if (d > ANG180) { d = ANG360 - d; }
+    if (d <= ANG90) { return 1; }
+    return 0;
+}
+
+fn ai_stats_reset(): i64 {
+    ai_stat_reject_skips = 0;
+    ai_stat_fov_rejects = 0;
+    ai_stat_wakes = 0;
+    ai_stat_chases = 0;
+    ai_stat_melee = 0;
+    ai_stat_ranged = 0;
+    ai_stat_sight_calls = 0;
+    ai_stat_sight_true = 0;
+    ai_stat_move_blocked = 0;
+    return 0;
+}
+
+fn ai_stats_print(): i64 {
+    syscall(1, 1, "AI wakes=", 9); fmt_int(ai_stat_wakes);
+    syscall(1, 1, " chases=", 8); fmt_int(ai_stat_chases);
+    syscall(1, 1, " melee=", 7); fmt_int(ai_stat_melee);
+    syscall(1, 1, " ranged=", 8); fmt_int(ai_stat_ranged);
+    syscall(1, 1, " sight_calls=", 13); fmt_int(ai_stat_sight_calls);
+    syscall(1, 1, " sight_true=", 12); fmt_int(ai_stat_sight_true);
+    syscall(1, 1, " move_blocked=", 14); fmt_int(ai_stat_move_blocked);
+    syscall(1, 1, " reject_skips=", 14); fmt_int(ai_stat_reject_skips);
+    syscall(1, 1, " fov_rejects=", 13); fmt_int(ai_stat_fov_rejects);
+    syscall(1, 1, "\n", 1);
+    return 0;
+}
+
+# Per-state census of live monsters, so a behaviour change shows as a shape
+# change and not just a count.
+# Where the SPAWNED (skill-filtered) monsters actually are, and whether each can
+# currently see the player. The WAD's THINGS list is not the answer — skill
+# filtering drops most of it — and picking a probe position without this is
+# guesswork.
+fn ai_monsters_print(): i64 {
+    syscall(1, 1, "AI player at ", 13); fmt_int(player_x >>> 16);
+    syscall(1, 1, ",", 1); fmt_int(player_y >>> 16); syscall(1, 1, "\n", 1);
+    for (var i = 0; i < thing_count; i += 1) {
+        if (thing_category(i) != CAT_MONSTER) { continue; }
+        if ((thing_flags(i) & TF_SHOOTABLE) == 0) { continue; }
+        syscall(1, 1, "AI mon type=", 12); fmt_int(thing_type(i));
+        syscall(1, 1, " at ", 4); fmt_int(thing_x(i) >>> 16);
+        syscall(1, 1, ",", 1); fmt_int(thing_y(i) >>> 16);
+        syscall(1, 1, " ang=", 5); fmt_int(thing_angle(i));
+        syscall(1, 1, " state=", 7); fmt_int(thing_state(i));
+        syscall(1, 1, " sees_player=", 13);
+        fmt_int(thing_check_sight(thing_x(i), thing_y(i), player_x, player_y));
+        syscall(1, 1, "\n", 1);
+    }
+    return 0;
+}
+
+fn ai_states_print(): i64 {
+    var n_spawn = 0; var n_see = 0; var n_chase = 0; var n_attack = 0; var n_other = 0;
+    for (var i = 0; i < thing_count; i += 1) {
+        if (thing_category(i) != CAT_MONSTER) { continue; }
+        if ((thing_flags(i) & TF_SHOOTABLE) == 0) { continue; }
+        var st = thing_state(i);
+        if (st == STATE_SPAWN) { n_spawn += 1; }
+        if (st == STATE_SEE) { n_see += 1; }
+        if (st == STATE_CHASE) { n_chase += 1; }
+        if (st == STATE_ATTACK) { n_attack += 1; }
+        if (st > STATE_ATTACK) { n_other += 1; }
+    }
+    syscall(1, 1, "AI states spawn=", 16); fmt_int(n_spawn);
+    syscall(1, 1, " see=", 5); fmt_int(n_see);
+    syscall(1, 1, " chase=", 7); fmt_int(n_chase);
+    syscall(1, 1, " attack=", 8); fmt_int(n_attack);
+    syscall(1, 1, " other=", 7); fmt_int(n_other);
+    syscall(1, 1, "\n", 1);
+    return 0;
+}
+
 fn thing_ai_tick(idx): i64 {
     var flags = thing_flags(idx);
     if ((flags & TF_ACTIVE) == 0) { return 0; }
@@ -631,6 +780,27 @@ fn thing_ai_tick(idx): i64 {
 
     # State machine
     if (state == STATE_SPAWN) {
+        # OP-5b, part 1 — REJECT pre-test. An idle monster used to run the FULL
+        # per-linedef sight walk every tick forever: the baseline probe measured
+        # sight_calls == monsters x ticks exactly (E1M5: 91 x 350 = 31,850), with
+        # sight_true == 0 for all of it. The WAD's own REJECT matrix answers
+        # "these two sectors cannot possibly see each other" in O(1), and a set
+        # bit is authoritative, so skipping is behaviour-preserving.
+        if (map_reject_blocks(thing_sector(idx), player_sector) == 1) {
+            ai_stat_reject_skips += 1;
+            return 0;
+        }
+        # OP-5b, part 2 — stagger. Even with REJECT, monsters in
+        # not-provably-invisible sectors still scan. Vanilla's A_Look only runs
+        # on the monster's own state-tic cadence, not every tic; doom had no
+        # equivalent, so all N scanned on the SAME tick, making the worst tick
+        # cost N full scans. Spread them over AI_LOOK_PERIOD ticks by thing
+        # index. Cost: a wake can be up to AI_LOOK_PERIOD-1 ticks (~0.09 s at
+        # period 4) later than before — deliberate, and the reason this is the
+        # behaviour-changing half of OP-5 rather than part of v0.34.7.
+        if (((ai_tick_counter + idx) % AI_LOOK_PERIOD) != 0) { return 0; }
+    }
+    if (state == STATE_SPAWN) {
         # Idle: wake on line-of-sight to the player. Real DOOM gates monster
         # wake-up on P_CheckSight (LOS) + FOV/sound, with NO distance cap — the
         # old `dist < MONSTER_SIGHT_RANGE` (1000-unit) cull kept all but the
@@ -638,8 +808,23 @@ fn thing_ai_tick(idx): i64 {
         # world. LOS alone is the gate now; thing_check_sight already culls
         # monsters with a one-sided wall between them and the player.
         if (thing_check_sight(tx, ty, player_x, player_y) == 1) {
-            thing_set_state(idx, STATE_SEE);
-            thing_set_tics(idx, 10);
+            # EF-2 (deferred from v0.34.1): vanilla A_Look only wakes a monster
+            # to something in its FRONT 180 degrees — a monster does not see
+            # through the back of its own head. doom woke on bare line-of-sight
+            # from any direction, so walking up behind a sleeping monster woke it
+            # as reliably as walking up in front.
+            #
+            # This gates the SIGHT wake only. Noise still wakes a monster from
+            # any direction (things_noise_alert, subject to the v0.34.1
+            # TF_AMBUSH deaf check) — that is vanilla too, and it is why shooting
+            # still pulls monsters that are facing away.
+            if (ai_in_front(thing_angle(idx), tx, ty, player_x, player_y) == 1) {
+                thing_set_state(idx, STATE_SEE);
+                thing_set_tics(idx, 10);
+                ai_stat_wakes += 1;
+            } else {
+                ai_stat_fov_rejects += 1;
+            }
         }
     }
 
@@ -650,6 +835,7 @@ fn thing_ai_tick(idx): i64 {
             thing_set_tics(idx, tics - 1);
         } else {
             thing_set_state(idx, STATE_CHASE);
+            ai_stat_chases += 1;
         }
     }
 
@@ -677,6 +863,8 @@ fn thing_ai_tick(idx): i64 {
             } else {
                 if (thing_move_clear(idx, tx, ty + my) == 1) {
                     thing_set_y(idx, ty + my);
+                } else {
+                    ai_stat_move_blocked += 1;
                 }
             }
         }
@@ -689,6 +877,7 @@ fn thing_ai_tick(idx): i64 {
         if (dist < MONSTER_ATTACK_RANGE && sight == 1) {
             thing_set_state(idx, STATE_ATTACK);
             thing_set_tics(idx, 15);
+            ai_stat_melee += 1;
         } else {
             # Ranged arm (0.33.1): a visible player beyond melee range draws
             # fire from hitscan/fireball monsters. aux paces the attempts —
@@ -1155,6 +1344,7 @@ fn thing_spawn_fireball(owner): i64 {
 
 # Ranged release at the end of the attack wind-up.
 fn thing_ranged_release(idx): i64 {
+    ai_stat_ranged += 1;
     var ttype = thing_type(idx);
     if (ttype == TTYPE_ZOMBIEMAN || ttype == TTYPE_SHOTGUY) {
         thing_hitscan_player(idx);
@@ -1275,6 +1465,11 @@ fn thing_missile_tick(idx): i64 {
 # ================================================================
 
 fn things_tick(): i64 {
+    # OP-5b: the stagger phase and the player's sector are per-TICK, not per
+    # monster — resolving the player's sector once here replaces one BSP descent
+    # per idle monster per tick.
+    ai_tick_counter += 1;
+    player_sector = map_point_sector(player_x, player_y);
     for (var i = 0; i < thing_count; i += 1) {
         thing_ai_tick(i);
         thing_missile_tick(i);

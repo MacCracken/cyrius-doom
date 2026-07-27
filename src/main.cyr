@@ -136,6 +136,28 @@ fn doom_exit(code): i64 {
     return 0;
 }
 
+# Parse a signed decimal from an argv string. The stdlib str_to_int does not
+# stop at the argument boundary here — "3008" followed by "-4256" came back as
+# 30084256 with the sign dropped — so map coordinates get their own parser.
+fn ai_parse_int(sp): i64 {
+    var i = 0;
+    var neg = 0;
+    if (load8(sp) == 45) { neg = 1; i = 1; }
+    var v = 0;
+    var any = 0;
+    while (1 == 1) {
+        var c = load8(sp + i);
+        if (c < 48) { i = i; break; }
+        if (c > 57) { i = i; break; }
+        v = v * 10 + (c - 48);
+        any = 1;
+        i += 1;
+    }
+    if (any == 0) { return 0; }
+    if (neg == 1) { return 0 - v; }
+    return v;
+}
+
 fn doom_main(): i64 {
     # NOTE: the agnos warm-up-mmap workaround was REMOVED once the kernel
     # root cause was fixed. The "first-mmap-return RIP=0" fault was NOT a
@@ -146,7 +168,7 @@ fn doom_main(): i64 {
     # non-identity arena top (0x3FC00000); no warm-up needed.
     alloc_init();
     args_init();
-    sakshi_info("cyrius-doom v0.34.10", 20);
+    sakshi_info("cyrius-doom v0.35.0", 19);
 
     # WAD path: argv[1] on Linux. On agnos, agnsh `run /bin/doom` passes no argv
     # beyond the path, so default to /DOOM1.WAD (staged on the ext2 root).
@@ -243,6 +265,10 @@ fn doom_main(): i64 {
     var ppm_mode = 0;
     var ppm_menu = 0;
     var ppm_tick_n = 0;
+    var ai_probe_n = 0;
+    var ai_at_x = 0;
+    var ai_at_y = 0;
+    var ai_at_set = 0;
     var audio_test = 0;
     var music_test = 0;
     var direct_map = 0;
@@ -259,6 +285,29 @@ fn doom_main(): i64 {
         # not observe door motion or wall/flat animation; that is why the SLADRIP
         # no-op survived every PPM gate the project has.
         # Defaults to 4 ticks; an optional following integer overrides.
+        # v0.35.0: --ai-probe N runs N world ticks and prints a deterministic
+        # BEHAVIOUR fingerprint (wake/chase/attack/sight counts + a per-state
+        # census). The 0.34.x band could gate on byte-identical pixels; the
+        # gameplay arc changes what monsters do, so it needs a gate that measures
+        # behaviour instead. Defaults to 350 ticks (10 s at 35 Hz).
+        # --ai-at X Y places the player before the probe runs, so an ENGAGEMENT
+        # can be staged: at the map's own spawn point no E1M1/E1M3/E1M5/E1M7
+        # monster has line of sight, so wake/chase/attack counts are all zero and
+        # only the idle sight cost is measured.
+        if (streq(arg, "--ai-at") == 1) {
+            if (ai + 2 < argc()) {
+                ai_at_x = ai_parse_int(argv(ai + 1));
+                ai_at_y = ai_parse_int(argv(ai + 2));
+                ai_at_set = 1;
+            }
+        }
+        if (streq(arg, "--ai-probe") == 1) {
+            ai_probe_n = 350;
+            if (ai + 1 < argc()) {
+                var an = str_to_int(str_from(argv(ai + 1)));
+                if (an > 0 && an <= 100000) { ai_probe_n = an; }
+            }
+        }
         if (streq(arg, "--ppm-tick") == 1) {
             ppm_mode = 1;
             ppm_tick_n = 4;
@@ -411,6 +460,29 @@ fn doom_main(): i64 {
     }
 
     # Game screenshot mode (also renders intermission)
+    if (ai_probe_n > 0) {
+        if (ai_at_set == 1) {
+            player_x = ai_at_x << 16;
+            player_y = ai_at_y << 16;
+            view_x = player_x;
+            view_y = player_y;
+        }
+        syscall(1, 1, "AI probe at x=", 14); fmt_int(player_x >>> 16);
+        syscall(1, 1, " y=", 3); fmt_int(player_y >>> 16);
+        syscall(1, 1, "\n", 1);
+        tick_init();
+        for (var apt = 0; apt < ai_probe_n; apt += 1) {
+            doors_tick();
+            things_tick();
+            texture_animate();
+        }
+        ai_stats_print();
+        ai_states_print();
+        ai_monsters_print();
+        wad_close();
+        doom_exit(0);
+    }
+
     if (ppm_mode == 1) {
         view_x = player_start_x();
         view_y = player_start_y();
