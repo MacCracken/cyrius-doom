@@ -7,6 +7,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.34.9] - 2026-07-27 — full-IWAD capacity: stop guessing, size from the WAD
+
+The gate-opener. Four silent truncations plus one lump this engine never looked for were, between
+them, the single door behind every "registered-WAD-gated" item in the roadmap. Shareware output is
+**byte-identical**; the change is only visible on a WAD bigger than shareware.
+
+### Fixed
+
+- **R-7 — the WAD directory was clamped to 2048 lumps, silently.** Registered DOOM.WAD is ~2306
+  lumps, so **the WAD did not even load intact** and nothing said so. The directory is now sized to
+  the WAD's own header count. Measured on a synthetic 2400-lump WAD: v0.34.8 admits **2048**,
+  v0.34.9 admits **2400**.
+- **`TEXTURE2` was never looked up at all.** It is the registered-only second texture lump and holds
+  roughly half a registered IWAD's wall textures — every one of them resolved to −1 and drew as the
+  fallback. Now parsed and concatenated onto the TEXTURE1 table. Both lumps are copied into **one
+  contiguous buffer** deliberately: each texture entry keeps a raw pointer into it and
+  `texture_get_column` bounds patch-ref reads against a single `tex_def_end`, so two separate
+  allocations would have needed a per-entry end bound (a `TEX_ENTRY_SIZE` layout change). One buffer
+  keeps the existing bound exactly valid.
+- **TEX_MAX / PATCH_MAX / FLAT_MAX were working capacities, and shareware was already scraping
+  them**: 125/128 textures, **exactly 350/350** patch names, 56 flats against a 64 cap. All three are
+  now sized from what the WAD declares, with the old constants demoted to sanity ceilings that exist
+  only to bound a hostile count. Measured on the synthetic WAD (400 textures across T1+T2, 900
+  PNAMES, 146 flats): v0.34.8 gives **128 / 350 / 64**, v0.34.9 gives **400 / 900 / 144**.
+- **A pre-existing allocation leak, fixed in passing.** `texture_init` re-allocated ~268 KB of
+  tables on *every* call against a never-free bump allocator, and it runs once per WAD — the fuzzers
+  call it a thousand times per run. All four tables now grow to a high-water mark instead
+  (`tex_table_reserve` / `patch_lumps_reserve` / `flat_reserve` / `wad_dir_reserve`), so repeated
+  opens cost nothing after the first. Sizing from the WAD also makes **shareware cheaper than
+  before**: the flat cache is 56 × 4 KB = 229 KB, against the old fixed 256 KB.
+- **A truncated diagnostic introduced in v0.34.8**: `sakshi_warn("texture height clamped to
+  TEX_COL_MAX", 36)` printed `…TEX_COL_MA` — the string is 37 bytes. All five warn lengths are now
+  verified against their strings.
+
+### Verification
+
+- **9 maps + 5 menus + intermission byte-identical** vs the committed v0.34.8. Raising a capacity
+  must not move shareware output, and it does not.
+- **Capacity proven by instrumented A/B**, not by inspection — old and new builds were probed for
+  what they actually admit, on both shareware (identical: 1264 lumps / 125 textures / 350 patches /
+  54 flats) and the synthetic over-cap WAD (the table above).
+- **All four sanity warns proven to fire** with crafted inputs: absurd header lump count, absurd
+  PNAMES count, absurd texture count, and 4097 valid flats. The flat case needed a second attempt —
+  the first test WAD had no TEXTURE1, so `texture_init` returned before reaching the flat block,
+  which is the same early-return trap that made `fuzz_flat`'s first draft measure nothing.
+- Tests **227 WAD-free / 349 full**; fuzz **×7** clean; `cyrius deps --verify` 36/0. Binary
+  464,136 → **464,352 B** (agnos 446,552 → **450,864**). **AGNOS QEMU direct-map PASS.**
+
+### Deferred
+
+- **`texture.cyr` Result adoption** (typed `texture_get_column` / `texture_init` errors) was slotted
+  into this cut on the reasoning that every error path in the file was being touched anyway. It is
+  **not** in it: the capacity work rewrote the *allocation* paths, while Result adoption changes the
+  *call surface* for every consumer, and bundling an API change into a cut whose whole gate is
+  "shareware output must not move" would have muddied both. → its own slot.
+
 ## [0.34.8] - 2026-07-27 — decoder robustness + the fuzz coverage v0.34.9 needs
 
 Five findings that all live in the patch/post decoders, shipped **before** v0.34.9 by design: that

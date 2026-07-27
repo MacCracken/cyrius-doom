@@ -16,11 +16,18 @@
 # We store texture definitions (width, height, patch list) in heap
 
 enum TexConst {
-    TEX_MAX = 128;
+    # Sanity ceilings only — NOT working capacities. tex_table / patch_lumps /
+    # flat_cache are now sized from what the WAD actually declares (see
+    # texture_init), so these exist purely to bound a hostile or corrupt count.
+    # They used to BE the capacities, clamping silently: shareware DOOM1.WAD
+    # already sits at 125/128 textures and EXACTLY 350/350 patch names, and a
+    # registered IWAD blows through all of them — which is why every
+    # "registered-WAD-gated" roadmap item was really gated on this.
+    TEX_MAX = 4096;
     TEX_ENTRY_SIZE = 32;
-    PATCH_MAX = 350;
+    PATCH_MAX = 8192;
     FLAT_SIZE = 4096;
-    FLAT_MAX = 64;
+    FLAT_MAX = 4096;
     # Capacity of the per-column pixel buffer callers hand to
     # texture_get_column (render.cyr's tex_col_buf = alloc(TEX_COL_MAX)). The
     # texture height comes straight from the WAD (read_le16, up to 65535) and
@@ -81,12 +88,97 @@ fn tex_name_hash(name_ptr): i64 {
     return h;
 }
 
+# Grow-only capacity high-water marks. texture_init runs once per WAD and alloc()
+# is a never-free bump allocator, so re-allocating these on every call would leak
+# — fuzz_texture/fuzz_flat open a thousand WADs per run. Growing to a high-water
+# mark costs at most a few allocations, and the old fixed-size version was
+# already re-allocating ~268 KB per call.
+var tex_table_cap = 0;
+var patch_lumps_cap = 0;
+var flat_cap = 0;
+
+fn tex_table_reserve(n): i64 {
+    if (n <= tex_table_cap) { return 0; }
+    var t = alloc(n * TEX_ENTRY_SIZE);
+    if (t == 0) { return -1; }
+    tex_table = t;
+    tex_table_cap = n;
+    # The OP-2 composite arrays are indexed by the same slot number, so they must
+    # track the table's capacity or a valid index reads past them.
+    var d = alloc(n * 8);
+    var m = alloc(n * 8);
+    if (d == 0) { return -1; }
+    if (m == 0) { return -1; }
+    tex_comp_data = d;
+    tex_comp_mask = m;
+    return 0;
+}
+
+fn patch_lumps_reserve(n): i64 {
+    if (n <= patch_lumps_cap) { return 0; }
+    var pl = alloc(n * 8);
+    if (pl == 0) { return -1; }
+    patch_lumps = pl;
+    patch_lumps_cap = n;
+    return 0;
+}
+
+fn flat_reserve(n): i64 {
+    if (n <= flat_cap) { return 0; }
+    var fc = alloc(n * FLAT_SIZE);
+    var fn_ = alloc(n * 8);
+    if (fc == 0) { return -1; }
+    if (fn_ == 0) { return -1; }
+    flat_cache = fc;
+    flat_names = fn_;
+    flat_cap = n;
+    return 0;
+}
+
+# Parse one TEXTURE lump (TEXTURE1 or TEXTURE2) into tex_table starting at slot
+# `start`. `base`/`size` describe the lump's bytes inside the combined buffer.
+# Returns the number of textures appended. Split out so TEXTURE2 — which
+# registered IWADs use for roughly half their wall textures and which this engine
+# never even looked for — parses through the identical path.
+fn texture_parse_lump(base, size, start): i64 {
+    if (size < 4) { return 0; }
+    var num = read_le32(base);
+    if (num < 0) { num = 0; }
+    if (start + num > tex_table_cap) { num = tex_table_cap - start; }
+    if (num < 0) { num = 0; }
+    for (var i = 0; i < num; i += 1) {
+        # Bound the offset directory read and the 22-byte texture header.
+        # A malformed offset leaves a zeroed tex_table entry (tw==0 guards it).
+        if (4 + i * 4 + 4 > size) { break; }
+        var off = read_le32(base + 4 + i * 4);
+        if (off + 22 > size) { continue; }
+        var tex = base + off;
+
+        var entry = tex_table + (start + i) * TEX_ENTRY_SIZE;
+        store64(entry, tex_name_hash(tex));
+        var tw = read_le16(tex + 12);
+        var th = read_le16(tex + 14);
+        # F06-1: clamp the WAD-declared height HERE, at the single point it is
+        # stored, rather than only inside the column decoders. texture_height()
+        # returns this field raw, and since TX-3 (v0.34.6) it feeds three V
+        # anchors through render_vmid (upper / one-sided mid / masked mid). A
+        # texture declaring height > TEX_COL_MAX used to hand the anchors a
+        # 4000-ish tex_h while the column data was clamped to 256 — the whole
+        # section's V anchor was then wrong, not just one blank column.
+        if (th > TEX_COL_MAX) {
+            sakshi_warn("texture height clamped to TEX_COL_MAX", 37);
+            th = TEX_COL_MAX;
+        }
+        if (th < 0) { th = 0; }
+        store64(entry + 8, tw);
+        store64(entry + 16, th);
+        store64(entry + 24, tex);
+    }
+    return num;
+}
+
 fn texture_init(): i64 {
-    tex_table = alloc(TEX_MAX * TEX_ENTRY_SIZE);
-    patch_lumps = alloc(PATCH_MAX * 8);
     pcache_init();
-    flat_cache = alloc(FLAT_MAX * FLAT_SIZE);
-    flat_names = alloc(FLAT_MAX * 8);
     tex_count = 0;
     patch_count = 0;
     flat_count = 0;
@@ -97,7 +189,7 @@ fn texture_init(): i64 {
     # composite is stale. Zero the slots — the orphaned composite buffers are
     # reclaimed at process exit (texture_init is a per-WAD/level event, cold).
     if (tex_comp_data != 0) {
-        for (var ci = 0; ci < TEX_MAX; ci += 1) {
+        for (var ci = 0; ci < tex_table_cap; ci += 1) {
             store64(tex_comp_data + ci * 8, 0);
             store64(tex_comp_mask + ci * 8, 0);
         }
@@ -115,7 +207,12 @@ fn texture_init(): i64 {
     wad_read_lump_into(pn_idx, pn_data, pn_size);
 
     patch_count = read_le32(pn_data);
-    if (patch_count > PATCH_MAX) { patch_count = PATCH_MAX; }
+    if (patch_count < 0) { patch_count = 0; }
+    if (patch_count > PATCH_MAX) {
+        sakshi_warn("PNAMES count exceeds sanity cap - truncated", 43);
+        patch_count = PATCH_MAX;
+    }
+    if (patch_lumps_reserve(patch_count) != 0) { patch_count = 0; return 0; }
     # Bound the count by what the lump actually holds — each name is an 8-byte
     # field after the 4-byte count. A truncated PNAMES claiming more names than
     # it has would otherwise over-read past pn_data in the loop below (audit F-S3).
@@ -138,7 +235,17 @@ fn texture_init(): i64 {
         store64(patch_lumps + i * 8, lump);
     }
 
-    # Load TEXTURE1 definitions
+    # Load TEXTURE1 (+ TEXTURE2 when present).
+    #
+    # TEXTURE2 is the registered-only second texture lump and this engine never
+    # looked for it at all — roughly half a registered IWAD's wall textures live
+    # there, so every one of them resolved to -1 and rendered as the fallback.
+    #
+    # Both lumps are copied into ONE contiguous buffer on purpose: each stored
+    # texture entry keeps a raw pointer into this buffer, and texture_get_column
+    # bounds its patch-ref reads against the single `tex_def_end`. Two separate
+    # allocations would need a per-entry end bound (a TEX_ENTRY_SIZE layout
+    # change); one buffer keeps the existing bound exactly valid.
     var t1_idx = wad_find_lump("TEXTURE1");
     if (t1_idx < 0) { return 0; }
 
@@ -148,72 +255,87 @@ fn texture_init(): i64 {
     # 16 MB is far above any real IWAD and bounds a malformed multi-GB size claim
     # (alloc→0 → wad_read_lump_into's memset(0,0,sz) would null-write; audit R-6/M-3).
     if (t1_size > 16777216) { return 0; }
-    var t1_data = alloc(t1_size);
-    if (t1_data == 0) { return 0; }
-    wad_read_lump_into(t1_idx, t1_data, t1_size);
+
+    var t2_idx = wad_find_lump("TEXTURE2");
+    var t2_size = 0;
+    if (t2_idx >= 0) {
+        t2_size = wad_lump_size(t2_idx);
+        if (t2_size < 4) { t2_size = 0; t2_idx = 0 - 1; }
+        if (t2_size > 16777216) { t2_size = 0; t2_idx = 0 - 1; }
+    }
+
+    var t_total = t1_size + t2_size;
+    var t_data = alloc(t_total);
+    if (t_data == 0) { return 0; }
+    wad_read_lump_into(t1_idx, t_data, t1_size);
+    if (t2_idx >= 0) { wad_read_lump_into(t2_idx, t_data + t1_size, t2_size); }
     # Upper bound for patch-ref reads in texture_get_column (malformed-WAD
     # hardening — completes the C2 patch attack surface). (0.28.0 F19)
-    tex_def_end = t1_data + t1_size;
+    tex_def_end = t_data + t_total;
 
-    var num_tex = read_le32(t1_data);
-    if (num_tex > TEX_MAX) { num_tex = TEX_MAX; }
-
-    for (var i = 0; i < num_tex; i += 1) {
-        # Bound the offset directory read and the 22-byte texture header.
-        # A malformed offset leaves a zeroed tex_table entry (tw==0 guards it).
-        if (4 + i * 4 + 4 > t1_size) { break; }
-        var off = read_le32(t1_data + 4 + i * 4);
-        if (off + 22 > t1_size) { continue; }
-        var tex = t1_data + off;
-
-        var entry = tex_table + i * TEX_ENTRY_SIZE;
-        # Store name hash
-        store64(entry, tex_name_hash(tex));
-        # Width and height
-        var tw = read_le16(tex + 12);
-        var th = read_le16(tex + 14);
-        # F06-1: clamp the WAD-declared height HERE, at the single point it is
-        # stored, rather than only inside the column decoders. texture_height()
-        # returns this field raw, and since TX-3 (v0.34.6) it feeds three V
-        # anchors through render_vmid (upper / one-sided mid / masked mid). A
-        # texture declaring height > TEX_COL_MAX used to hand the anchors a
-        # 4000-ish tex_h while the column data was clamped to 256 — the whole
-        # section's V anchor was then wrong, not just one blank column, which is
-        # why this was re-rated up from the LOW it shipped as in v0.34.0.
-        # Clamping at the source makes the two decoder-side clamps no-ops and
-        # keeps every consumer on one consistent value. Real DOOM textures top
-        # out at 128 tall, so valid content is untouched.
-        if (th > TEX_COL_MAX) {
-            sakshi_warn("texture height clamped to TEX_COL_MAX", 36);
-            th = TEX_COL_MAX;
-        }
-        if (th < 0) { th = 0; }
-        store64(entry + 8, tw);
-        store64(entry + 16, th);
-        # Store pointer to raw texture definition (for patch lookup later)
-        store64(entry + 24, tex);
+    # Size the table to what both lumps declare, then parse each through the
+    # same path. This used to clamp to a fixed 128 silently — shareware alone
+    # already declares 125.
+    var n1 = read_le32(t_data);
+    if (n1 < 0) { n1 = 0; }
+    var n2 = 0;
+    if (t2_idx >= 0) {
+        n2 = read_le32(t_data + t1_size);
+        if (n2 < 0) { n2 = 0; }
     }
-    tex_count = num_tex;
+    var n_want = n1 + n2;
+    if (n_want > TEX_MAX) {
+        sakshi_warn("texture count exceeds sanity cap - truncated", 44);
+        n_want = TEX_MAX;
+    }
+    if (tex_table_reserve(n_want) != 0) { return 0; }
+    # Re-zero the composite slots across the (possibly grown) capacity.
+    for (var cz = 0; cz < tex_table_cap; cz += 1) {
+        store64(tex_comp_data + cz * 8, 0);
+        store64(tex_comp_mask + cz * 8, 0);
+    }
 
-    # Load flats (F_START..F_END)
+    tex_count = texture_parse_lump(t_data, t1_size, 0);
+    if (t2_idx >= 0) {
+        tex_count += texture_parse_lump(t_data + t1_size, t2_size, tex_count);
+    }
+
+    # Load flats (F_START..F_END).
+    #
+    # Two passes: COUNT the valid flats, size the cache to exactly that, then
+    # load. The old single pass allocated a fixed 64 slots and stopped there —
+    # shareware already ships 56, and a registered IWAD has ~107, so the tail
+    # silently vanished and every sector using one fell back to the gray-vline
+    # path. Sizing from the WAD also makes shareware cheaper than before
+    # (56 x 4 KB = 229 KB, vs the old fixed 256 KB).
     var f_start = wad_find_lump("F_START");
     var f_end = wad_find_lump("F_END");
     if (f_start >= 0) {
         if (f_end >= 0) {
-            var fi = 0;
-            for (var li = f_start + 1; li < f_end; li += 1) {
-                if (fi >= FLAT_MAX) { break; }
-                var sz = wad_lump_size(li);
-                if (sz == FLAT_SIZE) {
-                    # Store flat name hash
-                    var fname = wad_dir + li * WAD_DIR_ENTRY_SIZE + 16;
-                    store64(flat_names + fi * 8, tex_name_hash(fname));
-                    # Load flat data (64x64 raw palette indices)
-                    wad_read_lump_into(li, flat_cache + fi * FLAT_SIZE, FLAT_SIZE);
-                    fi += 1;
-                }
+            var want = 0;
+            for (var lc = f_start + 1; lc < f_end; lc += 1) {
+                if (wad_lump_size(lc) == FLAT_SIZE) { want += 1; }
             }
-            flat_count = fi;
+            if (want > FLAT_MAX) {
+                sakshi_warn("flat count exceeds sanity cap - truncated", 41);
+                want = FLAT_MAX;
+            }
+            if (flat_reserve(want) == 0) {
+                var fi = 0;
+                for (var li = f_start + 1; li < f_end; li += 1) {
+                    if (fi >= want) { break; }
+                    var sz = wad_lump_size(li);
+                    if (sz == FLAT_SIZE) {
+                        # Store flat name hash
+                        var fname = wad_dir + li * WAD_DIR_ENTRY_SIZE + 16;
+                        store64(flat_names + fi * 8, tex_name_hash(fname));
+                        # Load flat data (64x64 raw palette indices)
+                        wad_read_lump_into(li, flat_cache + fi * FLAT_SIZE, FLAT_SIZE);
+                        fi += 1;
+                    }
+                }
+                flat_count = fi;
+            }
         }
     }
 

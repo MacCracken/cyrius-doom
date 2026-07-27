@@ -35,31 +35,12 @@ Everything else below is quality, fidelity, robustness, or performance.
 
 ## Near-term: the 0.34.x closeout band
 
-Two patch cuts that finish the render/decoder/toolchain backlog. All are byte-identical or
-near-byte-identical, so they keep the cheap PPM-A/B gate that has caught real regressions all minor.
-(v0.34.7 perf batch C and v0.34.8 decoder robustness shipped 2026-07-26/27 — see
-[`completed-phases.md`](completed-phases.md).)
+One patch cut left in the band. (v0.34.7 perf batch C, v0.34.8 decoder robustness and v0.34.9
+full-IWAD capacity shipped 2026-07-26/27 — see [`completed-phases.md`](completed-phases.md).)
 
-### v0.34.9 — Full-IWAD capacity (the gate-opener)
-
-**The highest-leverage item in the plan, and it had no roadmap row** — only its `FLAT_MAX` quarter was
-tracked. Four silent truncations plus one missing lump gate every registered-WAD item in this file:
-
-- `WAD_MAX_LUMPS = 2048`, silently clamped at [wad.cyr:126](../../src/wad.cyr#L126) — registered DOOM.WAD is
-  ~2306 lumps, so **the WAD does not even load intact**, with no warning.
-- `TEX_MAX = 128`, `PATCH_MAX = 350`, `FLAT_MAX = 64` — all silent.
-- **`TEXTURE2` is never looked up.** Registered IWADs put roughly half their wall textures there.
-
-Raise each cap (or size dynamically), `sakshi_warn` on truncation instead of clamping silently, and parse
-TEXTURE2 onto the TEXTURE1 table. Ship **before** a registered WAD is acquired — this is the single door
-behind five separate "registered-WAD-gated" items. Take `texture.cyr` Result adoption here too, since every
-error path in the file is being touched anyway.
-
-**Gate**: v0.34.8 shipped the prerequisite — the sprite and flat decoders now have fuzz targets
-(suite ×7), so admission can widen over fuzzed code. Exit: 9-map shareware PPM byte-identical
-(raising a cap must not move shareware output), a synthetic over-cap WAD proving each `sakshi_warn`
-fires, and `fuzz_flat` re-run against the raised `FLAT_MAX` (its truncation branch is already
-covered — 225 hits — so the new cap is exercised the moment it changes).
+**HOLD-A is now unblocked by half.** v0.34.9 was the shared prerequisite behind every
+registered-WAD-gated item; those five still need a registered IWAD on the box, but the engine side
+is done and the caps no longer truncate.
 
 ### v0.34.10 — `asr()` → native `>>>` migration
 
@@ -134,6 +115,17 @@ beep when `audio_dev != 0` (resolve the `sound.cyr`/`audio.cyr` include-order co
 · **AUDIO-7** the four 0.30.7 cosmetic nits.
 
 **Gate**: none. Exit: `fuzz_mus` over the new paths + a deterministic PCM dump of E1M1's track.
+
+### v0.35.4b — `texture.cyr` Result adoption
+
+Deferred out of v0.34.9. Typed `texture_get_column` / `texture_init` errors, aligning the texture
+boundary with the `Result<T, E>` treatment `wad.cyr` already has. It was slotted into the capacity
+cut on the reasoning that every error path was being touched anyway — but the capacity work rewrote
+the *allocation* paths while this changes the *call surface* for every consumer, and bundling an API
+change into a cut gated on "shareware output must not move" would have muddied both gates.
+
+**Gate**: independent. Exit: byte-identical 9-map A/B (a typed-error refactor must not move pixels)
+plus the existing texture asserts re-pointed at the new signatures.
 
 ### v0.35.5 — Lighting + plane parity
 

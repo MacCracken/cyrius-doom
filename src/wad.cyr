@@ -13,7 +13,13 @@
 # WAD file descriptor
 enum WadConst {
     WAD_DIR_ENTRY_SIZE = 24;
-    WAD_MAX_LUMPS = 2048;
+    # Sanity ceiling only — NOT a working capacity. The directory is sized to the
+    # WAD's own lump count (see wad_open), so this exists purely so a corrupt or
+    # hostile header claiming billions of lumps cannot drive a huge allocation.
+    # It used to be 2048 AND the working capacity, silently clamping there:
+    # registered DOOM.WAD is ~2306 lumps, so the WAD did not even load intact and
+    # nothing said so. Shareware is 1264, which is why this was never noticed.
+    WAD_MAX_LUMPS = 65536;
     WAD_LUMP_BUF_SIZE = 65536;
     WAD_DATA_MAX = 6291456;        # 6 MB (3x 2 MB pages) — DOOM1.WAD shareware is ~4.2 MB
 }
@@ -38,9 +44,24 @@ var wad_lump_buf = 0;
 var wad_data = 0;       # agnos: the whole WAD slurped into memory (no lseek on agnos)
 var wad_size = 0;       # agnos: bytes actually read into wad_data
 
+# Directory capacity actually allocated so far. The directory is sized per-WAD in
+# wad_open and GROWS ONLY — alloc() is a never-free bump allocator and the fuzzers
+# open thousands of WADs per run, so re-allocating on every open would be an
+# unbounded leak. Growing to a high-water mark costs at most a few allocations.
+var wad_dir_cap = 0;
+
 fn wad_alloc(): i64 {
-    wad_dir = alloc(WAD_MAX_LUMPS * WAD_DIR_ENTRY_SIZE);
     wad_lump_buf = alloc(WAD_LUMP_BUF_SIZE);
+    return 0;
+}
+
+# Ensure the directory can hold `count` entries, growing if needed.
+fn wad_dir_reserve(count): i64 {
+    if (count <= wad_dir_cap) { return 0; }
+    var d = alloc(count * WAD_DIR_ENTRY_SIZE);
+    if (d == 0) { return -1; }
+    wad_dir = d;
+    wad_dir_cap = count;
     return 0;
 }
 
@@ -123,7 +144,20 @@ fn wad_open(path): i64 {
 
     wad_numlumps = read_le32(&hdr + 4);
     var diroffset = read_le32(&hdr + 8);
-    if (wad_numlumps > WAD_MAX_LUMPS) { wad_numlumps = WAD_MAX_LUMPS; }
+    if (wad_numlumps < 0) { wad_numlumps = 0; }
+    # R-7: this used to clamp to a fixed 2048 SILENTLY. A registered DOOM.WAD
+    # (~2306 lumps) therefore loaded with its tail missing and no diagnostic —
+    # the single reason every "registered-WAD" item in the roadmap was blocked.
+    # Size the directory to the WAD, and warn only when the count is absurd.
+    if (wad_numlumps > WAD_MAX_LUMPS) {
+        sakshi_warn("WAD lump count exceeds sanity cap - truncated", 45);
+        wad_numlumps = WAD_MAX_LUMPS;
+    }
+    if (wad_dir_reserve(wad_numlumps) != 0) {
+        file_close(wad_fd);
+        wad_fd = -1;
+        return Err(WadIoFailed);
+    }
 
     # Read directory entries (16 bytes each in WAD) — wad_pread seeks per entry
     # (in-memory offset on agnos, lseek+read on Linux).
