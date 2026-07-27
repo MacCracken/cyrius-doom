@@ -1,0 +1,212 @@
+# Fuzz: flat lump loader + sampler (res-2, v0.34.8).
+#
+# texture_init scans F_START..F_END, accepts each lump whose size is exactly
+# FLAT_SIZE (4096 = 64x64 raw palette indices), hashes its name, and slurps it
+# into flat_cache. flat_find resolves a name hash to a slot and flat_get_pixel
+# samples it. A malformed or hostile WAD — wrong-sized flats, a missing or
+# inverted F_END marker, more flats than FLAT_MAX, zero-length lumps, names that
+# collide — must not read past a lump, overflow flat_cache, or crash.
+#
+# This loader had NO fuzz target: fuzz_texture covers TEXTURE1/PNAMES and the
+# patch/post decoder only, so the "fuzz-corpus refresh" recorded as complete in
+# 0.33.8 never reached flats. It matters now because v0.34.9 raises FLAT_MAX and
+# widens what gets admitted here.
+#
+# Drives the REAL loader (no logic copy). Must complete all iterations.
+# Run: cyrius build fuzz/fuzz_flat.cyr build/fuzz_flat && ./build/fuzz_flat
+
+include "lib/string.cyr"
+include "lib/alloc.cyr"
+include "lib/vec.cyr"
+include "lib/str.cyr"
+include "lib/fmt.cyr"
+include "lib/io.cyr"
+include "lib/args.cyr"
+include "lib/assert.cyr"
+include "lib/sakshi.cyr"
+
+include "lib/bsp.cyr"
+include "src/fixed.cyr"
+include "src/tables.cyr"
+include "src/wad.cyr"
+include "src/platform/wayland/wire.cyr"
+include "src/platform/wayland/client.cyr"
+include "src/platform/wayland/shm.cyr"
+include "src/platform/window.cyr"
+include "src/framebuf.cyr"
+include "src/map.cyr"
+include "src/texture.cyr"
+
+var _fz_state = 0x13198A2E03707344;
+
+fn _fz_rand(): i64 {
+    _fz_state = _fz_state * 6364136223846793005 + 1442695040888963407;
+    return _fz_state;
+}
+fn _fz_byte(): i64 {
+    var r = _fz_rand();
+    if (r < 0) { r = 0 - r; }
+    return r % 256;
+}
+fn _fz_st32(buf, v): i64 {
+    store8(buf, v & 255); store8(buf + 1, asr(v, 8) & 255);
+    store8(buf + 2, asr(v, 16) & 255); store8(buf + 3, asr(v, 24) & 255);
+    return 0;
+}
+fn _fz_name(d, a, b, c, e, f, g, h, i): i64 {
+    store8(d, a); store8(d + 1, b); store8(d + 2, c); store8(d + 3, e);
+    store8(d + 4, f); store8(d + 5, g); store8(d + 6, h); store8(d + 7, i);
+    return 0;
+}
+
+fn main() {
+    alloc_init();
+    args_init();
+    tables_init();
+    framebuf_init();
+
+    var iters = 1000;
+    if (argc() > 1) { iters = str_to_int(str_from(argv(1))); }
+    if (argc() > 2) { _fz_state = str_to_int(str_from(argv(2))); }
+
+    var tmppath = "/tmp/fuzz_flat.wad";
+    # 74 flats x 4096 = ~303 KB, plus lumps + directory. Sized at 512 KB because
+    # 256 KB silently truncated the tail via the `cursor + sz >= cap` guard below,
+    # which kept the loaded count under FLAT_MAX and left the truncation branch
+    # uncovered — found by the coverage probe, not by the fuzzer passing.
+    var cap = 524288;
+    var buf = alloc(cap);
+
+    for (var i = 0; i < iters; i = i + 1) {
+        # nflats spans FLAT_MAX (64) so the truncation branch is exercised.
+        # Plain `% 72` was NOT enough: with ~25% of flats rejected for wrong size
+        # the loaded count rarely reached 64, and a coverage probe showed the
+        # FLAT_MAX truncation branch firing ZERO times. Force an all-valid
+        # over-cap batch on ~1 iteration in 4 so that branch is actually covered —
+        # it is precisely the branch v0.34.9 is about to change.
+        var nflats = _fz_byte() % 72;
+        var force_overcap = 0;
+        if (_fz_byte() < 64) { force_overcap = 1; nflats = 66 + (_fz_byte() % 8); }
+        # PNAMES + TEXTURE1 + F_START + flats + F_END.
+        # The first two are MANDATORY: texture_init returns early when TEXTURE1
+        # is missing (texture.cyr:143), so without them the flat scan below is
+        # unreachable and this fuzzer measures nothing. The first draft of this
+        # file made exactly that mistake and reported 0 lumps seen — the same
+        # zero-coverage trap the 0.33.8 review caught in fuzz_texture.
+        var nlumps = nflats + 4;
+
+        var cursor = 12;
+        var payload_off = alloc((nflats + 4) * 8);
+        var payload_sz = alloc((nflats + 4) * 8);
+
+        # PNAMES: count = 0 (valid, no patches).
+        store64(payload_off, cursor);
+        store64(payload_sz, 4);
+        _fz_st32(buf + cursor, 0);
+        cursor = cursor + 4;
+
+        # TEXTURE1: numtex = 1, offset[0] = 8, one maptexture with 0 patches.
+        store64(payload_off + 8, cursor);
+        _fz_st32(buf + cursor, 1);
+        _fz_st32(buf + cursor + 4, 8);
+        var mt = buf + cursor + 8;
+        _fz_name(mt, 70, 90, 84, 88, 48, 49, 0, 0);      # "FZTX01"
+        _fz_st32(mt + 8, 0);
+        store8(mt + 12, 8); store8(mt + 13, 0);          # width 8
+        store8(mt + 14, 8); store8(mt + 15, 0);          # height 8
+        _fz_st32(mt + 16, 0);
+        store8(mt + 20, 0); store8(mt + 21, 0);          # patchcount 0
+        store64(payload_sz + 8, 8 + 22);
+        cursor = cursor + 8 + 22;
+
+        # F_START marker (zero-length).
+        store64(payload_off + 16, cursor);
+        store64(payload_sz + 16, 0);
+
+        for (var f = 0; f < nflats; f = f + 1) {
+            # Most flats are the exact FLAT_SIZE the loader demands; the rest are
+            # wrong-sized so the `sz == FLAT_SIZE` reject path runs too.
+            var sz = 4096;
+            var roll = _fz_byte();
+            if (force_overcap == 0) {
+                if (roll < 40) { sz = _fz_byte() % 4096; }        # short
+                if (roll >= 40 && roll < 56) { sz = 4096 + (_fz_byte() % 512); }   # long
+            }
+            if (cursor + sz >= cap) { sz = 0; }
+            store64(payload_off + (f + 3) * 8, cursor);
+            store64(payload_sz + (f + 3) * 8, sz);
+            for (var b = 0; b < sz; b = b + 1) { store8(buf + cursor + b, _fz_byte()); }
+            cursor = cursor + sz;
+        }
+        store64(payload_off + (nflats + 3) * 8, cursor);      # F_END, zero-length
+        store64(payload_sz + (nflats + 3) * 8, 0);
+
+        # --- Directory: F_START, flats..., F_END
+        var off_dir = cursor;
+        for (var d = 0; d < nlumps; d = d + 1) {
+            var e = buf + off_dir + d * 16;
+            _fz_st32(e, load64(payload_off + d * 8));
+            _fz_st32(e + 4, load64(payload_sz + d * 8));
+            if (d == 0) {
+                _fz_name(e + 8, 80, 78, 65, 77, 69, 83, 0, 0);       # "PNAMES"
+            }
+            if (d == 1) {
+                _fz_name(e + 8, 84, 69, 88, 84, 85, 82, 69, 49);     # "TEXTURE1"
+            }
+            if (d == 2) {
+                _fz_name(e + 8, 70, 95, 83, 84, 65, 82, 84, 0);      # "F_START"
+            }
+            if (d == nlumps - 1) {
+                _fz_name(e + 8, 70, 95, 69, 78, 68, 0, 0, 0);        # "F_END"
+            }
+            if (d > 2) {
+                if (d < nlumps - 1) {
+                    # "FLATnn" with a fuzzed tail so hashes vary and collide.
+                    _fz_name(e + 8, 70, 76, 65, 84,
+                    48 + (d % 10), 48 + ((d / 10) % 10), _fz_byte() % 90, 0);
+                }
+            }
+        }
+        # Structural fuzz: sometimes invert the markers or corrupt a directory entry.
+        if (_fz_byte() < 24) {
+            var ce = buf + off_dir + (2 + _fz_byte() % (nlumps - 2)) * 16;
+            _fz_st32(ce, _fz_rand() & 0x7FFFFFFF);
+        }
+        if (_fz_byte() < 16) {
+            # F_END before F_START — the loader's marker-order assumption.
+            var e0 = buf + off_dir + 32;
+            _fz_name(e0 + 8, 70, 95, 69, 78, 68, 0, 0, 0);
+        }
+
+        # Header: PWAD, numlumps, infotableofs.
+        store8(buf, 80); store8(buf + 1, 87); store8(buf + 2, 65); store8(buf + 3, 68);
+        _fz_st32(buf + 4, nlumps);
+        _fz_st32(buf + 8, off_dir);
+        var total = off_dir + nlumps * 16;
+
+        var fd = file_open(tmppath, 65, 0x1A4);
+        if (fd >= 0) {
+            file_write(fd, buf, total);
+            file_close(fd);
+            if (is_ok(wad_open(tmppath)) == 1) {
+                texture_init();          # PNAMES/TEXTURE1 absent -> flat scan is the target
+                # Sample every loaded slot plus out-of-range ones, with fuzzed
+                # coordinates (flat_get_pixel masks x/y to 0..63 internally).
+                var fc = flat_count;
+                if (fc > 8) { fc = 8; }
+                for (var q = 0; q < fc; q = q + 1) {
+                    flat_get_pixel(q, _fz_rand(), _fz_rand());
+                }
+                flat_get_pixel(0 - 1, _fz_byte(), _fz_byte());
+                flat_get_pixel(flat_count + 3, _fz_byte(), _fz_byte());
+                wad_close();
+            }
+        }
+    }
+
+    syscall(87, tmppath);
+    syscall(1, 1, "fuzz_flat: ", 11);
+    fmt_int(iters);
+    syscall(1, 1, " iterations OK\n", 15);
+    return 0;
+}

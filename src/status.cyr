@@ -163,8 +163,13 @@ fn st_draw_patch_from_buf(buf, px, py, sz): i64 {
 fn st_draw_patch_shaded(buf, px, py, shade, sz): i64 {
     if (sz < 8) { return 0; }
     var pend = buf + sz;
+    # R-5: the height was read and never used — dropped. The width caps the
+    # column loop, and every read inside it is already bounds-checked against
+    # the lump extent, so a crafted width is memory-safe; it just spins. Cap it
+    # so a 65535-wide HUD patch cannot burn 65535 iterations per draw (the same
+    # bounded-work class as R-1/R-10, which this decoder never got).
     var pw = read_le16(buf);
-    var ph = read_le16(buf + 2);
+    if (pw > TEX_COMP_W_MAX) { pw = TEX_COMP_W_MAX; }
     for (var col = 0; col < pw; col += 1) {
         var scr_x = px + col;
         if (scr_x < 0) { continue; }
@@ -174,7 +179,7 @@ fn st_draw_patch_shaded(buf, px, py, shade, sz): i64 {
         if (col_off >= sz) { continue; }
         var post = buf + col_off;
         var safety = 0;
-        while (safety < 64) {
+        while (safety < PATCH_POST_MAX) {
             if (post + 1 >= pend) { break; }
             var td = load8(post);
             if (td == 255) { break; }

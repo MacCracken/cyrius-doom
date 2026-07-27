@@ -33,6 +33,16 @@ enum TexConst {
     # composite (served uncached) so a malformed huge width can't blow up the
     # one-time build loop / alloc(tw*th). Real DOOM textures top out at 256 wide.
     TEX_COMP_W_MAX = 4096;
+    # R-9: shared cap on the patch post-walk, used by ALL FOUR decoders
+    # (texture / render psprite / sprite / status). They previously used 256 /
+    # 128 / 128 / 64 independently, so the same legal column decoded completely
+    # in one path and TRUNCATED in another — a >64-post HUD patch lost its tail
+    # while the identical texture column rendered whole. The walk stays doubly
+    # bounded (this counter AND the lump-extent check), so raising the low ones
+    # to a single value keeps the DoS guard while making the paths agree.
+    # 256 is the ceiling that matters: topdelta is one byte, so a column cannot
+    # address more than 256 rows, and TEX_COL_MAX clamps height to the same.
+    PATCH_POST_MAX = 256;
 }
 
 # Texture table: name_hash(8) width(8) height(8) lump_data_ptr(8) = 32 bytes each
@@ -162,6 +172,22 @@ fn texture_init(): i64 {
         # Width and height
         var tw = read_le16(tex + 12);
         var th = read_le16(tex + 14);
+        # F06-1: clamp the WAD-declared height HERE, at the single point it is
+        # stored, rather than only inside the column decoders. texture_height()
+        # returns this field raw, and since TX-3 (v0.34.6) it feeds three V
+        # anchors through render_vmid (upper / one-sided mid / masked mid). A
+        # texture declaring height > TEX_COL_MAX used to hand the anchors a
+        # 4000-ish tex_h while the column data was clamped to 256 — the whole
+        # section's V anchor was then wrong, not just one blank column, which is
+        # why this was re-rated up from the LOW it shipped as in v0.34.0.
+        # Clamping at the source makes the two decoder-side clamps no-ops and
+        # keeps every consumer on one consistent value. Real DOOM textures top
+        # out at 128 tall, so valid content is untouched.
+        if (th > TEX_COL_MAX) {
+            sakshi_warn("texture height clamped to TEX_COL_MAX", 36);
+            th = TEX_COL_MAX;
+        }
+        if (th < 0) { th = 0; }
         store64(entry + 8, tw);
         store64(entry + 16, th);
         # Store pointer to raw texture definition (for patch lookup later)
@@ -413,8 +439,16 @@ fn texture_get_column_uncached(tex_idx, col, dest): i64 {
         var pdata_size = pcache_data_size(pdata);
         if (pdata_size < 8) { continue; }
 
+        # R-5 (scoped down after inspection): the patch HEIGHT was read here and
+        # never used — `pcol >= pw` is the only dimension gate, and every column
+        # read past it is already bounds-checked against the lump extent, so a
+        # crafted dimension is memory-safe as it stands. The unused read is
+        # simply deleted rather than "hardened" with clamps that guard nothing.
+        # `read_le16` yields 0..65535, so the negative checks the audit implied
+        # cannot fire either. What DOES remain is bounded-but-wasteful work, and
+        # that is capped at the loop bound below.
         var pw = read_le16(pdata);
-        var ph = read_le16(pdata + 2);
+        if (pw > TEX_COMP_W_MAX) { pw = TEX_COMP_W_MAX; }
 
         # Which column of the patch do we need?
         var pcol = col - ox;
@@ -432,7 +466,7 @@ fn texture_get_column_uncached(tex_idx, col, dest): i64 {
         # Read posts: topdelta(1) length(1) pad(1) pixels(length) pad(1)
         # Terminated by topdelta = 0xFF
         var safety = 0;
-        while (safety < 256) {
+        while (safety < PATCH_POST_MAX) {
             # +1 so the `load8(post_ptr + 1)` length read below stays in-bounds
             # too (audit F-S5 — the other patch decoders already use this form).
             if (post_ptr + 1 >= pdata_end) { break; }

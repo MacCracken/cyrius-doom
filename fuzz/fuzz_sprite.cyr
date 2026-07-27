@@ -1,0 +1,145 @@
+# Fuzz: sprite patch column decoder (res-2, v0.34.8).
+#
+# `sprite_decode_column` walks a sprite patch's column-offset directory and its
+# post runs (topdelta / length / pad / pixels / pad, 0xFF-terminated) into the
+# dense spr_col_buf / spr_col_mask pair. A malformed or hostile sprite — column
+# offsets past the lump, over-claimed post lengths, a missing 0xFF terminator,
+# absurd heights — must not read past the lump or crash.
+#
+# This decoder had NO fuzz target until now: it was inline inside
+# sprite_render_all with no callable entry point, so the 0.33.8 "fuzz-corpus
+# refresh" that added fuzz_texture could not reach it. v0.34.8 extracted
+# `sprite_decode_column` precisely so this file could exist.
+#
+# Drives the REAL decoder (no logic copy) with a structured-fuzz patch: a valid
+# header + column directory with FUZZED leaves, so the walk reaches the post
+# decoder rather than being rejected at the directory guard.
+# Must complete all iterations.
+# Run: cyrius build fuzz/fuzz_sprite.cyr build/fuzz_sprite && ./build/fuzz_sprite
+
+include "lib/string.cyr"
+include "lib/alloc.cyr"
+include "lib/vec.cyr"
+include "lib/str.cyr"
+include "lib/fmt.cyr"
+include "lib/io.cyr"
+include "lib/args.cyr"
+include "lib/assert.cyr"
+include "lib/sakshi.cyr"
+
+include "lib/bsp.cyr"
+include "src/fixed.cyr"
+include "src/tables.cyr"
+include "src/wad.cyr"
+include "src/platform/wayland/wire.cyr"
+include "src/platform/wayland/client.cyr"
+include "src/platform/wayland/shm.cyr"
+include "src/platform/window.cyr"
+include "src/framebuf.cyr"
+include "src/map.cyr"
+include "src/texture.cyr"
+include "src/render.cyr"
+include "src/input.cyr"
+include "src/player.cyr"
+include "src/things.cyr"
+include "src/sprite.cyr"
+
+var _fz_state = 0x5DEECE66D2A9F1B3;
+
+fn _fz_rand(): i64 {
+    _fz_state = _fz_state * 6364136223846793005 + 1442695040888963407;
+    return _fz_state;
+}
+fn _fz_byte(): i64 {
+    var r = _fz_rand();
+    if (r < 0) { r = 0 - r; }
+    return r % 256;
+}
+fn _fz_st32(buf, v): i64 {
+    store8(buf, v & 255); store8(buf + 1, asr(v, 8) & 255);
+    store8(buf + 2, asr(v, 16) & 255); store8(buf + 3, asr(v, 24) & 255);
+    return 0;
+}
+fn _fz_st16(buf, v): i64 {
+    store8(buf, v & 255); store8(buf + 1, asr(v, 8) & 255);
+    return 0;
+}
+
+fn main() {
+    alloc_init();
+    args_init();
+    tables_init();
+    framebuf_init();
+    # The decoder writes into these; sprite_render_all normally allocates them.
+    if (spr_col_buf == 0) { spr_col_buf = alloc(256); }
+    if (spr_col_mask == 0) { spr_col_mask = alloc(256); }
+
+    var iters = 2000;
+    if (argc() > 1) { iters = str_to_int(str_from(argv(1))); }
+    if (argc() > 2) { _fz_state = str_to_int(str_from(argv(2))); }
+
+    var cap = 8192;
+    var pdata = alloc(cap);
+
+    for (var i = 0; i < iters; i = i + 1) {
+        # --- Patch header: width / height / left / top offsets.
+        var pw = 1 + (_fz_byte() % 24);
+        var ph = 1 + (_fz_byte() % 200);
+        _fz_st16(pdata, pw);
+        _fz_st16(pdata + 2, ph);
+        _fz_st16(pdata + 4, _fz_byte() % 64);
+        _fz_st16(pdata + 6, _fz_byte() % 64);
+
+        # --- Column directory + one fuzzed post per column.
+        var post_base = 8 + pw * 4;
+        var cursor = post_base;
+        for (var c = 0; c < pw; c = c + 1) {
+            _fz_st32(pdata + 8 + c * 4, cursor);
+            var nposts = _fz_byte() % 3;          # 0..2 posts, then terminator
+            for (var q = 0; q < nposts; q = q + 1) {
+                var plen = _fz_byte() % 24;
+                if (cursor + 5 + plen >= cap) { q = nposts; }
+                else {
+                    store8(pdata + cursor, _fz_byte());        # topdelta (fuzzed, may exceed ph)
+                    store8(pdata + cursor + 1, plen);          # length
+                    store8(pdata + cursor + 2, 0);             # pad
+                    for (var k = 0; k < plen; k = k + 1) {
+                        store8(pdata + cursor + 3 + k, _fz_byte());
+                    }
+                    store8(pdata + cursor + 3 + plen, 0);      # pad
+                    cursor = cursor + 4 + plen;
+                }
+            }
+            if (cursor < cap) {
+                store8(pdata + cursor, 255);                   # 0xFF terminator
+                cursor = cursor + 1;
+            }
+        }
+        var psz = cursor;
+
+        # Structural fuzz: corrupt a byte (short post, bad offset, lost 0xFF),
+        # or claim a column offset past the lump.
+        if (_fz_byte() < 60) { store8(pdata + (_fz_byte() % psz), _fz_byte()); }
+        if (_fz_byte() < 40) {
+            var bad = _fz_byte() % pw;
+            _fz_st32(pdata + 8 + bad * 4, _fz_rand() & 0x7FFFFFFF);
+        }
+        # Sometimes under-report the size so the extent guard is exercised.
+        var use_sz = psz;
+        if (_fz_byte() < 32) { use_sz = _fz_byte() % (psz + 1); }
+
+        # Drive the real decoder across every column, plus out-of-range ones.
+        for (var sc = 0; sc < pw; sc = sc + 1) {
+            sprite_decode_column(pdata, use_sz, sc, ph);
+        }
+        sprite_decode_column(pdata, use_sz, 0 - 1, ph);
+        sprite_decode_column(pdata, use_sz, pw + 7, ph);
+        sprite_decode_column(pdata, use_sz, 0, 0 - 5);
+        sprite_decode_column(pdata, use_sz, 0, 100000);
+    }
+
+    syscall(1, 1, "fuzz_sprite: ", 13);
+    fmt_int(iters);
+    syscall(1, 1, " iterations OK\n", 15);
+    return 0;
+}

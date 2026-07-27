@@ -129,6 +129,17 @@ fn framebuf_init(): i64 {
     #endif
 
     #ifndef CYRIUS_TARGET_AGNOS
+    # P-8: screenshot mode never presents to a panel, but it still opened
+    # /dev/fb0 READ-WRITE, issued two ioctls, and allocated a panel-sized
+    # scratch (fb_buf = pitch * yres — ~14 MB on a 2560x1440 desktop) that
+    # nothing ever writes. Early-out the way PM_WAYLAND already does. Beyond the
+    # waste, this is what the release gates run: every --ppm capture in CI and in
+    # the A/B harness was touching the developer's live framebuffer device.
+    if (present_mode == PM_PPM) {
+        fb_fd = -1;
+        return 0;
+    }
+
     # Wayland backend (v0.33.0): open a native window instead of /dev/fb0. On
     # failure, fall back to fb0 so a mis-detected session still runs.
     if (present_mode == PM_WAYLAND) {

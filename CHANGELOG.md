@@ -7,6 +7,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.34.8] - 2026-07-27 — decoder robustness + the fuzz coverage v0.34.9 needs
+
+Five findings that all live in the patch/post decoders, shipped **before** v0.34.9 by design: that
+cut widens what the engine admits, and two of these decoders had no fuzz target at all. Widening
+admission over unfuzzed decoders is the wrong order. All output **byte-identical** to v0.34.7.
+
+### Added
+
+- **`fuzz/fuzz_sprite.cyr` + `fuzz/fuzz_flat.cyr` — the fuzz suite goes ×5 → ×7.** The
+  "fuzz-corpus refresh" recorded as complete in v0.33.8 covered TEXTURE1/PNAMES and the patch/post
+  decoder only; the sprite and flat decoders were never reached.
+  - The sprite decoder was **inline inside `sprite_render_all`** with no callable entry point, which
+    is *why* it had no fuzzer. Extracted as `sprite_decode_column(pdata, psz, src_col, ph)` —
+    byte-identical, verified by the 15-capture A/B — so the fuzzer can drive the real decoder.
+  - **Both fuzzers were coverage-probed, not trusted because they passed.** That check earned its
+    keep twice: `fuzz_flat`'s first draft reported **0 lumps seen** (`texture_init` returns early
+    without a TEXTURE1 lump, so the flat scan was unreachable — the exact zero-coverage trap the
+    0.33.8 review caught in `fuzz_texture`), and after fixing that the `FLAT_MAX` truncation branch
+    still never fired because the generator's own 256 KB buffer cap was silently zeroing the tail.
+    Final coverage: sprite **33,633 decoder calls / 7,143 guard rejects / 102,046 pixels decoded**;
+    flat **37,125 lumps seen / 32,045 loaded / 225 FLAT_MAX truncations**.
+
+### Fixed
+
+- **R-9 — the four patch decoders capped their post walk at 64 / 128 / 128 / 256.** status, render
+  (psprite), sprite and texture each carried their own limit, so the *same legal column* decoded
+  completely in one path and **truncated in another** — a >64-post HUD patch lost its tail while the
+  identical texture column rendered whole. Unified on `PATCH_POST_MAX = 256`, sized by what a byte
+  topdelta can actually address. The walk stays doubly bounded (counter **and** lump extent), so the
+  DoS guard is unchanged.
+- **F06-1 — texture height is now clamped where it is stored, not only inside the column decoders.**
+  `texture_height()` returned the raw WAD field, and since TX-3 (v0.34.6) that feeds three V anchors
+  through `render_vmid`. A texture declaring height > `TEX_COL_MAX` handed the anchors a 4000-ish
+  `tex_h` while the column data was clamped to 256 — a **whole-section wrong V anchor**, not the one
+  blank column this shipped as (LOW) in v0.34.0, which is why the audit re-rated it up. Clamping at
+  the parse makes the two decoder-side clamps no-ops and puts every consumer on one value, with a
+  `sakshi_warn` on truncation.
+- **R-5 — scoped down after inspection, and the honest result is smaller than the finding.** The
+  audit called for "patch-dim / height-delta overflow clamps". In the texture decoder the patch
+  *height* was read and **never used**, and `read_le16` cannot return negative, so the guards the
+  finding implies would have been dead code — the unused read is deleted instead. The same dead
+  height read is gone from `status.cyr`. What genuinely remained is bounded-but-wasteful work: a
+  crafted 65535-wide patch spins the column loop 65535 times (every read inside is already
+  extent-checked, so it is memory-safe), now capped in the texture, status and psprite decoders —
+  the same bounded-work class as R-1/R-10, which these three never got.
+- **P-8 — `--ppm` opened /dev/fb0 read-write, ioctl'd it, and allocated a panel-sized scratch**
+  (~14 MB on a 2560×1440 desktop) that nothing ever writes. Screenshot mode now early-outs the way
+  `PM_WAYLAND` already does. This is what the release gates run: **every `--ppm` capture in CI and in
+  the A/B harness was touching the developer's live framebuffer device.** Verified by `strace`: 0
+  fb0 opens.
+
+### Verification
+
+- **9 maps + 5 menus + intermission byte-identical** vs the committed v0.34.7, including the
+  `sprite_decode_column` extraction on its own.
+- **Tests 227 WAD-free / 349 full** (unchanged — this cut is decoder hardening plus new fuzz
+  targets, and the new coverage lives in the fuzzers rather than in asserts).
+- **Fuzz ×7 clean**: 1000 / 50000 / 2000 / 1000 / 1000 / 2000 / 1000.
+- PPM still exactly 192,015 B; `cyrius deps --verify` 36/0; both targets build clean.
+  Binary 459,984 → **464,136 B** (agnos 446,512 → **446,552**).
+- **AGNOS QEMU direct-map PASS on the final binary** (floor band unchanged).
+
 ## [0.34.7] - 2026-07-26 — perf batch C closeout: map-load index caches (−58% render_frame)
 
 The last queued row of the 0.34.x band. Five changes, **all byte-identical output**, verified by a

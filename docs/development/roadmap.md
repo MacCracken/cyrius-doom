@@ -35,27 +35,10 @@ Everything else below is quality, fidelity, robustness, or performance.
 
 ## Near-term: the 0.34.x closeout band
 
-Three patch cuts that finish the render/decoder/toolchain backlog. All are byte-identical or
+Two patch cuts that finish the render/decoder/toolchain backlog. All are byte-identical or
 near-byte-identical, so they keep the cheap PPM-A/B gate that has caught real regressions all minor.
-(v0.34.7, perf batch C, shipped 2026-07-26 — see [`completed-phases.md`](completed-phases.md).)
-
-### v0.34.8 — Decoder robustness + the fuzz coverage v0.34.9 needs
-
-Five findings that all live in the patch/post decoders and share one harness. **Ships before v0.34.9 by
-design**: that cut widens what the engine will admit, and the sprite/flat decoders have *no fuzz target at
-all* today — widening admission over unfuzzed decoders is the wrong order.
-
-| # | Item | Detail |
-|---|------|--------|
-| R-9 | **Post-walk safety caps are inconsistent across the four decoders** | 64 / 128 / 128 / 256 in status / render / sprite / texture. A legal 200-post column renders truncated in the HUD path and complete in the texture path. Unify on one shared constant. |
-| F06-1 | **`tex_h > TEX_COL_MAX` clamp** | **Re-rated up**: TX-3 gave the unclamped `texture_height` three anchor consumers via `render_vmid`, so the failure mode is now a whole-section wrong V anchor, not one blank column. One clamp at `texture_init`/`texture_height` closes all three. |
-| R-5 | **Patch-dim / height-delta upper clamps** | `pw`/`ph` are read raw from the WAD and `ph` is never validated. Memory-safe today via the `dy` guard; this is the cosmetic half. |
-| res-2 | **The sprite + flat decoders have no fuzz target** | Write both. Correct the roadmap/audit claim that the fuzz-corpus item shipped complete at 0.33.8 — `fuzz_texture.cyr` covers TEXTURE1/PNAMES only. |
-| P-8 | **`--ppm` opens /dev/fb0 anyway** | Screenshot mode still opens the panel read-write, ioctls it, and allocates a panel-sized scratch it never touches. Early-out `PM_PPM` the way `PM_WAYLAND` already does. |
-
-**Gate**: after v0.34.7 (shares `texture.cyr` — let the index-cache restructure land first so the clamps sit
-on the final shape). Exit: 7 fuzz targets green, PPM still exactly 192,015 B, 9-map byte-identical, and an
-`--ppm` run traced to prove zero fb0 syscalls.
+(v0.34.7 perf batch C and v0.34.8 decoder robustness shipped 2026-07-26/27 — see
+[`completed-phases.md`](completed-phases.md).)
 
 ### v0.34.9 — Full-IWAD capacity (the gate-opener)
 
@@ -72,8 +55,11 @@ TEXTURE2 onto the TEXTURE1 table. Ship **before** a registered WAD is acquired �
 behind five separate "registered-WAD-gated" items. Take `texture.cyr` Result adoption here too, since every
 error path in the file is being touched anyway.
 
-**Gate**: after v0.34.8. Exit: 9-map shareware PPM byte-identical (raising a cap must not move shareware
-output), plus a synthetic over-cap WAD proving the warn fires.
+**Gate**: v0.34.8 shipped the prerequisite — the sprite and flat decoders now have fuzz targets
+(suite ×7), so admission can widen over fuzzed code. Exit: 9-map shareware PPM byte-identical
+(raising a cap must not move shareware output), a synthetic over-cap WAD proving each `sakshi_warn`
+fires, and `fuzz_flat` re-run against the raised `FLAT_MAX` (its truncation branch is already
+covered — 225 hits — so the new cap is exercised the moment it changes).
 
 ### v0.34.10 — `asr()` → native `>>>` migration
 

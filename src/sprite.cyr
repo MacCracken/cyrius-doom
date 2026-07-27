@@ -325,6 +325,61 @@ fn sprite_calc_rotation(thing_x, thing_y, thing_angle): i64 {
 }
 
 # Render all visible sprites for the current frame
+# Decode one post-encoded sprite column into spr_col_buf / spr_col_mask.
+#
+# Extracted from sprite_render_all (v0.34.8, res-2) so the sprite patch decoder
+# has a callable entry point — inline, it could not be fuzzed, which is why this
+# decoder had no fuzz target while the texture path had one. Behaviour is byte
+# for byte the code that was inline: same bounds, same PATCH_POST_MAX walk, same
+# dense-buffer clear.
+#
+# Returns the clamped column height (>= 0), or -1 when the column-directory
+# entry is out of bounds and the caller must skip this column.
+fn sprite_decode_column(pdata, psz, src_col, ph): i64 {
+    # Bound the column directory + post walk (mirrors texture_get_column).
+    # Same missing C2 hardening as the weapon decoder. (0.28.0 F02)
+    if (8 + src_col * 4 + 4 > psz) { return -1; }
+    var col_off = read_le32(pdata + 8 + src_col * 4);
+    if (col_off >= psz) { return -1; }
+    var post_ptr = pdata + col_off;
+    var pend = pdata + psz;
+
+    # Decode the post-encoded column into a dense buffer first. The old loop
+    # iterated SOURCE rows and computed each one's screen row — source-driven,
+    # so a magnified sprite (sprite_h > ph, i.e. closer than ~160 units at 1:1)
+    # skipped screen rows between successive source rows and drew as shredded
+    # horizontal stripes (RC-S5).
+    var ph_c = ph;
+    if (ph_c > 256) { ph_c = 256; }
+    if (ph_c < 0) { ph_c = 0; }
+    for (var zy = 0; zy < ph_c; zy += 1) {
+        store8(spr_col_buf + zy, 0);
+        store8(spr_col_mask + zy, 0);
+    }
+
+    var safety = 0;
+    while (safety < PATCH_POST_MAX) {
+        if (post_ptr + 1 >= pend) { break; }
+        var topdelta = load8(post_ptr);
+        if (topdelta == 255) { break; }
+        var length = load8(post_ptr + 1);
+        if (post_ptr + 4 + length > pend) { break; }
+        var pixels = post_ptr + 3;
+
+        for (var py = 0; py < length; py += 1) {
+            var dy = topdelta + py;
+            if (dy < ph_c) {
+                store8(spr_col_buf + dy, load8(pixels + py));
+                store8(spr_col_mask + dy, 1);
+            }
+        }
+
+        post_ptr += 4 + length;
+        safety += 1;
+    }
+    return ph_c;
+}
+
 fn sprite_render_all(): i64 {
     sprite_visible = 0;
 
@@ -564,45 +619,11 @@ fn sprite_render_all(): i64 {
             if (src_col >= pw) { src_col = pw - 1; }
             if (src_col < 0) { src_col = 0; }
 
-            # Bound the column directory + post walk (mirrors texture_get_column).
-            # Same missing C2 hardening as the weapon decoder. (0.28.0 F02)
-            if (8 + src_col * 4 + 4 > psz) { continue; }
-            var col_off = read_le32(pdata + 8 + src_col * 4);
-            if (col_off >= psz) { continue; }
-            var post_ptr = pdata + col_off;
-
-            # Decode the post-encoded column into a dense buffer first. The old
-            # loop iterated SOURCE rows and computed each one's screen row —
-            # source-driven, so a magnified sprite (sprite_h > ph, i.e. closer
-            # than ~160 units at 1:1) skipped screen rows between successive
-            # source rows and drew as shredded horizontal stripes (RC-S5).
-            var ph_c = ph;
-            if (ph_c > 256) { ph_c = 256; }
-            for (var zy = 0; zy < ph_c; zy += 1) {
-                store8(spr_col_buf + zy, 0);
-                store8(spr_col_mask + zy, 0);
-            }
-
-            var safety = 0;
-            while (safety < 128) {
-                if (post_ptr + 1 >= pend) { break; }
-                var topdelta = load8(post_ptr);
-                if (topdelta == 255) { break; }
-                var length = load8(post_ptr + 1);
-                if (post_ptr + 4 + length > pend) { break; }
-                var pixels = post_ptr + 3;
-
-                for (var py = 0; py < length; py += 1) {
-                    var dy = topdelta + py;
-                    if (dy < ph_c) {
-                        store8(spr_col_buf + dy, load8(pixels + py));
-                        store8(spr_col_mask + dy, 1);
-                    }
-                }
-
-                post_ptr += 4 + length;
-                safety += 1;
-            }
+            # res-2: the decode is sprite_decode_column() so it has a callable
+            # entry point and can be fuzzed. It was inline here, which is why
+            # this decoder has never had a fuzz target.
+            var ph_c = sprite_decode_column(pdata, psz, src_col, ph);
+            if (ph_c < 0) { continue; }
 
             # Screen-driven draw: iterate the on-screen rows and sample the
             # source (nearest), exactly how the horizontal axis already works

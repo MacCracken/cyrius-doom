@@ -263,7 +263,10 @@ fn weapon_bob_tick(is_moving): i64 {
 # across the screen as it fired. anchor_x = 1, anchor_y = 16 reproduce the
 # (correct) PISGA0 placement while staying correct for all frames.
 fn render_blit_psprite(buf, psz, light): i64 {
+    # R-5: cap the width so a crafted psprite cannot spin the column loop
+    # (bounded work — every read inside is already lump-extent checked).
     var pw = read_le16(buf);
+    if (pw > TEX_COMP_W_MAX) { pw = TEX_COMP_W_MAX; }
     var loff = read_le16(buf + 4);
     var toff = read_le16(buf + 6);
     if (loff >= 0x8000) { loff -= 0x10000; }
@@ -289,7 +292,7 @@ fn render_blit_psprite(buf, psz, light): i64 {
         var post = buf + col_off;
 
         var safety = 0;
-        while (safety < 128) {
+        while (safety < PATCH_POST_MAX) {
             if (post + 1 >= pend) { break; }
             var td = load8(post);
             if (td == 255) { break; }
