@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.35.3] - 2026-08-01 — overlapping things can escape (E1M5's frozen pair, freed)
+
+### Fixed
+
+- **Two solid things that already overlap were immobile FOREVER.** `thing_move_clear`'s thing pass was
+  a pure *destination* test: correct for a mover that is currently clear, but a permanent trap for one
+  that is not — if two things already overlap, every destination still overlaps, so both are pinned.
+
+  Not hypothetical. E1M5 spawns a former human at **(−1392, 704)** and an imp at **(−1408, 672)** —
+  **35.8 units apart against a 40-unit radius sum, overlapping by 4.2 units before anything moves.**
+  Both sat at *identical coordinates at tick 1 and at tick 350* of a probe, with `sees_player=1`
+  throughout. In play that reads as two monsters staring at you and never reacting.
+
+  **Found by diagnosing the one v0.35.2 staging where the new 8-direction chase made things WORSE**
+  (+3% `move_blocked`) instead of writing it off as RNG noise.
+
+  | staging | v0.35.1 | v0.35.2 | **v0.35.3** |
+  |---|---|---|---|
+  | E1M8 @ 608,6544 | 1834 | 22 | **1** |
+  | E1M5 @ −1152,864 | 561 | 577 *(worse)* | **0** |
+  | E1M4 @ 1792,1728 | 621 | 518 | **15** |
+
+  The E1M5 pair now separates — (−1392,704) → (−1392,960) and (−1408,672) → (−1408,992).
+
+  **The rule is deliberately narrow, and both halves are asserted.** A mover only gets escape licence
+  when it *already* overlaps that thing, and only for a step that **strictly increases** centre
+  separation. A currently-clear mover is blocked exactly as before, so nothing can walk into something
+  it was not already inside; an overlapped pair can only unwedge, never burrow deeper. Applied to the
+  player pass too, so a monster shoved into the player is not pinned for the rest of the level.
+
+### Verification
+
+- **Tests 414 → 423.** New group covers the predicate directly (clear mover, escape, burrow-deeper,
+  zero-progress) plus end-to-end through `thing_move_clear`.
+- **Mutation-proven 4/4 — and the first pass was 2/4.** Removing the escape call entirely *passed*,
+  because the end-to-end destination I first chose, (−8,−16), is 48 units away on Y against a 40-unit
+  radius sum: the loop `continue`d on the plain AABB test and the escape branch never executed. The
+  destinations are now chosen to stay inside the overlap on **both** axes, and a "clear mover
+  retreating gets no licence" case was added to kill the dropped-precondition mutant.
+- **14/14 `--ppm` byte-identical**; idle-map aggregate counters and monster census unchanged on all 9
+  maps (the freed monsters are in staged engagements, not idle spawns).
+- fuzz ×7 clean; deps 36/0; both targets clean. Binary 481,264 → **485,360 B** (agnos 471,920).
+- **AGNOS QEMU direct-map PASS**, 4×-block pixel-diff vs Linux **100.00% exact**.
+
+### Known issues
+
+- **The local `cycc` auto-updated to 6.5.5 mid-cut.** The pin stays **6.5.4** and every gate above was
+  run on it, via `CYRIUS_HOME=$HOME/.cyrius` plus the versioned binary. Worth recording precisely
+  because the *other* form — `CYRIUS_HOME=$HOME/.cyrius/versions/$V` — silently works for incremental
+  builds but breaks `cyrius deps` after `rm -rf lib` (`0 verified, 36 failed`, `run: cyrius install
+  6.5.4`). 6.5.5 is available and unevaluated.
+
 ## [0.35.2] - 2026-08-01 — vanilla 8-direction chase (`move_blocked` −98.8%)
 
 ### Changed

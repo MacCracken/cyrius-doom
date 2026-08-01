@@ -845,6 +845,28 @@ fn thing_animate(idx): i64 {
 # (was player_check_position, whose step check read player_z — chases froze
 # near any ledge whenever the player stood on different ground), with
 # allow_drop=0: vanilla monsters never walk off a >24-unit ledge.
+# v0.35.3 — is (nx,ny) an ESCAPE from an existing overlap with (ox,oy)?
+#
+# Returns 1 only when BOTH hold: the mover currently overlaps that thing at
+# (cx,cy), and the destination is strictly farther from its centre. Extracted as
+# its own fn rather than inlined into thing_move_clear's loop — same lesson as
+# door_thing_blocks in v0.35.1, and it makes the predicate directly testable.
+#
+# Distance uses fixed_approx_dist, the same octagonal metric the AI already uses
+# for range checks. It is not exact, but it is MONOTONE in separation, which is
+# all this comparison needs, and staying on the engine's existing metric avoids
+# introducing a second notion of "distance" to the collision core.
+fn thing_overlap_escapes(cx, cy, nx, ny, ox, oy, rr): i64 {
+    # Not currently overlapping => no escape licence; the caller blocks as before.
+    if (fixed_abs(ox - cx) >= rr) { return 0; }
+    if (fixed_abs(oy - cy) >= rr) { return 0; }
+    var cur_sep = fixed_approx_dist(ox - cx, oy - cy);
+    var new_sep = fixed_approx_dist(ox - nx, oy - ny);
+    if (new_sep > cur_sep) { return 1; }
+    return 0;
+}
+
+
 fn thing_move_clear(self_idx, nx, ny): i64 {
     var mcx = thing_x(self_idx);
     var mcy = thing_y(self_idx);
@@ -864,12 +886,34 @@ fn thing_move_clear(self_idx, nx, ny): i64 {
         var rr = self_r + thing_radius(i);
         if (fixed_abs(thing_x(i) - nx) >= rr) { continue; }
         if (fixed_abs(thing_y(i) - ny) >= rr) { continue; }
+        # v0.35.3 — ESCAPE RULE for a pre-existing overlap.
+        #
+        # This pass used to be a pure destination test, which is correct for a
+        # mover that is currently clear but permanently traps one that is not:
+        # if two solid things already overlap, EVERY destination still overlaps,
+        # so both are immobile forever. That is not hypothetical — E1M5 spawns a
+        # former human at (-1392,704) and an imp at (-1408,672), which is 35.8
+        # units apart against a 40-unit radius sum, i.e. overlapping by 4.2 units
+        # before anything moves. Both sat at identical coordinates for an entire
+        # 350-tick probe with sees_player=1 the whole time. Found by diagnosing
+        # the one v0.35.2 staging where the 8-direction chase made things WORSE
+        # (+3% move_blocked) instead of writing it off as noise.
+        #
+        # The rule is deliberately narrow: only when the mover ALREADY overlaps
+        # this thing, and only for a step that strictly INCREASES centre
+        # separation. A mover that is currently clear is blocked exactly as
+        # before, so nothing can walk into a thing it was not already inside;
+        # and an overlapped pair can only unwedge, never burrow deeper.
+        if (thing_overlap_escapes(mcx, mcy, nx, ny, thing_x(i), thing_y(i), rr) == 1) { continue; }
         return 0;
     }
-    # The player is solid too.
+    # The player is solid too — same escape rule, so a monster spawned inside the
+    # player (or shoved into them) is not pinned for the rest of the level.
     var pr = self_r + PLAYER_RADIUS;
     if (fixed_abs(player_x - nx) < pr) {
-        if (fixed_abs(player_y - ny) < pr) { return 0; }
+        if (fixed_abs(player_y - ny) < pr) {
+            if (thing_overlap_escapes(mcx, mcy, nx, ny, player_x, player_y, pr) == 0) { return 0; }
+        }
     }
     return 1;
 }

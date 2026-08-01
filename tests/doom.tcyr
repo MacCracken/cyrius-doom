@@ -551,6 +551,76 @@ fn main() {
 
     # ============================================================
     # ============================================================
+    test_group("v0.35.3: overlapping things can escape, but nothing else changes");
+    # ============================================================
+    # Two solid things that already overlap used to be immobile FOREVER: the
+    # thing pass was a pure destination test, so every destination still
+    # overlapped and both were pinned. Real case, E1M5: a former human at
+    # (-1392,704) and an imp at (-1408,672) — 35.8 units apart against a 40-unit
+    # radius sum — sat at identical coordinates for a whole 350-tick probe.
+    #
+    # The escape rule is deliberately narrow, and BOTH halves are asserted here:
+    # a currently-clear mover is blocked exactly as before, and an overlapped
+    # mover may only INCREASE separation.
+    var ov_rr = 40 << 16;
+    # (a) not currently overlapping => no licence, regardless of destination
+    assert_eq(thing_overlap_escapes(0, 0, 10 << 16, 0, 100 << 16, 0, ov_rr), 0,
+              "clear mover gets no escape licence");
+    # (b) overlapping, moving AWAY => allowed
+    assert_eq(thing_overlap_escapes(0, 0, 0 - (10 << 16), 0, 20 << 16, 0, ov_rr), 1,
+              "overlapped mover may increase separation");
+    # (c) overlapping, moving CLOSER => still blocked (cannot burrow deeper)
+    assert_eq(thing_overlap_escapes(0, 0, 10 << 16, 0, 20 << 16, 0, ov_rr), 0,
+              "overlapped mover may NOT decrease separation");
+    # (d) overlapping, separation unchanged => blocked (strictly-greater, not >=)
+    assert_eq(thing_overlap_escapes(0, 0, 0, 0, 20 << 16, 0, ov_rr), 0,
+              "a zero-progress step is not an escape");
+
+    # End-to-end through thing_move_clear: two overlapping solid monsters must
+    # be able to separate, and must still not be able to close on each other.
+    thing_count = 0;
+    var oa = things;
+    store64(oa, 0); store64(oa + 8, 0);
+    store64(oa + 32, TTYPE_DEMON); store64(oa + 40, STATE_CHASE); store64(oa + 48, 60);
+    store64(oa + 56, CAT_MONSTER); store64(oa + 80, 20 << 16); store64(oa + 88, 56 << 16);
+    store64(oa + 96, 0); store64(oa + 104, TF_ACTIVE | TF_SOLID | TF_SHOOTABLE);
+    store64(oa + 112, 0); store64(oa + 120, 0);
+    var ob = things + THING_SIZE;
+    store64(ob, 16 << 16); store64(ob + 8, 32 << 16);      # 35.8 units away: overlapping
+    store64(ob + 32, TTYPE_DEMON); store64(ob + 40, STATE_SPAWN); store64(ob + 48, 60);
+    store64(ob + 56, CAT_MONSTER); store64(ob + 80, 20 << 16); store64(ob + 88, 56 << 16);
+    store64(ob + 96, 0); store64(ob + 104, TF_ACTIVE | TF_SOLID | TF_SHOOTABLE);
+    store64(ob + 112, 0); store64(ob + 120, 0);
+    thing_count = 2;
+    player_x = 4000 << 16; player_y = 4000 << 16;          # far away, not a factor
+    # Non-vacuity, stated in the predicate the ENGINE actually uses: the thing
+    # pass is an AABB test on the radius sum, not a radial one. (The octagonal
+    # fixed_approx_dist reads exactly 40 for this pair, so a distance-based
+    # assertion here would sit precisely on the boundary and prove nothing —
+    # which is how this assert was first written, and why it failed.)
+    assert_lt(fixed_abs(thing_x(1) - thing_x(0)), 40 << 16, "pair overlaps on X (non-vacuity)");
+    assert_lt(fixed_abs(thing_y(1) - thing_y(0)), 40 << 16, "pair overlaps on Y (non-vacuity)");
+    # The destinations below are chosen to stay INSIDE the AABB overlap on BOTH
+    # axes, which is what actually reaches the escape branch. A first version of
+    # this test stepped to (-8,-16); that is 48 units away on Y against a 40-unit
+    # radius sum, so the loop `continue`d on the plain AABB test and the escape
+    # code was never executed — the assert passed with the escape deleted, and a
+    # mutation run is what caught it.
+    #   partner at (16,32); from (0,0):
+    #     dest (-2,-4) -> |18|,|36| both < 40, still overlapping, separation UP
+    #     dest ( 2, 4) -> |14|,|28| both < 40, still overlapping, separation DOWN
+    assert_eq(thing_move_clear(0, 0 - (2 << 16), 0 - (4 << 16)), 1,
+              "an overlapped monster CAN step away while still overlapping");
+    assert_eq(thing_move_clear(0, 2 << 16, 4 << 16), 0,
+              "... but still cannot step further INTO it");
+
+    # And the precondition itself: a mover that is NOT overlapping must get no
+    # licence even when the step increases separation, or the rule would quietly
+    # become "any retreat is always legal".
+    assert_eq(thing_overlap_escapes(0, 0, 0 - (10 << 16), 0, 100 << 16, 0, ov_rr), 0,
+              "a CLEAR mover retreating gets no licence (precondition is load-bearing)");
+
+    # ============================================================
     test_group("F331-4: vanilla 8-direction chase (v0.35.2)");
     # ============================================================
     # The direction tables are the load-bearing part: a sign error in one entry
@@ -689,6 +759,13 @@ fn main() {
     store64(mv + 96, 0);
     store64(mv + 104, TF_ACTIVE | TF_SOLID | TF_SHOOTABLE); store64(mv + 112, 0);
     thing_count = 1;
+    # Reset the chase commitment for this slot. These tests re-synthesize thing 0
+    # by poking memory directly, which bypasses every engine path that clears the
+    # movedir/movecount parallel arrays (things_spawn_from_map does clear them, so
+    # the ENGINE is fine — this is a harness-only hazard). Without it, this group
+    # inherits whatever direction the F331-4 group above committed for slot 0, and
+    # asserts a westward step while the monster dutifully walks the stale heading.
+    thing_movedir_set(0, DI_NODIR); thing_movecount_set(0, 0);
     player_x = 0; player_y = 0; player_angle = 0; player_health = 100;
     var mx0 = thing_x(0);
     thing_ai_tick(0);
