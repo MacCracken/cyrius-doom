@@ -380,6 +380,19 @@ fn sprite_decode_column(pdata, psz, src_col, ph): i64 {
     return ph_c;
 }
 
+# v0.35.4 — the sprite-bottom projection, extracted so it is unit-testable
+# WITHOUT a WAD or a frame. Pure: no globals, no map. `z` and `eye` are both
+# 16.16; `vy` is the view-space depth. Returns a screen row.
+#
+# Extraction is not cosmetic — before this the only way to exercise the
+# projection was to render a frame and diff pixels, which cannot distinguish
+# "monotone in z" from "accidentally inverted in a range nothing visible
+# occupies".
+fn sprite_bottom_row(z, eye, vy): i64 {
+    return HALF_HEIGHT - fixed_to_int(fixed_div(fixed_mul(z - eye, PROJ_DIST), vy));
+}
+
+
 fn sprite_render_all(): i64 {
     sprite_visible = 0;
 
@@ -519,53 +532,35 @@ fn sprite_render_all(): i64 {
         var sx1 = screen_x - fixed_to_int(fixed_mul(left_off << 16, scale));
         var sy1 = HALF_HEIGHT - fixed_to_int(fixed_mul(top_off << 16, scale));
 
-        # Find floor height via BSP walk
-        var thing_floor = 0;
+        # v0.35.4 (RC-S6) — z is STORED now, not re-derived. This used to
+        # open-code a BSP point-descent PER VISIBLE THING PER FRAME: the third
+        # uncached copy of map_point_sector in the engine, and one that diverged
+        # from the canonical one (no line_idx bounds check, and it could break out
+        # of the descent still holding an interior node). It is byte-identical to
+        # read the stored value because thing_spawn_floor_z point-samples the same
+        # subsector floor this walk resolved — the value moved, the arithmetic did
+        # not. The sector is still needed for the LIGHT, but that goes through the
+        # CACHED resolver, so a repeat visible thing costs a load, not a descent.
+        var thing_floor_z = thing_z(thing_idx);
         var thing_light = 160;
         if (map_num_nodes > 0) {
-            var nw = map_num_nodes - 1;
-            # Iteration cap = self-defense against a node cycle (validation rejects
-            # them at load; a valid descent is <= tree-depth steps). 0.33.8 pre-PWAD.
-            # On break nw is a node index (< 0x8000); ssi below is bounds-checked.
-            var nwg = 0;
-            while (bsp_is_subsector(nw) == 0) {
-                nwg += 1;
-                if (nwg > map_num_nodes) { break; }
-                if (bsp_point_on_side(map_nodes, nw, tx, ty) == 0) { nw = bsp_node_child_r(map_nodes, nw); }
-                else { nw = bsp_node_child_l(map_nodes, nw); }
-            }
-            var ssi = bsp_subsector_idx(nw);
-            if (ssi < map_num_ssectors) {
-                var s0 = map_ssector_first(ssi);
-                if (s0 < map_num_segs) {
-                    var l0 = map_seg_linedef(s0);
-                    var sd0 = map_linedef_side_right(l0);
-                    if (map_seg_side(s0) == 1) { sd0 = map_linedef_side_left(l0); }
-                    if (sd0 >= 0) {
-                        var sc = map_sidedef_sector(sd0);
-                        thing_floor = map_sector_floorh(sc);
-                        thing_light = map_sector_light(sc);
-                    }
-                }
-            }
+            var sc = thing_sector(thing_idx);
+            if (sc >= 0) { thing_light = map_sector_light(sc); }
         }
 
-        # Projectiles fly at ~32 units and draw fullbright (the cheap honest
-        # slice of RC-S6/RC-S8): the engine is 2.5D with no thing-z, so give
-        # in-flight rockets a fixed render height instead of dragging them
-        # along the floor, and light them like vanilla's fullbright MISL
-        # frames. Real thing-z (render + physics together) stays roadmapped.
+        # Projectiles draw fullbright like vanilla's MISL frames. The vertical
+        # `thing_floor += 32` hack that used to live here is GONE — projectiles
+        # carry a real launch z (MISSILE_LAUNCH_Z) from their spawn site.
         var is_missile = 0;
         if (thing_category(thing_idx) == CAT_PROJECTILE) { is_missile = 1; }
-        if (is_missile == 1) { thing_floor += 32; }
 
         # Project sprite bottom at the thing's floor height vs the frame
         # eye (view_z, 0.28.5): things on higher/lower floors now project
         # higher/lower — the old per-thing eye (own floor + 41) flattened
         # sprite elevation exactly like the per-seg wall eye did.
-        var eye_h = view_z;
-        var floor_proj = HALF_HEIGHT - fixed_to_int(
-        fixed_div(fixed_mul((thing_floor << 16) - eye_h, PROJ_DIST), vy));
+        # U2: thing_floor_z and view_z are BOTH 16.16 — the old `<< 16` on a raw
+        # sector height is deleted, not moved.
+        var floor_proj = sprite_bottom_row(thing_floor_z, view_z, vy);
 
         # Anchor sprite bottom to floor
         sy1 = floor_proj - sprite_h;

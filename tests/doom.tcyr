@@ -551,6 +551,67 @@ fn main() {
 
     # ============================================================
     # ============================================================
+    test_group("RC-S6: real thing-z (v0.35.4)");
+    # ============================================================
+    # Offset 16 was written 0 and never read from the engine's first commit until
+    # now. Making it live is a pure addition INSIDE the existing 128-byte stride,
+    # so there is no struct growth — but an offset slip would be silent, hence the
+    # sentinel round-trip below.
+    thing_count = 0;
+    var zb = things;
+    store64(zb,       11 << 16);   # 0  x
+    store64(zb + 8,   22 << 16);   # 8  y
+    store64(zb + 16,  33 << 16);   # 16 z   <- the field under test
+    store64(zb + 24,  44);         # 24 angle
+    store64(zb + 80,  20 << 16);   # 80 radius
+    store64(zb + 88,  56 << 16);   # 88 height
+    thing_count = 1;
+    # MUTANT M8 (offset slip: z written to +8 or +24) dies here — the neighbours
+    # are distinct sentinels, so a slip corrupts one of them too.
+    assert_eq(thing_z(0),      33 << 16, "thing_z reads offset 16");
+    assert_eq(thing_x(0),      11 << 16, "... and x at 0 is undisturbed");
+    assert_eq(thing_y(0),      22 << 16, "... and y at 8 is undisturbed");
+    assert_eq(thing_angle(0),  44,       "... and angle at 24 is undisturbed");
+    assert_eq(thing_radius(0), 20 << 16, "... and radius at 80 is undisturbed");
+    assert_eq(thing_height(0), 56 << 16, "... and height at 88 is undisturbed");
+    thing_set_z(0, 77 << 16);
+    assert_eq(thing_z(0), 77 << 16, "thing_set_z round-trips");
+    assert_eq(thing_x(0), 11 << 16, "... without touching its neighbours");
+    assert_eq(thing_angle(0), 44,   "... on either side");
+
+    # The projection, extracted so it is testable without a WAD or a frame.
+    # MUTANT M2 (a stray << 16 at the call site) dies on monotonicity.
+    var zeye = 100 << 16;
+    var zvy  = 200 << 16;
+    assert_eq(sprite_bottom_row(zeye, zeye, zvy), HALF_HEIGHT,
+              "a thing at eye height projects to the horizon");
+    assert_lt(sprite_bottom_row(200 << 16, zeye, zvy), HALF_HEIGHT,
+              "a thing ABOVE the eye projects above the horizon");
+    assert_gt(sprite_bottom_row(50 << 16, zeye, zvy), HALF_HEIGHT,
+              "a thing BELOW the eye projects below it");
+    # Monotone in z — the property a pixel diff cannot distinguish from an
+    # inversion in a range nothing visible happens to occupy.
+    assert_lt(sprite_bottom_row(150 << 16, zeye, zvy), sprite_bottom_row(120 << 16, zeye, zvy),
+              "sprite_bottom_row is monotone in z");
+
+    # Projectile launch z. MUTANT M6 (using raw 32, or aliasing the HORIZONTAL
+    # MISSILE_SPAWN_OFFSET) dies here; MUTANT M7 (writing z only for a fresh slot)
+    # dies on the recycle case.
+    thing_count = 0;
+    player_x = 0; player_y = 0; player_z = 64 << 16; player_angle = 0;
+    var zr1 = thing_spawn_missile(0, 0, 0);
+    if (zr1 >= 0) {
+        assert_eq(thing_z(zr1), (64 << 16) + (32 << 16),
+                  "a rocket launches at player_z + 32 units (16.16, not raw)");
+        thing_set_flags(zr1, 0);                 # spend it, freeing the slot
+        player_z = 200 << 16;                    # shooter is now somewhere higher
+        var zr2 = thing_spawn_missile(0, 0, 0);
+        assert_eq(zr2, zr1, "the spent slot is recycled (non-vacuity)");
+        assert_eq(thing_z(zr2), (200 << 16) + (32 << 16),
+                  "a RECYCLED slot gets the new launch z, not the old one");
+    }
+
+    # ============================================================
     test_group("v0.35.3: overlapping things can escape, but nothing else changes");
     # ============================================================
     # Two solid things that already overlap used to be immobile FOREVER: the
@@ -1877,6 +1938,47 @@ fn main() {
         assert_eq(door_line_used(7), 1, "line 7 latches used");
         doors_init();
         assert_eq(door_line_used(7), 0, "doors_init clears the latch (per-level)");
+
+        # ============================================================
+        test_group("RC-S6: spawn z is the point-sampled subsector floor (v0.35.4)");
+        # ============================================================
+        # The unit assertion. A mutation run showed that dropping the `<< 16` in
+        # thing_spawn_floor_z — storing a RAW sector height into a 16.16 field —
+        # passed the entire WAD-free suite: every other assert either uses values
+        # it set itself or is blind to the scale. Only real map data catches it.
+        #
+        # It also pins the RULE: point-sampled subsector floor, NOT the radius-max
+        # / tmfloorz floor that move_check_position uses. Those differ for a thing
+        # straddling a step, and swapping them would move sprites (the deferred
+        # F331-2 item) while still "having a z".
+        var zsp_maps = 0;
+        var zsp_checked = 0;
+        var zsp_bad = 0;
+        var zsp_nonzero = 0;
+        for (var zm = 1; zm <= 9; zm += 1) {
+            var zname = "E1M1";
+            if (zm == 2) { zname = "E1M2"; } if (zm == 3) { zname = "E1M3"; }
+            if (zm == 4) { zname = "E1M4"; } if (zm == 5) { zname = "E1M5"; }
+            if (zm == 6) { zname = "E1M6"; } if (zm == 7) { zname = "E1M7"; }
+            if (zm == 8) { zname = "E1M8"; } if (zm == 9) { zname = "E1M9"; }
+            if (map_load(zname) == 0) {
+                zsp_maps += 1;
+                things_spawn_from_map();
+                for (var zi = 0; zi < thing_count; zi += 1) {
+                    zsp_checked += 1;
+                    var want = map_sector_floorh(thing_sector(zi)) << 16;
+                    if (thing_z(zi) != want) { zsp_bad += 1; }
+                    if (thing_z(zi) != 0) { zsp_nonzero += 1; }
+                }
+            }
+        }
+        assert_eq(zsp_maps, 9, "RC-S6: all 9 shareware maps loaded");
+        assert_gt(zsp_checked, 900, "RC-S6: a real corpus of things was checked (non-vacuity)");
+        # Non-vacuity that specifically kills the raw-store mutant: a raw floor is
+        # a small integer, so if the shift were dropped almost every z would be
+        # tiny. Requiring most of them to be non-zero 16.16 values is the discriminator.
+        assert_gt(zsp_nonzero, 400, "RC-S6: most things have a non-zero z (kills a raw store)");
+        assert_eq(zsp_bad, 0, "RC-S6: every spawned thing's z == its subsector floor << 16");
 
         # ============================================================
         test_group("RC-G1: a closing door reverses on a MONSTER, not just the player (v0.35.1)");

@@ -26,7 +26,7 @@ checklist items already ship. Only two things stand in the way, and they are ind
 
 | Blocker | Release | Why it is the blocker |
 |---|---|---|
-| Episode end | **v0.35.5** | `level_advance` wraps E1M8 → E1M1 ([level.cyr:136](../../src/level.cyr#L136)) — there is no finale, so the game literally cannot be finished. |
+| Episode end | **v0.35.6** | `level_advance` wraps E1M8 → E1M1 ([level.cyr:136](../../src/level.cyr#L136)) — there is no finale, so the game literally cannot be finished. |
 | X11 backend | **v0.37.0** | The only unmet "multiple display backends" item; fb0 / Wayland / AGNOS-setu all ship. |
 
 Everything else below is quality, fidelity, robustness, or performance.
@@ -58,27 +58,22 @@ gated on a PPM A/B. Nothing below is.
 monsters do, where things sit in z, and how a level ends. The PPM A/B gate stops being sufficient here, so
 each release below names a gameplay gate instead.
 
-### v0.35.4 — Real thing-z
+### v0.35.5 — The `top_off` sprite-anchor revival
 
-**v0.35.3 shipped the other half of the old combined slot** (the overlapping-spawn escape rule) —
-see [`completed-phases.md`](completed-phases.md). This half is separated because it is the one that
-**moves pixels**: it touches `sprite.cyr`, so the 14-capture PPM A/B stops being a control and
-becomes a diff to adjudicate. Five modules reference thing coordinates (`things`, `sprite`, `player`,
-`map`, `automap`); plan the gate before the code.
+**v0.35.4 shipped real thing-z and deliberately did NOT touch this** — see
+[`completed-phases.md`](completed-phases.md). This is the item that actually moves pixels, and it is
+**independent of thing-z**: `sprite.cyr` computes `sy1` from the patch's `top_off`, then
+unconditionally overwrites it with a bottom-anchored value, so the top_off store is dead. Reviving it
+is what re-anchors sprites — the design pass measured **72 of 940 candidates shifting 1–8 px**, with
+15 thing types whose `topoff` exceeds their patch height.
 
+Kept separate on purpose: bundled with thing-z, the render diff would have had two possible causes
+and proved neither.
 
-| # | Item | Detail |
-|---|------|--------|
-| RC-S6 | **Things have no z** | Sprites and physics use the sector floor height. Populate and read a real z; `sprite.cyr` stops BSP-resolving `thing_floor` per frame; the `+= 32` projectile-height hack goes. |
-| F331-3 | **Sight / hitscan z-slope** | `thing_check_sight` is 2D — a monster fully below a window sill still "sees" over it. Errs permissive today. |
-| — | **Precise missile-vs-wall trace** | z-aware, replacing the `player_check_position` approximation that lets a rocket clip on tall steps in 2.5D. |
-| F331-2 | **Vanilla ledge-glide z** | tmfloorz contacted-line tracking replacing the instant z-snap + drop-off escape-rule cure. Lowest value of the four; drop if the cut gets heavy. |
+**Gate**: this one genuinely *is* a diff to adjudicate. Capture the 14-capture A/B, then justify each
+moved sprite against its patch metadata rather than accepting the diff wholesale.
 
-**Gate**: after v0.35.2. Exit: mutation-proven thing-struct layout asserts (the v0.34.5 `MASKED_ENTRY`
-sentinel pattern — a missed offset here is silent corruption), plus a WAD-gated regression that a monster
-below a sill no longer sees over it.
-
-### v0.35.5 — Episode end ⭐ *critical path*
+### v0.35.6 — Episode end ⭐ *critical path*
 
 | # | Item | Detail |
 |---|------|--------|
@@ -88,7 +83,7 @@ below a sill no longer sees over it.
 
 **Gate**: nothing blocks it — schedulable any time after v0.34.7.
 
-### v0.35.6 — Combat cosmetics + two dormant one-liners
+### v0.35.7 — Combat cosmetics + two dormant one-liners
 
 BEXP rocket-explosion frames (detonation is instant today) · full xdeath giblet animation on overkill ·
 animated multi-frame muzzle flash (chaingun/rocket show only frame A — needs a flash counter decoupled from
@@ -98,7 +93,7 @@ registered-WAD gated) · **G-10** diagonal movement calls `doors_walk_trigger` t
 **Gate**: after v0.35.2. Exit: staged-viewpoint PPMs at successive ticks per animation; a WAD-free assert
 that a diagonal step produces exactly one trigger call.
 
-### v0.35.7 — Audio + music fidelity
+### v0.35.8 — Audio + music fidelity
 
 **MUSIC-2** MUS percussion (channel 15 is dropped entirely — E1M1's track is drum-driven, so this is the
 high-impact one) · **MUSIC-3** pitch bend + expression/pan controllers · **AUDIO-6** gate the PC-speaker
@@ -118,7 +113,7 @@ change into a cut gated on "shareware output must not move" would have muddied b
 **Gate**: independent. Exit: byte-identical 9-map A/B (a typed-error refactor must not move pixels)
 plus the existing texture asserts re-pointed at the new signatures.
 
-### v0.35.8 — Lighting + plane parity
+### v0.35.9 — Lighting + plane parity
 
 Closes the last of the v0.28.7 sub-audit: **brightness/lighting A-B vs the COLORMAP reference** (write the
 per-light-level PPM diff to `docs/audit/`) · **RC-S8** sprite dimming still uses an ad-hoc `/96` ramp
@@ -132,7 +127,7 @@ viewpoints (E1M1's blue pool is FLAT14, not NUKAGE), so the SLADRIP animation fi
 gated by WAD-gated unit asserts rather than the PPM sweep. Stage a viewpoint onto a SLADRIP wall
 here, where staged-viewpoint work already lives, and add it to the captured set.
 
-### v0.35.9 — Engine-invariant audit (verification-first)
+### v0.35.10 — Engine-invariant audit (verification-first)
 
 The original Black Book sub-audits, deliberately run **after** the gameplay arc so they assert the shipped
 engine rather than one mid-rewrite: BSP traversal invariants (`bsp_point_on_side` parity, front-to-back walk
@@ -160,7 +155,7 @@ Ordered so the `win_*` seam churns exactly once: scaling → pointer → X11.
 
 ## v1.0.0 — Ship
 
-**Blocked only on v0.35.5 and v0.37.0.** Checklist items 4 (runs on AGNOS), 5 (runs on /dev/fb0) and 6 (in
+**Blocked only on v0.35.6 and v0.37.0.** Checklist items 4 (runs on AGNOS), 5 (runs on /dev/fb0) and 6 (in
 the AGNOS initrd) already ship — correct them to ✅ with their evidence at tag time, and fold item 2 (X11)
 into v0.37.0 as one row rather than two.
 
@@ -212,6 +207,12 @@ the mabda dep + a dmabuf/EGL path.
 > | 9-map `--ppm` A/B | — | **9 / 9 differ** (5 / 5 menus match) |
 > | E1M1 thing census | 6 mon / 52 items / 33 decor | **6 / 51 / 34** — a classification boundary moved |
 > | `test_doom` | 366 / 366 | **363 / 366** |
+>
+> **CORRECTION (cycc 6.5.5): the pass named here was WRONG.** `CYRIUS_LASE_OFF=1` disables the
+> *shared* NOP-apply step used by lase, DCE **and** dead-store, so it localises no further than that
+> step. Root cause is **DCE** (a `switch` dispatching on a stale register); fixed upstream in 6.5.5.
+> On the current tree `CYRIUS_IR=3` passes 423/423 on both pins, so it no longer reproduces here.
+> The original, superseded reading follows:
 >
 > **Bisected to a single pass: LASE apply.** `CYRIUS_IR=3 CYRIUS_LASE_OFF=1` restores **366/366**;
 > `CYRIUS_FOLD_OFF=1` does not help. The three failures are all the weapon-fire path

@@ -91,10 +91,13 @@ enum ThingCat {
 # ================================================================
 # Runtime thing (mobj_t equivalent)
 # ================================================================
-# Layout per thing: 15 fields * 8 bytes = 120 bytes
+# Layout per thing: 16 fields * 8 bytes = 128 bytes (THING_SIZE)
 #   0: x (fixed-point)
 #   8: y (fixed-point)
-#  16: z (fixed-point)
+#  16: z (fixed-point) — LIVE as of v0.35.4 (RC-S6). Written 0 and never read
+#      from the engine's first commit until then; it is the sector floor of the
+#      thing's own subsector, point-sampled, in 16.16. NOT a tmfloorz/radius-max
+#      value — that is the deferred F331-2 rule and it would move sprites.
 #  24: angle (0..1023)
 #  32: type (DoomEd number)
 #  40: state (ThingState)
@@ -187,6 +190,31 @@ fn thing_invalidate_sector(idx): i64 {
     return 0;
 }
 
+# v0.35.4 (RC-S6) — the spawn/standing z for a thing: the floor of the subsector
+# its own (x,y) point-samples, in 16.16.
+#
+# NAMED to be un-confusable with the movement rule. `move_check_position` uses a
+# RADIUS-MAX floor (the highest floor any part of the box touches); using that
+# here would move 32 shareware sprites by up to 216 units and destroy the
+# byte-identical render A/B. That rule is the DEFERRED F331-2 / tmfloorz item.
+# Point-sampled is also what sprite.cyr derived per frame before this, which is
+# exactly why swapping the derivation for a stored value is byte-identical.
+fn thing_spawn_floor_z(idx): i64 {
+    if (map_num_sectors <= 0) { return 0; }        # hermetic: WAD-free tests
+    var s = thing_sector(idx);
+    if (s < 0) { return 0; }
+    return map_sector_floorh(s) << 16;             # U1: raw i16 -> 16.16, the only inbound conversion
+}
+
+# Re-resolve z after a move. thing_set_x/thing_set_y have already invalidated the
+# sector cache, so this costs exactly one BSP descent per SUCCESSFUL move — where
+# the code it replaces (sprite.cyr's inline walk) cost one per VISIBLE THING PER
+# FRAME, and thing_move_clear's cost one per move ATTEMPT.
+fn thing_update_z(idx): i64 {
+    thing_set_z(idx, thing_spawn_floor_z(idx));
+    return 0;
+}
+
 fn thing_x(idx): i64 { return load64(things + idx * THING_SIZE); }
 fn thing_y(idx): i64 { return load64(things + idx * THING_SIZE + 8); }
 fn thing_angle(idx): i64 { return load64(things + idx * THING_SIZE + 24); }
@@ -204,6 +232,13 @@ fn thing_radius(idx): i64 { return load64(things + idx * THING_SIZE + 80); }
 # cyberdemon 110, so hardcoding would silently under-block exactly the things
 # most able to stand in a doorway.
 fn thing_height(idx): i64 { return load64(things + idx * THING_SIZE + 88); }
+# v0.35.4 (RC-S6) — offset 16 finally has readers. 16.16 fixed, like player_z
+# (player.cyr:22) and view_z (render.cyr), NOT raw map units like the sector
+# heights in map_sectors. Every conversion is funnelled through the two sites
+# noted in the unit register: thing_spawn_floor_z (<< 16 on the way in) and
+# thing_move_clear's cfloor (fixed_to_int on the way out).
+fn thing_z(idx): i64 { return load64(things + idx * THING_SIZE + 16); }
+fn thing_set_z(idx, v): i64 { store64(things + idx * THING_SIZE + 16, v); return 0; }
 fn thing_flags(idx): i64 { return load64(things + idx * THING_SIZE + 104); }
 
 fn thing_set_state(idx, st): i64 { store64(things + idx * THING_SIZE + 40, st); return 0; }
@@ -447,6 +482,10 @@ fn things_spawn_from_map(): i64 {
         if (ttype == 15) { store64(base + 112, 13); }
         if (ttype == 10 || ttype == 12) { store64(base + 112, 22); }
 
+        # v0.35.4 (RC-S6): resolve z AFTER the slot is fully written — thing_sector()
+        # reads this thing's own x/y, and the whole sector cache was cleared at the
+        # top of this fn (PRE-1), so this is a cold, correct resolve.
+        thing_set_z(idx, thing_spawn_floor_z(idx));
         thing_count += 1;
     }
 
@@ -669,6 +708,7 @@ fn chase_try_walk(idx, d): i64 {
     if (thing_move_clear(idx, nx, ny) == 0) { return 0; }
     thing_set_x(idx, nx);
     thing_set_y(idx, ny);
+    thing_update_z(idx);          # v0.35.4: z follows the mover onto a new floor
     # Commit to this direction for a randomised interval, as vanilla does.
     thing_movedir_set(idx, d);
     thing_movecount_set(idx, p_random_range(16));
@@ -872,10 +912,12 @@ fn thing_move_clear(self_idx, nx, ny): i64 {
     var mcy = thing_y(self_idx);
     # Hermetic guard: the WAD-free tests run combat with no map loaded —
     # map_sectors is null there, so only resolve the floor when sectors exist.
-    var mfloor = 0;
-    if (map_num_sectors > 0) {
-        mfloor = map_sector_floorh(map_point_sector(mcx, mcy));
-    }
+    # v0.35.4 (U5): cfloor comes from the STORED z, not a fresh BSP walk. This was
+    # the fourth uncached copy of map_point_sector in the engine. move_check_position
+    # compares cfloor against RAW map_sector_floorh (player.cyr:327/337), so convert
+    # out of 16.16 here — the same shape player.cyr:133 already uses for player_z.
+    # Hermetic: with no map loaded z is 0, exactly as mfloor was.
+    var mfloor = fixed_to_int(thing_z(self_idx));
     if (move_check_position(mcx, mcy, mfloor, nx, ny, 0) == 0) { return 0; }
     var self_r = thing_radius(self_idx);
     for (var i = 0; i < thing_count; i += 1) {
@@ -1479,7 +1521,13 @@ fn thing_explode(src_idx, radius, maxdmg): i64 {
 enum MissileConst {
     TTYPE_ROCKET_MISSILE = 9999;     # synthetic type (not a DoomEd number)
     MISSILE_SPEED = 1310720;         # 20 map units/tic, << 16
-    MISSILE_SPAWN_OFFSET = 2097152;  # 32 units, << 16 — clear the shooter
+    MISSILE_SPAWN_OFFSET = 2097152;  # 32 units, << 16 — HORIZONTAL, clears the shooter
+    # U3/U4 (v0.35.4): the VERTICAL launch height. Numerically identical to
+    # MISSILE_SPAWN_OFFSET and deliberately a SEPARATE name — they mean different
+    # axes and only coincide today. It replaces sprite.cyr's `thing_floor += 32`,
+    # which was in RAW map units; this one is 16.16. Same digit, different unit:
+    # that is the trap, and it is why the constant is named rather than inlined.
+    MISSILE_LAUNCH_Z = 2097152;      # 32 units, << 16 — VERTICAL
     MISSILE_LIFETIME = 100;          # tics before auto-detonation (safety)
     ROCKET_SPLASH_RADIUS = 8388608;  # 128 units, << 16
     ROCKET_SPLASH_DMG = 128;
@@ -1516,7 +1564,7 @@ fn thing_spawn_missile(px, py, ang): i64 {
     var base = things + idx * THING_SIZE;
     store64(base,       spx);
     store64(base + 8,   spy);
-    store64(base + 16,  0);
+    store64(base + 16,  player_z + MISSILE_LAUNCH_Z);   # v0.35.4: real launch z (was 0 + sprite's raw +=32)
     store64(base + 24,  ang);
     store64(base + 32,  TTYPE_ROCKET_MISSILE);
     store64(base + 40,  STATE_SPAWN);
@@ -1604,7 +1652,8 @@ fn thing_spawn_fireball(owner): i64 {
     var base = things + idx * THING_SIZE;
     store64(base,       tx + fixed_mul(ca, MISSILE_SPAWN_OFFSET));
     store64(base + 8,   ty + fixed_mul(sa, MISSILE_SPAWN_OFFSET));
-    store64(base + 16,  0);
+    # v0.35.4: read the OWNER's z before this recycled slot is overwritten.
+    store64(base + 16,  thing_z(owner) + MISSILE_LAUNCH_Z);
     store64(base + 24,  ang);
     store64(base + 32,  btype);
     store64(base + 40,  STATE_SPAWN);

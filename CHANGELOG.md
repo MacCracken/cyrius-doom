@@ -7,6 +7,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.35.4] - 2026-08-01 — real thing-z (RC-S6), and the per-sprite BSP walk deleted
+
+Thing offset 16 has been written as literal `0` and **never read** since the engine's first commit.
+It is now live: the point-sampled subsector floor of the thing's own position, in 16.16.
+
+**Scoped deliberately so the render A/B stays a CONTROL, not a diff to adjudicate.** The roadmap
+assumed this cut had to move pixels. It does not — storing z = the sector floor makes the operand fed
+to the sprite projection *integer-identical* to the value the renderer derived per frame. What
+actually moves pixels is the `top_off` sprite-anchor revival, which is **independent of thing-z** and
+gets its own cut; bundling them would have given the diff two possible causes and proved neither.
+
+### Changed
+
+- **`sprite.cyr` no longer open-codes a BSP descent per visible thing per frame.** That walk was the
+  **third uncached copy** of `map_point_sector` in the engine, and it had *diverged* from the
+  canonical one — no `line_idx` bounds check, and it could break out of the descent still holding an
+  interior node. Sprites now read the stored z; the sector is still needed for the **light**, but that
+  goes through the already-cached `thing_sector()`, so a repeat visible thing costs a load, not a descent.
+- **`thing_move_clear`'s `cfloor` reads the stored z** instead of performing a *fourth* uncached walk.
+- **Projectiles carry a real launch z**, retiring `sprite.cyr`'s `thing_floor += 32` hack — whose own
+  comment said "real thing-z (render + physics together) stays roadmapped".
+- New `sprite_bottom_row(z, eye, vy)`, extracted pure so the projection is testable without a WAD or a
+  frame. Before this, the only way to exercise it was to render and diff pixels, which cannot tell
+  "monotone in z" from "inverted in a range nothing visible occupies".
+
+**Perf — interleaved A/B, same compiler, post wins every pair:**
+
+| pair | v0.35.3 | v0.35.4 |
+|---|---|---|
+| 1 | 544.664 µs | **525.136 µs** |
+| 2 | 544.657 µs | **522.377 µs** |
+| 3 | 540.131 µs | **523.607 µs** |
+
+`render_frame+sprites_spawned` best-of-mins **540.1 → 522.4 µs (−3.3%)**; `things_tick` unchanged.
+
+### Verification
+
+- **14/14 `--ppm` captures byte-identical** against a v0.35.3 baseline built from `git archive HEAD`
+  into scratch — the working tree was never touched.
+- **`--ai-probe` fingerprint identical.** It first appeared to differ, and the cause was instructive:
+  the baseline I compared against was **four cuts stale** (captured at session start, v0.35.0), so it
+  carried the chase rewrite's legitimate v0.35.2 delta. Against a correctly-built v0.35.3 baseline it
+  is identical. A stale baseline is indistinguishable from a regression until you rebuild it.
+- Before concluding that, a divergence probe was wired into `thing_move_clear` comparing the stored z
+  against a fresh walk on every call: **zero divergences** across a 350-tick staged engagement.
+- **Tests 423 → 443.** Sentinel round-trip on the 16-field stride, the pure projection helper, the
+  projectile launch z including the recycled-slot case, and a WAD-gated sweep asserting **every**
+  spawned thing on all 9 maps satisfies `thing_z == subsector floor << 16`.
+- **Mutation-proven 6/6 — the first battery was 4/5.** Dropping the `<< 16` (storing a raw sector
+  height into a 16.16 field) **passed the entire WAD-free suite**: every other assert either uses
+  values it set itself or is blind to scale. Only real map data catches it, which is exactly what the
+  WAD-gated sweep was added for. A wrong-floor-rule mutant (point-sample → off-by-a-step) dies there too.
+- fuzz ×7 clean; deps 36/0; binary 485,360 → **485,368 B** (agnos 471,928).
+
+### Unit register (raw map units ↔ 16.16)
+
+The trap in this cut, recorded because the digits coincide: `thing_floor += 32` was **raw**; its
+replacement `MISSILE_LAUNCH_Z` is **16.16**. It is numerically identical to the *horizontal*
+`MISSILE_SPAWN_OFFSET` and is deliberately a separate constant — they mean different axes and only
+happen to agree today. Conversions are funnelled through exactly two sites: `thing_spawn_floor_z`
+(`<< 16` inbound) and `thing_move_clear`'s `cfloor` (`fixed_to_int` outbound, matching the precedent
+`player.cyr:133` already sets for `player_z`).
+
 ## [0.35.3] - 2026-08-01 — overlapping things can escape (E1M5's frozen pair, freed)
 
 ### Fixed
@@ -50,6 +113,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   maps (the freed monsters are in staged engagements, not idle spawns).
 - fuzz ×7 clean; deps 36/0; both targets clean. Binary 481,264 → **485,360 B** (agnos 471,920).
 - **AGNOS QEMU direct-map PASS**, 4×-block pixel-diff vs Linux **100.00% exact**.
+
+### Corrected
+
+- **The `CYRIUS_IR=3` defect I filed against cyrius in v0.35.1 named the wrong pass, and cycc 6.5.5
+  fixed it while correcting me.** I bisected with `CYRIUS_LASE_OFF=1` and reported **LASE**. The
+  bisection was sound; the attribution was not. `ir_apply_lase` is the **only NOP-filler in the
+  pipeline**, and it applies `IR_ELIMINATED` marks from **three** passes — lase, DCE and dead-store —
+  so `LASE_OFF` disables all three and localises no further than the shared *apply* step. The finer
+  knobs separate them: upstream measured doom at `IR=3` **377/380** and `IR=3 CYRIUS_DCE_CAP=0`
+  **380/380**. Root cause is **DCE**: an `IR_RAW_EMIT` marker only shields raw bytes until the next
+  recorded node, so a `switch` dispatched on a stale register. Fixed in 6.5.5 behind a mutation-proven
+  `ir3_switch_dce` gate.
+
+  Re-checked here: on the current tree `CYRIUS_IR=3` passes **423/423 on 6.5.4 *and* 6.5.5** — the
+  v0.35.2/.3 changes shifted codegen enough that it no longer reproduces on our corpus, so upstream's
+  gate is the evidence rather than ours.
+
+  **The generalisable lesson**: a kill-switch named after one pass may gate a step shared by several.
+  Check what the knob actually disables before naming a pass in a filing.
 
 ### Known issues
 
