@@ -7,6 +7,99 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.35.1] - 2026-08-01 — two monster-side repairs, and the 6.5.4 toolchain
+
+Continues the gameplay arc with the half of v0.35.1 that is **repair**. The roadmap row also carried
+F331-4 (`P_NewChaseDir` 8-direction chase); it is re-slotted to **v0.35.2** for the same reason
+v0.35.0 split sight from movement — a behaviour rewrite behind the same fingerprint diff as two bug
+fixes makes any unexpected delta ambiguous about its cause. F331-2 stays deferred to v0.35.1b.
+
+**Both fixes are invisible to every pre-existing gate, by construction** — `--ppm`, `--ai-probe` and
+the whole suite each load exactly one map, and no spawn view closes a door on a monster. So the
+14-capture PPM A/B and the `--ai-probe` fingerprint are both **unchanged**, and the evidence for these
+changes is the two new mutation-proven test groups, not the old gates. That is the point worth
+carrying forward: a gate that cannot reach a code path is not evidence about it.
+
+### Fixed
+
+- **PRE-1 — the thing-sector cache was never reset on a level change, so monsters could be
+  permanently asleep from E1M2 onward.** Shipped broken in v0.35.0. `thing_sec_cache`
+  ([things.cyr:163](src/things.cyr#L163)) is allocated once for the process and had **no reset path
+  anywhere**; its only invalidator is `thing_set_x`/`thing_set_y`, but `things_spawn_from_map` writes
+  positions **raw** ([things.cyr:354](src/things.cyr#L354)) and both projectile spawners write raw into
+  **recycled** slots. So after a second `load_map`, thing *i* carried the previous map's sector index —
+  and v0.35.0's REJECT pre-test ([things.cyr:789](src/things.cyr#L789)) treats a set bit as
+  *authoritative* and returns early, so a stale-but-in-range index silently meant "provably cannot see
+  you" and the monster never scanned again.
+
+  Measured on the shipped 0.35.0 binary, before the fix — every consecutive shareware transition was
+  affected:
+
+  | transition | monsters | stale | false-blind (monster, player-sector) pairs |
+  |---|---|---|---|
+  | E1M1 → E1M2 | 41 | **36** | **1,176** |
+  | E1M4 → E1M5 | 91 | **91** | 1,242 |
+  | E1M5 → E1M6 | 118 | 85 | 1,001 |
+  | E1M8 → E1M9 | 72 | 38 | 598 |
+
+  After the fix the same sweep reports **0 stale, 0 false-blind on all 9 transitions**. Scoped
+  honestly: the sweep treats every sector as a hypothetical player position rather than only reachable
+  ones, and noise still wakes a monster (`things_noise_alert` is not REJECT-gated), so the symptom was
+  *"asleep until shot at or noise-alerted"*, not inert.
+
+  Gated by the suite's **only two-map assert** — resolve `thing_sector` on E1M1, load E1M3, assert it
+  matches `map_point_sector`; plus a recycled-projectile-slot assert. Both mutation-proven: removing
+  the reset fails with **91 stale things**, removing the projectile invalidation fails the slot assert.
+
+- **RC-G1 — a closing door now reverses on a monster, not only on the player.** Only the player was
+  obstruction-checked ([doors.cyr:373](src/doors.cyr#L373)). A monster caught in a closing door was
+  **not** damaged (this engine has no crush damage) and could not leave — any exit crosses the door's
+  two-sided linedef and `move_check_linedef`'s ceiling test sees a gap of 0 < its height — so it was
+  entombed permanently, still solid, still counted in the census.
+
+  Vanilla semantics are **reverse, not crush**: `T_VerticalDoor`'s down case passes `crush=false`, and
+  damage comes only from a real crushing-ceiling thinker, which doom does not implement. So the
+  roadmap's "crush/reverse" resolves to reverse-only here, deliberately.
+
+  - New `thing_height()` accessor. Offset 88 had been **written since things were introduced**
+    (`56 << 16` for map things, `8 << 16` for projectiles) and **never read** — there was no accessor
+    at all. Reading it rather than assuming `PLAYER_HEIGHT` matters for registered WADs, where a baron
+    is 64 and a cyberdemon 110.
+  - `TF_SOLID` is the entire filter and is sufficient on its own: death re-flags to
+    `TF_ACTIVE|TF_CORPSE` with SOLID cleared, so a corpse cannot hold a door open forever, and
+    projectiles are `TF_ACTIVE|TF_MISSILE`, so a rocket in the doorway is ignored. Both directions are
+    asserted.
+  - **Units bug caught by the new test, worth recording**: sector floor/ceiling heights in
+    `map_sectors` are **raw** map units (hence the bare `PLAYER_HEIGHT = 56` comparison), while the
+    thing height field is **16.16 fixed**. Comparing them directly makes the predicate always true —
+    every solid thing blocks every door at any gap.
+
+  Gated by three new asserts, all mutation-proven: reverting to the player-only check fails the
+  monster-block assert; removing the `TF_SOLID` filter fails the corpse assert.
+
+
+- **CI's test gate could not see a suite that failed exactly 10, 20, 30 … tests.**
+  [ci.yml:170](.github/workflows/ci.yml#L170) asserted success with
+  `grep -q "0 failed"` — an **unanchored substring** match, so `"356 passed, 10 failed"` and
+  `"266 passed, 100 failed"` both contain `0 failed` and the gate reported PASS. Verified, not
+  theorised: `echo "356 passed, 10 failed" | grep -q "0 failed"` matches. This sat directly beneath
+  the comment explaining the `regression_asr.tcyr` incident — a suite that sat red for two weeks
+  because CI never ran it — which makes it the same blindness one line later. Now anchored to
+  `^[0-9]+ passed, 0 failed`, which additionally fails a suite that crashes or fails to compile
+  (no summary line at all). Mutation-checked against 3-, 10-, 20-, 100-failure lines, an empty line
+  and a compile error — all now FAIL — while all three real suites still PASS.
+
+- **CI and release now hard-fail on toolchain drift.** `CYRIUS_STRICT_PIN=1` is exported alongside
+  `CYRIUS_HOME` in both `ci.yml` jobs and in `release.yml`, turning *"cyrius.cyml pins X but cycc is
+  Y"* from a warning into `error: … (CYRIUS_STRICT_PIN)` with exit 1 and no binary emitted. Verified
+  locally: with the pin at 6.4.78 against cycc 6.5.4, a plain build exits **0** with a warning and the
+  strict build exits **1**. This closes a real gap — the project had no way to *force* pinned codegen,
+  only to notice drift in a log nobody reads, and a release binary built by a compiler other than the
+  pin is precisely what the pin exists to prevent.
+
+- CI's test job was still named *"Test (WAD-free subset — 37 asserts)"*; the subset has been every
+  `tests/*.tcyr` since v0.34.5 and is 285 asserts. Renamed to stop the count rotting again.
+
 ### Changed
 
 - **Toolchain pin `cycc 6.4.78` → `6.5.4`** (13 upstream releases: 6.4.79–6.4.86, 6.5.0–6.5.4).
@@ -72,60 +165,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   versions table three sections above it said 1.1.2 / 0.7.0. The table had been kept current at each
   refresh and this line had not. Corrected, with the drift noted inline so the correction is legible.
 
-### Fixed
-
-- **CI's test gate could not see a suite that failed exactly 10, 20, 30 … tests.**
-  [ci.yml:170](.github/workflows/ci.yml#L170) asserted success with
-  `grep -q "0 failed"` — an **unanchored substring** match, so `"356 passed, 10 failed"` and
-  `"266 passed, 100 failed"` both contain `0 failed` and the gate reported PASS. Verified, not
-  theorised: `echo "356 passed, 10 failed" | grep -q "0 failed"` matches. This sat directly beneath
-  the comment explaining the `regression_asr.tcyr` incident — a suite that sat red for two weeks
-  because CI never ran it — which makes it the same blindness one line later. Now anchored to
-  `^[0-9]+ passed, 0 failed`, which additionally fails a suite that crashes or fails to compile
-  (no summary line at all). Mutation-checked against 3-, 10-, 20-, 100-failure lines, an empty line
-  and a compile error — all now FAIL — while all three real suites still PASS.
-
-- **CI and release now hard-fail on toolchain drift.** `CYRIUS_STRICT_PIN=1` is exported alongside
-  `CYRIUS_HOME` in both `ci.yml` jobs and in `release.yml`, turning *"cyrius.cyml pins X but cycc is
-  Y"* from a warning into `error: … (CYRIUS_STRICT_PIN)` with exit 1 and no binary emitted. Verified
-  locally: with the pin at 6.4.78 against cycc 6.5.4, a plain build exits **0** with a warning and the
-  strict build exits **1**. This closes a real gap — the project had no way to *force* pinned codegen,
-  only to notice drift in a log nobody reads, and a release binary built by a compiler other than the
-  pin is precisely what the pin exists to prevent.
-
-- CI's test job was still named *"Test (WAD-free subset — 37 asserts)"*; the subset has been every
-  `tests/*.tcyr` since v0.34.5 and is 285 asserts. Renamed to stop the count rotting again.
-
 ### Known issues
 
-- **The thing-sector cache is never reset on level change — monsters can be permanently asleep from
-  E1M2 onward. Shipped in v0.35.0; found here, not yet fixed.** `thing_sec_cache`
-  ([things.cyr:163](src/things.cyr#L163)) is allocated once and has **no reset path anywhere**. Its
-  only invalidator is called from `thing_set_x` / `thing_set_y`, but `things_spawn_from_map` writes
-  positions **raw** ([things.cyr:354-355](src/things.cyr#L354)) and so bypasses it — as do both
-  projectile spawners into reused slots. After a second `load_map`, thing *i* carries the **previous
-  map's** sector index. The consumer is v0.35.0's own REJECT pre-test
-  ([things.cyr:789](src/things.cyr#L789)), where a set bit is *authoritative* and returns early: a
-  stale-but-in-range index silently means "provably cannot see you" and the monster never scans again.
+- **A control-flow anomaly in `doors_tick`, worked around, NOT diagnosed.** RC-G1's thing scan was
+  first written inline in the door loop — a nested `for` with `continue`/`break` inside two `if`s. In
+  that form the door **stopped descending entirely**: per-branch probes showed control reaching the
+  marker immediately before the scan **961 times** and the markers inside it, after it, and after the
+  whole enclosing `if` **zero** times. An A/B against `git show HEAD:src/doors.cyr` pinned it to that
+  block, and it persisted after the units bug was found and fixed, with identical logic and identical
+  units, while the extracted-helper form passes the same suite **380/380**.
 
-  **Measured on the shipped binary**, not inferred — every consecutive shareware transition is
-  affected:
+  Extracted to `door_thing_blocks()` ([doors.cyr](src/doors.cyr)), which is better code anyway, so the
+  workaround costs nothing. **Deliberately not filed upstream**: it has not been minimised to a
+  standalone reproducer, and the obvious small shape (nested `for` + `continue`) behaves correctly in
+  isolation — so whether this is a cycc codegen bug in a large function or something subtler about
+  this nesting is **unresolved**. Reproduce by pasting the helper body back inline and running the
+  suite.
 
-  | transition | monsters | stale | false-blind (monster, player-sector) pairs |
-  |---|---|---|---|
-  | E1M1 → E1M2 | 41 | **36** | **1,176** |
-  | E1M4 → E1M5 | 91 | **91** | 1,242 |
-  | E1M5 → E1M6 | 118 | 85 | 1,001 |
-  | E1M8 → E1M9 | 72 | 38 | 598 |
-  | E1M7 → E1M8 | 27 | 27 | 7 |
-
-  Stated with its limits: the sweep treats *every* sector as a hypothetical player sector rather than
-  only reachable ones, and noise still wakes a monster (`things_noise_alert` is not REJECT-gated), so
-  the accurate claim is **"asleep until shot at or noise-alerted"**, not "inert". It is invisible to
-  every current gate by construction — `--ppm`, `--ai-probe` and the whole test suite each load
-  exactly one map. Slotted as **PRE-1** at the head of v0.35.1; it is a prerequisite for RC-G1, which
-  promotes `thing_sector` from an optimisation hint to a correctness input, but it is a shipped bug in
-  its own right.
 
 - **`CYRIUS_IR=3` miscompiles doom on cycc 6.5.4 — do not use it for a release build.** cyrius 6.5.2
   announced the optimizing IR substrate as unblocked (corpus mismatches 35 → 8); **doom is one of the
@@ -150,6 +206,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shell and under `env -i`, honoured both knobs, with the installed `cycc` byte-identical throughout
   (sha256 `41eb0b19…`). No cause was established. The upstream filing written on it was deleted rather
   than left in cyrius's tracker; the observation is recorded here as unexplained, not as a known bug.
+
+### Verification
+
+- **Tests 240 WAD-free / 380 full (+14)** — two new groups, both mutation-proven (4 mutants, 4 killed).
+- **14/14 `--ppm` captures byte-identical** and the **`--ai-probe` fingerprint unchanged** vs v0.35.0 —
+  which is the expected result, not a null one: neither fix is reachable from a single-map spawn view.
+- fuzz **×7** clean (50000 / 1000 / 2000 / 1000 / 1000 / 2000 / 1000); `cyrius deps --verify` **36/0**.
+- Both targets build clean, no warnings.
+
 
 ## [0.35.0] - 2026-07-27 — monster sight + wake: REJECT, stagger, and the front-180 gate
 

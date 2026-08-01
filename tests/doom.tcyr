@@ -1705,6 +1705,133 @@ fn main() {
         doors_init();
         assert_eq(door_line_used(7), 0, "doors_init clears the latch (per-level)");
 
+        # ============================================================
+        test_group("RC-G1: a closing door reverses on a MONSTER, not just the player (v0.35.1)");
+        # ============================================================
+        # Until v0.35.1 only the player was obstruction-checked. A monster caught
+        # in a closing door was not crushed (there is no crush damage in this
+        # engine) and could not leave — any exit crosses the door's two-sided
+        # linedef and move_check_linedef's ceiling test sees a gap of 0 < its
+        # height — so it was entombed permanently, still solid, still counted.
+        #
+        # Vanilla semantics are REVERSE, not crush (T_VerticalDoor's down case
+        # passes crush=false), which is what is asserted here.
+        assert_eq(map_load("E1M1"), 0, "RC-G1: E1M1 loads");
+        things_spawn_from_map();
+        doors_init();
+        # Park the player well clear so this measures the THING path only — if the
+        # player were in sector 4 the old player-only check would pass this test
+        # for the wrong reason.
+        player_x = 1024 << 16;
+        player_y = (0 - 3616) << 16;
+        assert_neq(player_find_sector(), 4, "RC-G1: player is NOT in the doorway (isolates the thing path)");
+
+        # Synthesise a solid monster standing in the doorway (sector 4). Reuse a
+        # free slot rather than inventing struct layout by hand.
+        var g1i = thing_count;
+        thing_count = thing_count + 1;
+        var g1b = things + g1i * THING_SIZE;
+        store64(g1b, 1544 << 16);            # x — the doorway coords the player test uses
+        store64(g1b + 8, (0 - 2496) << 16);  # y
+        store64(g1b + 80, 20 << 16);         # radius
+        store64(g1b + 88, 56 << 16);         # height
+        store64(g1b + 104, TF_ACTIVE | TF_SOLID | TF_SHOOTABLE);
+        thing_invalidate_sector(g1i);
+        assert_eq(thing_sector(g1i), 4, "RC-G1: the synthetic monster resolves into sector 4");
+
+        door_open(4);
+        var g1_min = 100000;
+        for (var g1t = 0; g1t < 500; g1t += 1) {
+            doors_tick();
+            if (door_state(0) == DS_CLOSING) {
+                var g1c = load64(map_sectors + 4 * MAP_SECTOR_SIZE + 8) - load64(map_sectors + 4 * MAP_SECTOR_SIZE);
+                if (g1c < g1_min) { g1_min = g1c; }
+            }
+        }
+        # MUTATION PROOF: revert doors.cyr to the player-only check and this fails
+        # (the door seals to a 0 gap on the monster).
+        assert_gte(g1_min, 56, "RC-G1: door never squeezes below the MONSTER's height (raw map units, as PLAYER_HEIGHT is)");
+
+        # Clear the doorway — the door must then complete its close, proving the
+        # block is conditional and not a permanent stall.
+        thing_set_flags(g1i, 0);
+        thing_count = thing_count - 1;
+        for (var g1t2 = 0; g1t2 < 600; g1t2 += 1) { doors_tick(); }
+        assert_eq(load64(map_sectors + 4 * MAP_SECTOR_SIZE + 8), 0,
+                  "RC-G1: door fully closes once the monster is gone");
+
+        # A CORPSE must not hold the door open — death re-flags to
+        # TF_ACTIVE|TF_CORPSE with SOLID cleared, and the scan filters on SOLID.
+        doors_init();
+        var g1c2 = thing_count;
+        thing_count = thing_count + 1;
+        var g1cb = things + g1c2 * THING_SIZE;
+        store64(g1cb, 1544 << 16);
+        store64(g1cb + 8, (0 - 2496) << 16);
+        store64(g1cb + 88, 56 << 16);
+        store64(g1cb + 104, TF_ACTIVE | TF_CORPSE);   # active, NOT solid
+        thing_invalidate_sector(g1c2);
+        door_open(4);
+        for (var g1t3 = 0; g1t3 < 700; g1t3 += 1) { doors_tick(); }
+        assert_eq(load64(map_sectors + 4 * MAP_SECTOR_SIZE + 8), 0,
+                  "RC-G1: a CORPSE in the doorway does not hold the door open");
+        thing_set_flags(g1c2, 0);
+        thing_count = thing_count - 1;
+
+        # ============================================================
+        test_group("PRE-1: thing-sector cache survives a level change (v0.35.1)");
+        # ============================================================
+        # This is the ONLY two-map assert in the suite, and that is the point:
+        # `thing_sec_cache` is process-lifetime, `things_spawn_from_map` writes
+        # positions RAW (bypassing thing_set_x/y, the only invalidator), and the
+        # v0.35.0 REJECT pre-test treats a set bit as AUTHORITATIVE. So a stale
+        # in-range sector index silently means "provably cannot see you" and the
+        # monster never scans again — from E1M2 onward. Every other gate in this
+        # repo (--ppm, --ai-probe, every group above) loads exactly one map and is
+        # blind to it by construction.
+        #
+        # Measured before the fix: E1M1->E1M2 left 36 of 41 monsters stale and
+        # 1,176 (monster, player-sector) REJECT verdicts flipped to false-blind.
+        #
+        # MUTATION PROOF: delete the reset loop in things_spawn_from_map and the
+        # pr1_stale assert below fails (it saw 36 on E1M2, 13 on E1M3).
+        assert_eq(map_load("E1M1"), 0, "PRE-1: E1M1 loads");
+        things_spawn_from_map();
+        var pr1_warm = thing_count;
+        for (var pw = 0; pw < pr1_warm; pw += 1) { thing_sector(pw); }
+        # Non-vacuity: the warm-up must actually have cached something, or a
+        # trivially-passing second map would prove nothing.
+        assert_gt(pr1_warm, 0, "PRE-1: E1M1 populated the cache (non-vacuity)");
+
+        assert_eq(map_load("E1M3"), 0, "PRE-1: E1M3 loads (the level change)");
+        things_spawn_from_map();
+        var pr1_stale = 0;
+        var pr1_checked = 0;
+        for (var pc = 0; pc < thing_count; pc += 1) {
+            pr1_checked += 1;
+            if (thing_sector(pc) != map_point_sector(thing_x(pc), thing_y(pc))) {
+                pr1_stale += 1;
+            }
+        }
+        assert_gt(pr1_checked, 0, "PRE-1: E1M3 has things to check (non-vacuity)");
+        assert_eq(pr1_stale, 0, "PRE-1: no thing keeps the previous map's sector");
+
+        # The projectile half: spawner slots are RECYCLED, and those position
+        # stores are raw too. Spawn, expire, respawn from a different position,
+        # and the cache must track the new one.
+        assert_eq(map_load("E1M1"), 0, "PRE-1: E1M1 reloads for the projectile half");
+        things_spawn_from_map();
+        var pr1_m1 = thing_spawn_missile(1056 << 16, (0 - 3616) << 16, 0);
+        if (pr1_m1 >= 0) {
+            var pr1_s1 = thing_sector(pr1_m1);
+            thing_set_flags(pr1_m1, 0);                 # expire it, freeing the slot
+            var pr1_m2 = thing_spawn_missile(1056 << 16, (0 - 3320) << 16, 0);
+            assert_eq(pr1_m2, pr1_m1, "PRE-1: the spent projectile slot is recycled");
+            assert_eq(thing_sector(pr1_m2),
+                      map_point_sector(thing_x(pr1_m2), thing_y(pr1_m2)),
+                      "PRE-1: a recycled projectile slot re-resolves its sector");
+        }
+
         wad_close();
     } else {
         syscall(1, 1, "(WAD tests skipped — pass WAD path as arg)\n", 44);

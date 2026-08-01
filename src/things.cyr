@@ -196,6 +196,14 @@ fn thing_health(idx): i64 { return load64(things + idx * THING_SIZE + 48); }
 fn thing_category(idx): i64 { return load64(things + idx * THING_SIZE + 56); }
 fn thing_tics(idx): i64 { return load64(things + idx * THING_SIZE + 96); }
 fn thing_radius(idx): i64 { return load64(things + idx * THING_SIZE + 80); }
+# v0.35.1 (RC-G1) — offset 88 has been WRITTEN since things were introduced
+# (56<<16 for map things at :421, 8<<16 for projectiles) and never read: there
+# was no accessor at all. The door obstruction check is its first consumer, and
+# it matters that it reads the field rather than assuming PLAYER_HEIGHT — the
+# shareware monsters all happen to be 56, but a registered-WAD baron is 64 and a
+# cyberdemon 110, so hardcoding would silently under-block exactly the things
+# most able to stand in a doorway.
+fn thing_height(idx): i64 { return load64(things + idx * THING_SIZE + 88); }
 fn thing_flags(idx): i64 { return load64(things + idx * THING_SIZE + 104); }
 
 fn thing_set_state(idx, st): i64 { store64(things + idx * THING_SIZE + 40, st); return 0; }
@@ -321,6 +329,22 @@ fn thing_default_radius(ttype): i64 {
 fn things_spawn_from_map(): i64 {
     if (things == 0) { things = alloc(THING_MAX * THING_SIZE); }
     thing_count = 0;
+
+    # PRE-1 (v0.35.1) — reset the per-thing sector cache. This is a LEVEL-CHANGE
+    # correctness fix, not housekeeping. `thing_sec_cache` is allocated once and
+    # lives for the whole process; the only invalidator is thing_set_x/thing_set_y,
+    # and the position stores below are RAW (`store64(base, …)`), so they bypass it.
+    # Without this reset, thing i on map 2 inherits map 1's cached sector index.
+    # The consumer is the v0.35.0 REJECT pre-test — where a set bit is AUTHORITATIVE
+    # and returns early — so a stale but in-range index silently means "this monster
+    # provably cannot see you" and it never scans again. Measured before the fix on
+    # the shipped 0.35.0 binary: E1M1->E1M2 left 36 of 41 monsters stale and produced
+    # 1,176 (monster, player-sector) pairs whose REJECT verdict flipped to
+    # false-blind; every consecutive shareware transition was affected.
+    # Invisible to --ppm, --ai-probe and the whole suite, all of which load one map.
+    if (thing_sec_cache != 0) {
+        for (var sc = 0; sc < THING_MAX; sc += 1) { store64(thing_sec_cache + sc * 8, 0 - 1); }
+    }
 
     for (var i = 0; i < map_num_things; i += 1) {
         if (thing_count >= THING_MAX) { break; }
@@ -1254,6 +1278,10 @@ fn thing_spawn_missile(px, py, ang): i64 {
     store64(base + 104, TF_ACTIVE | TF_MISSILE);
     store64(base + 112, 0);
     store64(base + 120, 0 - 1);   # owner: the player
+    # PRE-1: the position stores above are raw, and this slot is RECYCLED from a
+    # spent projectile (the caller scans for a cleared TF_ACTIVE), so the cache
+    # would otherwise still hold the previous rocket's sector.
+    thing_invalidate_sector(idx);
     return idx;
 }
 
@@ -1338,6 +1366,9 @@ fn thing_spawn_fireball(owner): i64 {
     store64(base + 104, TF_ACTIVE | TF_MISSILE);
     store64(base + 112, 0);
     store64(base + 120, owner);
+    # PRE-1: raw position stores into a recycled projectile slot — same reason as
+    # thing_spawn_missile above.
+    thing_invalidate_sector(idx);
     audio_play_at("DSFIRSHT", tx, ty);
     return idx;
 }

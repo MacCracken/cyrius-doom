@@ -324,6 +324,62 @@ fn lift_activate(sector_idx): i64 {
 # `switch`, which the audit flagged as latent cycc return-smash risk). Terminal
 # states (fully open+latched, fully closed, lift back at top) call door_free(i)
 # so the sector can be re-triggered (audit F-G2 / F-G3).
+# RC-G1 (v0.35.1) — is any solid thing standing in `sec` too tall for the gap
+# the door is about to leave? Returns 1 to block (reverse), 0 to keep closing.
+#
+# Extracted rather than written inline in doors_tick's door loop, and NOT purely
+# for tidiness: written inline — a nested `for` with `continue`/`break` inside two
+# `if`s inside that loop — the door stopped descending entirely. Per-branch probes
+# showed control reaching the marker immediately before the scan **961 times** and
+# the markers inside it, after it, and after the whole enclosing `if` **zero**
+# times: the iteration left without entering the block or falling past it. The
+# player-side path was byte-identical to before at the time, and an A/B against
+# `git show HEAD:src/doors.cyr` pinned the change to this block.
+#
+# The unit bug below was NOT the cause — it was found and fixed separately, and
+# the inline form still failed afterwards with identical logic and identical
+# units while this helper form passes the same suite 380/380. That A/B is the
+# evidence; re-run it by pasting the body back inline.
+#
+# Stated as an observation, not a diagnosis: it has NOT been minimised to a
+# standalone reproducer (the obvious small shape — nested `for` + `continue` —
+# behaves correctly in isolation), so whether this is a cycc codegen bug in a
+# large function or something subtler about this specific nesting is unresolved.
+# See docs/development/state.md "Known issues". As a function it is also better
+# code, so the workaround costs nothing.
+#
+# `ceil_next` is the ceiling height AFTER the step being considered, so the caller
+# does the DOOR_SPEED arithmetic and this stays a pure predicate.
+#
+# TF_SOLID is the whole filter and it is sufficient on its own: a dead monster is
+# re-flagged TF_ACTIVE|TF_CORPSE (SOLID cleared) so a corpse cannot hold a door
+# open forever, and projectiles are TF_ACTIVE|TF_MISSILE so a rocket in the
+# doorway is ignored. The flag tests come BEFORE thing_sector because that call
+# can cost a BSP descent on a cold cache entry, and a chasing monster invalidates
+# its own entry on every move — so the descents land exactly when things move.
+# UNITS, and this is the easy thing to get wrong here: sector floor/ceiling
+# heights in `map_sectors` are RAW map units (which is why the player check
+# compares against a bare PLAYER_HEIGHT = 56), while the thing struct's height
+# at offset 88 is 16.16 FIXED (56 << 16). Comparing them directly makes the
+# predicate always true — every solid thing blocks every door at any gap.
+# Shift the thing height down to raw rather than scaling the gap up, so the
+# comparison stays in the same units the rest of this file uses.
+fn door_thing_blocks(sec, ceil_next): i64 {
+    var tfloor = load64(map_sectors + sec * MAP_SECTOR_SIZE);
+    var tgap = ceil_next - tfloor;
+    for (var ti = 0; ti < thing_count; ti += 1) {
+        var tfl = thing_flags(ti);
+        if ((tfl & TF_ACTIVE) != 0) {
+            if ((tfl & TF_SOLID) != 0) {
+                if (thing_sector(ti) == sec) {
+                    if (tgap < (thing_height(ti) >>> 16)) { return 1; }
+                }
+            }
+        }
+    }
+    return 0;
+}
+
 fn doors_tick(): i64 {
     for (var i = 0; i < door_count; i += 1) {
         var sec = door_sector(i);
@@ -368,13 +424,33 @@ fn doors_tick(): i64 {
             # Remotely-triggered tag doors have no special on their own lines,
             # so without this a door closing on the player was a quit-only
             # softlock (no inside "use", no crush damage to die from).
-            # (Monsters in doorways still get pinned — thing-side obstruction
-            # rides the F15 thing-sector cache; roadmap.)
             var pblocked = 0;
             if (player_find_sector() == sec) {
                 var dfloor = load64(map_sectors + sec * MAP_SECTOR_SIZE);
                 if ((h - DOOR_SPEED) - dfloor < PLAYER_HEIGHT) { pblocked = 1; }
             }
+            # RC-G1 (v0.35.1) — the same test for THINGS, which until now only
+            # the player got. A monster caught in a closing door was not crushed
+            # (this engine has no crush damage) and could not leave: any exit
+            # crosses the door's two-sided linedef, and move_check_linedef's
+            # ceiling test sees a gap of 0 < its height and refuses. It was
+            # entombed permanently, still solid, still counted in the census.
+            #
+            # Vanilla semantics are REVERSE, not crush: T_VerticalDoor's DOWN
+            # case calls T_MovePlane with crush=false, so a blocked normal door
+            # restores the plane and flips direction. Damage comes only from a
+            # real crushing-ceiling thinker, which doom does not implement — so
+            # "crush/reverse" resolves to reverse-only here, deliberately.
+            #
+            # TF_SOLID is the filter and it does the right thing on its own:
+            # corpses are re-flagged TF_ACTIVE|TF_CORPSE at death (things.cyr,
+            # SOLID cleared) so a dead body cannot hold a door open forever, and
+            # projectiles are TF_ACTIVE|TF_MISSILE so a rocket in the doorway is
+            # ignored. The flag test comes BEFORE thing_sector on purpose: that
+            # call can cost a BSP descent on a cold cache entry, and a chasing
+            # monster invalidates its own entry every move, so the descents land
+            # exactly when things are moving.
+            if (pblocked == 0) { pblocked = door_thing_blocks(sec, h - DOOR_SPEED); }
             if (pblocked == 1) {
                 door_set_state(i, DS_OPENING);
             } else {

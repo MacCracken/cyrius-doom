@@ -58,42 +58,37 @@ gated on a PPM A/B. Nothing below is.
 monsters do, where things sit in z, and how a level ends. The PPM A/B gate stops being sufficient here, so
 each release below names a gameplay gate instead.
 
-### v0.35.1 — Monster movement: doors, chase, and the ledge cases
+### v0.35.1a — Monster movement: the 8-direction chase
 
-**Re-slotted from v0.35.0.** That cut shipped the two items about how a monster decides it has SEEN
-you (OP-5b, EF-2); these are about how it MOVES. They were split because four behaviour changes
-behind one fingerprint diff makes any unexpected delta ambiguous about its cause.
-
-**Re-grounded against the source 2026-08-01, not against the previous version of this file** — which
-is how **PRE-1** surfaced. Each row below now carries file:line anchors and the facts that change how
-it should be scoped; two roadmap claims needed correcting (RC-G1's "crush/reverse" is reverse-only in
-vanilla, and the resolver RC-G1 was slotted to reuse is sound in shape but stale in practice).
+**v0.35.1 shipped the two REPAIRS from this row** (PRE-1 stale thing-sector cache, RC-G1 door
+obstruction) — see [`completed-phases.md`](completed-phases.md). What remains is the behaviour
+rewrite, deliberately alone: putting it behind the same `--ai-probe` fingerprint diff as two bug
+fixes would have made any unexpected delta ambiguous about its cause, which is the same reason
+v0.35.0 split sight from movement.
 
 | # | Item | Detail |
 |---|------|--------|
-| **PRE-1** ⚠ | **Reset the thing-sector cache on map load — a LIVE bug, not just a prerequisite** | **Ships broken in v0.35.0.** `thing_sec_cache` ([things.cyr:163](../../src/things.cyr#L163)) has no reset path, and `things_spawn_from_map` writes positions **raw** ([:354-355](../../src/things.cyr#L354)), bypassing the only invalidator. After a level change, thing *i* keeps the previous map's sector — and the v0.35.0 REJECT pre-test ([:789](../../src/things.cyr#L789)) treats a set bit as authoritative, so the monster **never scans again**. Measured on the shipped binary: E1M1→E1M2 leaves **36 of 41 monsters stale with 1,176 false-blind (monster, player-sector) pairs**; every consecutive shareware transition is affected (E1M4→E1M5 91/91 stale, 1,242 pairs). Invisible to every current gate — `--ppm`, `--ai-probe` and the whole suite each load exactly one map. Fix: clear all `THING_MAX` entries in `things_spawn_from_map`, plus invalidate after the two raw projectile-spawn writes ([:1241](../../src/things.cyr#L1241), [:1325](../../src/things.cyr#L1325)). **Must land before or with RC-G1**, which promotes `thing_sector` from an optimisation hint to a correctness input — but it is worth shipping on its own merits first. |
-| RC-G1 | **Monsters aren't obstruction-checked by closing doors** | Only the player is — [doors.cyr:373-377](../../src/doors.cyr#L373) tests `player_find_sector() == sec` and nothing else; the code says so itself two lines above. Consequence today: a door closes on a monster, which is **not** damaged (there is no crush damage anywhere) and cannot leave, because any exit crosses the door linedef and `move_check_linedef`'s ceiling test sees `0 < PLAYER_HEIGHT` — entombed permanently, still solid, still counted. The per-thing sector resolver **already shipped** in v0.35.0, so this is door-side wiring — but see **PRE-1**, and note vanilla semantics are **reverse, not crush** (`T_VerticalDoor`'s down case passes `crush=false`), so "crush/reverse" resolves to reverse-only until a crusher thinker exists. Two sub-decisions the source forces: thing height at offset 88 is written `56 << 16` at [things.cyr:404](../../src/things.cyr#L404) and **never read** (no accessor exists), and the loop must pre-filter on `TF_SOLID` so corpses don't hold doors open forever. |
-| F331-4 | **`P_NewChaseDir` 8-direction chase** | Chasers head straight at the player via `fixed_atan2` with a single axis-slide fallback ([things.cyr:853-870](../../src/things.cyr#L853)); vanilla's 8-direction walk with dogleg fallbacks rounds corners and paces on ledges. `grep movedir\|movecount src/` is **empty** — there is no direction state of any kind on a thing, and the thing struct is exactly full at stride 128, so the two new fields need the parallel-array precedent `thing_sec_cache` set. The v0.35.0 baseline shows the symptom as a number: **E1M1 `move_blocked=247` over 350 ticks**. **Three facts to hold fixed or the gate is unreadable**: (a) `MONSTER_CHASE_SPEED = 65536` is 1 unit/tic against vanilla's 8 — monsters move ~8× slow, which dominates any `move_blocked` reading, and changing it must be a separately-measured step; (b) **monsters cannot open doors** (`doors_walk_trigger` has two callers, both in `player.cyr`), so some fraction of those 247 blocked ticks is door-shaped and will not respond to chase-direction work at all; (c) an 8-way dispatch must be an if/else ladder or table, **never a `switch`** — sparse/out-of-order labels are the documented cycc return-address smash that bit `thing_animate`. Also: `p_random` is a shared LCG sequence, so a random-direction fallback shifts every downstream roll and will move `ranged=` for that reason alone. |
-| F331-2 | **Vanilla ledge-glide z** | tmfloorz contacted-line tracking replacing the instant z-snap ([player.cyr:631-636](../../src/player.cyr#L631)) + the drop-off escape rule ([player.cyr:258-298](../../src/player.cyr#L258)) it exists to cure. **Recommend deferring to v0.35.1b and doing it there**: it rewrites the collision core both the player and every monster move through, `move_check_position` currently returns a bare 0/1 and accumulates nothing, and monsters have nowhere to *store* a floorz until RC-S6 populates thing-z — so v0.35.1b is the cheaper ordering. It also deletes a rule that exists because of a real field bug (the armor-platform wedge, [player.cyr:122-128](../../src/player.cyr#L122)), and **neither `--ai-probe` nor the PPM A/B can see a regression here** — the probe never moves the player and `--ppm` renders a static viewpoint. Needs its own accumulator asserts. Lowest value of the four; drop if the cut gets heavy. |
+| F331-4 | **`P_NewChaseDir` 8-direction chase** | Chasers head straight at the player via `fixed_atan2` with a single axis-slide fallback ([things.cyr:853-870](../../src/things.cyr#L853)); vanilla's 8-direction walk with dogleg fallbacks rounds corners and paces on ledges. `grep movedir\|movecount src/` is **empty** — there is no direction state of any kind on a thing, and the thing struct is exactly full at stride 128, so the two new fields need the parallel-array precedent the `thing_sec_cache` set. Baseline symptom: **E1M1 `move_blocked=247` over 350 ticks**. |
 
-**Gate**: `--ai-probe` fingerprint vs the v0.35.0 baseline — `move_blocked` must fall substantially
-and wake/chase counts must not regress; plus a WAD-gated assert that a monster in a closing door
-reverses it.
+**Three facts to hold fixed or the gate is unreadable** (each verified against the source, not assumed):
 
-Three gate details worth pinning before the cut starts, because each one can make the gate lie:
+1. `MONSTER_CHASE_SPEED = 65536` is **1 map unit/tic** against vanilla's 8 — monsters move ~8× slow,
+   which dominates any `move_blocked` reading. Changing it must be a separately-measured step.
+2. **Monsters cannot open doors** — `doors_walk_trigger` has exactly two callers, both in
+   `player.cyr`, where vanilla's `P_Move` opens them. Some fraction of those 247 blocked ticks is
+   door-shaped and will not respond to chase-direction work at all.
+3. An 8-way dispatch must be an **if/else ladder or a table, never a `switch`** — sparse/out-of-order
+   labels are the documented cycc return-address smash that bit `thing_animate`.
 
-1. **The 247 baseline is prose in this file only.** No fingerprint capture is committed anywhere in
-   the repo, so the "before" side must be regenerated from a v0.35.0 build. Capture it *first*.
-2. **Read the fields differently.** `wakes` and `chases` are hard invariants (neither path consumes
-   `p_random`), `melee` is position-driven and *will* move as pathing changes, and `ranged` moves from
-   the shared-LCG shift alone — so it must be explained, not asserted. The 9 idle maps are the cheap
-   control: idle monsters never reach `STATE_CHASE`, so those fingerprints must stay byte-identical.
-3. **PRE-1 needs its own gate, and the arc's gate cannot provide it** — `--ai-probe` loads one map.
-   It needs a two-map assert: resolve `thing_sector(i)` on one map, load a second, assert it equals
-   `map_point_sector(thing_x(i), thing_y(i))`. Mutation proof: revert the reset, the assert fails.
-   `ai_stats_reset()` also exists at [things.cyr:676](../../src/things.cyr#L676) with **zero callers** —
-   today's totals are correct only because the probe loop is the sole thing ticking the world, so any
-   future pre-probe warm-up would silently pollute them.
+Also: `p_random` is a single shared LCG, so a random-direction fallback shifts every downstream roll
+and will move `ranged=` for that reason alone — it must be explained, not asserted.
+
+**Gate**: `--ai-probe` fingerprint vs the v0.35.1 baseline (v0.35.1 left it byte-identical to v0.35.0, so either is valid as "before"). `move_blocked` must fall substantially;
+`wakes`/`chases` are hard invariants (neither path consumes `p_random`); `melee` is position-driven
+and *will* move; the 9 idle maps are the control and must stay byte-identical. **Capture the "before"
+side first** — no fingerprint is committed anywhere in the repo, so the 247 figure is prose until
+regenerated. `ai_stats_reset()` ([things.cyr:676](../../src/things.cyr#L676)) still has **zero
+callers**; today's totals are correct only because the probe loop is the sole thing ticking the world.
 
 ### v0.35.1b — Real thing-z
 
@@ -104,7 +99,7 @@ Three gate details worth pinning before the cut starts, because each one can mak
 | — | **Precise missile-vs-wall trace** | z-aware, replacing the `player_check_position` approximation that lets a rocket clip on tall steps in 2.5D. |
 | F331-2 | **Vanilla ledge-glide z** | tmfloorz contacted-line tracking replacing the instant z-snap + drop-off escape-rule cure. Lowest value of the four; drop if the cut gets heavy. |
 
-**Gate**: after v0.35.0. Exit: mutation-proven thing-struct layout asserts (the v0.34.5 `MASKED_ENTRY`
+**Gate**: after v0.35.1a. Exit: mutation-proven thing-struct layout asserts (the v0.34.5 `MASKED_ENTRY`
 sentinel pattern — a missed offset here is silent corruption), plus a WAD-gated regression that a monster
 below a sill no longer sees over it.
 
