@@ -139,12 +139,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The binary is *larger*, not smaller: 477,072 → **518,032 B (+8.6 %)**.
 
   **Bisected to one pass — LASE apply.** `CYRIUS_IR=3 CYRIUS_LASE_OFF=1` restores **366 / 366**;
-  `CYRIUS_FOLD_OFF=1` changes nothing. A **second, separable defect** surfaced while bisecting:
-  `CYRIUS_LASE_OFF=1` is **silently ignored when `CYRIUS_FOLD_OFF=1` is also set** — cycc's own `ir:`
-  line still reports `756 LASE (2649B applied)`, byte-identical to `FOLD_OFF` alone. That is a
-  recurrence of the class 6.5.2 fixed (`_read_env`'s shared `_env_scratch` buffer rendering the IR
-  knobs inert) and it makes multi-knob bisection upstream untrustworthy. Both are cyrius-side; default
-  codegen is unaffected and is what every gate above was measured on. Roadmap **HOLD-C stays closed**.
+  `CYRIUS_FOLD_OFF=1` changes nothing. Default codegen is unaffected and is what every gate above was
+  measured on. **Filed upstream** as
+  `cyrius/docs/development/issues/2026-08-01-cyrius-doom-ir3-lase-miscompiles-doom.md`, re-verified
+  against the installed `cycc 6.5.4` immediately before filing. Roadmap **HOLD-C stays closed**.
+
+  **A second claim made here has been WITHDRAWN.** Three runs during the bisect appeared to show
+  `CYRIUS_LASE_OFF=1` being ignored when `CYRIUS_FOLD_OFF=1` was also set, and it was written up as an
+  upstream `_read_env` defect. It **does not reproduce** — 22 consecutive runs afterwards, in a normal
+  shell and under `env -i`, honoured both knobs, with the installed `cycc` byte-identical throughout
+  (sha256 `41eb0b19…`). No cause was established. The upstream filing written on it was deleted rather
+  than left in cyrius's tracker; the observation is recorded here as unexplained, not as a known bug.
 
 ## [0.35.0] - 2026-07-27 — monster sight + wake: REJECT, stagger, and the front-180 gate
 

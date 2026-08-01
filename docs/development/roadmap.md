@@ -248,12 +248,18 @@ the mabda dep + a dmabuf/EGL path.
 > (`pistol fires with ammo`, `pistol deducts 1 bullet`, `fist always fires` — each getting 0 where 1 is
 > expected), so `player_try_fire` returns the wrong value under applied LASE.
 >
-> **Second, separable defect found while bisecting**: `CYRIUS_LASE_OFF=1` is **silently ignored when
-> `CYRIUS_FOLD_OFF=1` is also set** — the compiler's own `ir:` line reports `756 LASE (2649B applied)`
-> with both knobs set, byte-for-byte the same as `FOLD_OFF` alone. That is a recurrence of the class
-> cyrius **6.5.2** fixed (`_read_env`'s shared `_env_scratch` making the IR knobs inert), and it means
-> multi-knob bisection is currently untrustworthy upstream. **Both worth filing on cyrius**; until the
-> LASE defect is fixed, `CYRIUS_IR=3` must not be used for a doom release build.
+> **A second claim was made here and is WITHDRAWN — recorded so it is not re-derived.** During the
+> bisect, three runs appeared to show `CYRIUS_LASE_OFF=1` being ignored whenever `CYRIUS_FOLD_OFF=1`
+> was also set, and that was written up as an upstream `_read_env` defect. It **does not reproduce**:
+> 22 consecutive runs afterwards, in both a normal shell and under `env -i`, honoured both knobs. The
+> installed `cycc` was byte-identical throughout (sha256 `41eb0b19…`, mtime 2026-07-30), so no
+> toolchain change explains the flip and **no cause was established**. Treat the earlier observation as
+> unexplained, not as a known bug; the upstream filing that had been written on it was deleted rather
+> than left in cyrius's tracker.
+>
+> **Filed upstream**: the LASE defect above is
+> `cyrius/docs/development/issues/2026-08-01-cyrius-doom-ir3-lase-miscompiles-doom.md`, re-verified
+> immediately before filing. Until it is fixed, `CYRIUS_IR=3` must not be used for a doom release build.
 
 ### HOLD-D — post-v1.0.0
 
