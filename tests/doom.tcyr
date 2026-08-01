@@ -550,6 +550,92 @@ fn main() {
     assert(thing_health(0) < 200, "rocket splash damaged the target");
 
     # ============================================================
+    # ============================================================
+    test_group("F331-4: vanilla 8-direction chase (v0.35.1a)");
+    # ============================================================
+    # The direction tables are the load-bearing part: a sign error in one entry
+    # sends monsters away from the player in one octant only, which no aggregate
+    # counter would catch. Assert every direction explicitly.
+    assert_eq(chase_dir_dx(DI_EAST),  65536, "EAST dx = +1");
+    assert_eq(chase_dir_dy(DI_EAST),      0, "EAST dy =  0");
+    assert_eq(chase_dir_dx(DI_NORTH),     0, "NORTH dx =  0");
+    assert_eq(chase_dir_dy(DI_NORTH), 65536, "NORTH dy = +1");
+    assert_eq(chase_dir_dx(DI_WEST), 0 - 65536, "WEST dx = -1");
+    assert_eq(chase_dir_dy(DI_WEST),      0, "WEST dy =  0");
+    assert_eq(chase_dir_dx(DI_SOUTH),     0, "SOUTH dx =  0");
+    assert_eq(chase_dir_dy(DI_SOUTH), 0 - 65536, "SOUTH dy = -1");
+    # Diagonals use vanilla's 47000, deliberately not 1/sqrt(2) rounded (46341).
+    assert_eq(chase_dir_dx(DI_NORTHEAST), 47000, "NE dx = +0.717");
+    assert_eq(chase_dir_dy(DI_NORTHEAST), 47000, "NE dy = +0.717");
+    assert_eq(chase_dir_dx(DI_SOUTHWEST), 0 - 47000, "SW dx = -0.717");
+    assert_eq(chase_dir_dy(DI_SOUTHWEST), 0 - 47000, "SW dy = -0.717");
+    assert_eq(chase_dir_dx(DI_NODIR), 0, "NODIR dx = 0 (never moves)");
+    assert_eq(chase_dir_dy(DI_NODIR), 0, "NODIR dy = 0 (never moves)");
+
+    # Opposites must be exact — `turnaround` gates the whole search, so an
+    # off-by-one here silently lets a monster reverse when vanilla forbids it.
+    assert_eq(chase_dir_opposite(DI_EAST),  DI_WEST,  "opposite(EAST) = WEST");
+    assert_eq(chase_dir_opposite(DI_NORTH), DI_SOUTH, "opposite(NORTH) = SOUTH");
+    assert_eq(chase_dir_opposite(DI_NORTHEAST), DI_SOUTHWEST, "opposite(NE) = SW");
+    assert_eq(chase_dir_opposite(DI_SOUTHEAST), DI_NORTHWEST, "opposite(SE) = NW");
+    assert_eq(chase_dir_opposite(DI_NODIR), DI_NODIR, "opposite(NODIR) = NODIR");
+
+    # chase_new_dir must pick the diagonal that closes BOTH axes. Player to the
+    # north-east of the monster => NORTHEAST.
+    thing_count = 0;
+    var cdm = things;
+    store64(cdm, 0); store64(cdm + 8, 0);
+    store64(cdm + 32, TTYPE_DEMON); store64(cdm + 40, STATE_CHASE); store64(cdm + 48, 60);
+    store64(cdm + 56, CAT_MONSTER); store64(cdm + 80, 20 << 16);
+    store64(cdm + 96, 0); store64(cdm + 104, TF_ACTIVE | TF_SOLID | TF_SHOOTABLE);
+    store64(cdm + 112, 0); store64(cdm + 120, 0);
+    thing_count = 1;
+    # thing_move_clear also does thing-vs-PLAYER solidity, so the player globals
+    # must be set explicitly here — left stale from an earlier group they can
+    # overlap a monster parked at the origin and block every direction.
+    player_x = 400 << 16; player_y = 400 << 16;
+    thing_movedir_set(0, DI_NODIR); thing_movecount_set(0, 0);
+    assert_eq(chase_new_dir(0, 400 << 16, 400 << 16), 1, "chase_new_dir moves toward a NE player");
+    assert_eq(thing_movedir_get(0), DI_NORTHEAST, "... and commits to NORTHEAST");
+    assert(thing_x(0) > 0, "... x advanced east");
+    assert(thing_y(0) > 0, "... y advanced north");
+    # Facing must follow the walked direction — it feeds the sprite AND other
+    # monsters' ai_in_front FOV gate.
+    assert_eq(thing_angle(0), (DI_NORTHEAST * 128) & ANG_MASK, "... angle faces NE");
+
+    # A pure-west target must give WEST, not a diagonal: deltay is inside the
+    # 10-unit epsilon, so the north/south candidate is DI_NODIR.
+    store64(cdm, 0); store64(cdm + 8, 0);
+    player_x = 0 - (400 << 16); player_y = 0;
+    thing_movedir_set(0, DI_NODIR); thing_movecount_set(0, 0);
+    assert_eq(chase_new_dir(0, 0 - (400 << 16), 0), 1, "chase_new_dir moves toward a due-west player");
+    assert_eq(thing_movedir_get(0), DI_WEST, "... and commits to WEST (no spurious diagonal)");
+
+    # A due-NORTH target must give NORTH via the CARDINAL path. This case exists
+    # because a mutation audit found the north/south candidate could be inverted
+    # (deltay > eps => SOUTH) and still pass everything else: the diagonal branch
+    # derives its direction from the deltax/deltay signs directly, so it never
+    # reads that assignment, and the only other cardinal case here was due-west.
+    store64(cdm, 0); store64(cdm + 8, 0);
+    player_x = 0; player_y = 400 << 16;
+    thing_movedir_set(0, DI_NODIR); thing_movecount_set(0, 0);
+    assert_eq(chase_new_dir(0, 0, 400 << 16), 1, "chase_new_dir moves toward a due-north player");
+    assert_eq(thing_movedir_get(0), DI_NORTH, "... and commits to NORTH (cardinal path, not SOUTH)");
+    assert(thing_y(0) > 0, "... y advanced north, not south");
+
+    # ... and due-SOUTH, the mirror, so neither sign can be flipped unnoticed.
+    store64(cdm, 0); store64(cdm + 8, 0);
+    player_x = 0; player_y = 0 - (400 << 16);
+    thing_movedir_set(0, DI_NODIR); thing_movecount_set(0, 0);
+    assert_eq(chase_new_dir(0, 0, 0 - (400 << 16)), 1, "chase_new_dir moves toward a due-south player");
+    assert_eq(thing_movedir_get(0), DI_SOUTH, "... and commits to SOUTH");
+    assert(thing_y(0) < 0, "... y advanced south, not north");
+
+    # The commitment interval is what lets a monster round a corner instead of
+    # re-aiming every tick; it must be armed on a successful walk.
+    assert_gte(thing_movecount_get(0), 0, "a successful walk arms movecount");
+    assert_lt(thing_movecount_get(0), 16, "... bounded by p_random_range(16)");
+
     test_group("combat: melee wind-up (F-G1 regression)");
     # ============================================================
     # A chasing monster in melee range with clear LOS must ARM a 15-tick
@@ -586,9 +672,19 @@ fn main() {
     # With no map loaded, collision passes everywhere, so a chaser must still
     # close distance on open ground — i.e. the new check must not freeze it.
     thing_count = 0;
-    var mv = things;                          # imp 200 units ahead, chasing
+    var mv = things;                          # demon 200 units ahead, chasing
+    # MELEE-ONLY on purpose (v0.35.1a). This was TTYPE_IMP, and the
+    # "still chasing" assert below was silently RNG-POSITION-DEPENDENT: imps are
+    # ranged, and the ranged arm fires on `p_random() >= mchance` with
+    # mchance = dist-64 = 136 at 200 units — roughly a coin flip. Demonstrated by
+    # holding everything fixed and varying only how many p_random() calls precede
+    # the tick: 4 of 10 offsets ended in STATE_ATTACK instead of STATE_CHASE.
+    # It passed only because upstream groups happened to leave the shared LCG
+    # somewhere favourable, and F331-4's direction search consumes p_random, which
+    # moved it. A demon has no ranged branch, so the assertion now tests the
+    # movement it claims to test, deterministically.
     store64(mv, 200 << 16); store64(mv + 8, 0);
-    store64(mv + 32, TTYPE_IMP); store64(mv + 40, STATE_CHASE); store64(mv + 48, 60);
+    store64(mv + 32, TTYPE_DEMON); store64(mv + 40, STATE_CHASE); store64(mv + 48, 60);
     store64(mv + 56, CAT_MONSTER); store64(mv + 80, 20 << 16);
     store64(mv + 96, 0);
     store64(mv + 104, TF_ACTIVE | TF_SOLID | TF_SHOOTABLE); store64(mv + 112, 0);

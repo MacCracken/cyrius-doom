@@ -7,6 +7,96 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **F331-4 — vanilla 8-direction chase (`P_NewChaseDir`), replacing the per-tick atan2 beeline.**
+  Clean-room from the documented algorithm. A chaser used to recompute the exact bearing to the player
+  *every tick* and walk straight at it, with a single axis slide as the only fallback
+  ([things.cyr:853-870](src/things.cyr#L853) before this) — no persistent direction, no commitment
+  interval, no turnaround, no reroll. `grep movedir\|movecount src/` returned nothing: a thing had no
+  direction state at all. That beelines into corners and cannot round them.
+
+  Vanilla instead picks one of 8 compass directions, commits for a randomised number of tics, and
+  re-picks only when that expires or the move fails. The search is: the diagonal that closes both
+  axes → the two cardinals (preferring the longer axis, randomly swapping otherwise) → the previous
+  direction → all eight in a randomly-chosen rotation → the turnaround as a last resort.
+
+  **Measured, on staged E1M8 engagements over 350 ticks:**
+
+  | staging | `move_blocked` before | after | wakes | chases |
+  |---|---|---|---|---|
+  | E1M8 @ 608,6544 | 1834 | **22** | 13 → 13 | 13 → 13 |
+  | E1M8 @ 576,6608 | 1752 | **21** | 12 → 12 | 12 → 12 |
+  | E1M8 @ 688,6480 | 1614 | **3** | 15 → 15 | 15 → 15 |
+  | E1M8 @ 608,6368 | 1504 | **20** | 15 → 15 | 15 → 15 |
+
+  **−98.8%**, with the hard invariants holding: `wakes`, `chases` and `fov_rejects` are unchanged on
+  every staging (none of those paths consumes `p_random`). `melee` and `ranged` move, and are expected
+  to — the first is position-driven, the second rides the shared LCG, which the direction search now
+  perturbs.
+
+  **The win is NOT universal, and the exceptions are the interesting part.** Sweeping the same nine
+  maps again on the new binary:
+
+  | staging | before | after | |
+  |---|---|---|---|
+  | E1M4 @ 1792,1728 | 621 | **518** | −17% |
+  | E1M5 @ −1152,864 | 561 | **577** | **+3% — slightly worse** |
+  | E1M5 @ −1152,800 | 559 | **575** | **+3% — slightly worse** |
+
+  E1M5 was diagnosed rather than dismissed: its two chasers sit at **exactly the same coordinates at
+  tick 1 and at tick 350 — they never move at all.** They spawn at (−1392,704) and (−1408,672), which
+  is **35.8 units apart against a 40-unit radius sum: overlapping by 4.2 units at spawn.**
+  `thing_move_clear`'s thing-vs-thing AABB pass then rejects every destination, because any move keeps
+  them overlapping. No direction search can resolve that, so the ±3% there is RNG-shift noise on a
+  pair that was already 100% blocked. **A separate bug — monsters that spawn inside each other's radii
+  are permanently immobile — is filed to the roadmap rather than folded in here.** The honest summary
+  is: this fixes *beeline-into-a-corner* blocking, which is what it set out to fix, and does nothing
+  for monsters that are walled in or wedged, which was never within its reach.
+
+  **The roadmap's headline number did not survive contact.** It recorded "E1M1 `move_blocked=247` over
+  350 ticks" as the symptom; at the coordinates the v0.35.0 CHANGELOG recorded, E1M1 measures
+  **`move_blocked=0`** — no fingerprint was ever committed, so the figure was prose. The staging above
+  was found by sweeping every monster's own position on all nine maps and ranking by `move_blocked`,
+  which is now the documented way to pick a staging for this gate.
+
+  - Storage is **two parallel arrays**, not new struct fields: the thing struct is exactly full at
+    stride 128, and growing it is the layout-change class v0.34.5 needed 18 sentinel asserts to make
+    safe. Same precedent as `thing_sec_cache` — and, like it, they are **reset in
+    `things_spawn_from_map`**, or a monster would inherit the previous map's committed direction.
+  - The 8-way dispatch is an **if/else ladder, never a `switch`** — sparse/out-of-order case labels
+    are the documented cycc return-address smash that bit `thing_animate`.
+  - Diagonals use vanilla's **47000/65536 ≈ 0.717**, deliberately not `1/sqrt(2)` rounded (46341).
+  - `chase_try_walk` is vanilla's `P_TryWalk` **minus the door-opening half** — doom's monsters cannot
+    open doors (`doors_walk_trigger` is player-only), so some blocked ticks are door-shaped and will
+    not respond to this work at all. That is a separate roadmap item, not a shortfall of this one.
+
+### Fixed
+
+- **A pre-existing test was silently RNG-position-dependent, and this change exposed it.** The F-G4
+  assertion `still chasing (200u > attack range)` used a **TTYPE_IMP**, which is *ranged* — the ranged
+  arm fires on `p_random() >= mchance` with `mchance = dist-64 = 136` at 200 units, roughly a coin
+  flip. It passed only because upstream groups happened to leave the shared LCG somewhere favourable.
+  Demonstrated by holding everything fixed and varying only how many `p_random()` calls precede the
+  tick: **4 of 10 offsets ended in `STATE_ATTACK` instead of `STATE_CHASE`.** Switched to a melee-only
+  **TTYPE_DEMON**, which has no ranged branch, so the assertion now tests the movement it claims to
+  test, deterministically.
+
+### Verification
+
+- **Tests 380 → 414 (+34).** New `F331-4` group covers all 8 direction vectors, every opposite pair,
+  the diagonal pick, both cardinal picks and the commitment interval. **Mutation-proven, and the first
+  pass was not good enough**: of 5 mutants, 4 died immediately but **inverting the north/south
+  candidate survived the whole suite** — the diagonal branch derives its direction from the
+  deltax/deltay signs directly, so it never reads that assignment, and the only other cardinal case
+  was due-west. Due-north and due-south cases were added specifically to kill it; final battery 5/5.
+- **9 idle maps byte-identical** (630 fingerprint lines, zero diff) — idle monsters never reach
+  `STATE_CHASE`, so this is the control proving the rewrite is inert outside its trigger.
+- **14/14 `--ppm` captures byte-identical** — this cut does not touch the render path.
+- fuzz ×7 clean; `cyrius deps --verify` 36/0; both targets build clean. Binary 477,072 → **481,264 B**
+  (agnos 467,824).
+
+
 ## [0.35.1] - 2026-08-01 — two monster-side repairs, and the 6.5.4 toolchain
 
 Continues the gameplay arc with the half of v0.35.1 that is **repair**. The roadmap row also carried

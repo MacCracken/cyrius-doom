@@ -58,37 +58,26 @@ gated on a PPM A/B. Nothing below is.
 monsters do, where things sit in z, and how a level ends. The PPM A/B gate stops being sufficient here, so
 each release below names a gameplay gate instead.
 
-### v0.35.1a — Monster movement: the 8-direction chase
+### v0.35.1c — Monsters that spawn overlapping are permanently immobile
 
-**v0.35.1 shipped the two REPAIRS from this row** (PRE-1 stale thing-sector cache, RC-G1 door
-obstruction) — see [`completed-phases.md`](completed-phases.md). What remains is the behaviour
-rewrite, deliberately alone: putting it behind the same `--ai-probe` fingerprint diff as two bug
-fixes would have made any unexpected delta ambiguous about its cause, which is the same reason
-v0.35.0 split sight from movement.
+**Found 2026-08-01 while gating F331-4**, by diagnosing the one staging where the 8-direction chase
+did *not* help instead of dismissing it as noise.
 
-| # | Item | Detail |
-|---|------|--------|
-| F331-4 | **`P_NewChaseDir` 8-direction chase** | Chasers head straight at the player via `fixed_atan2` with a single axis-slide fallback ([things.cyr:853-870](../../src/things.cyr#L853)); vanilla's 8-direction walk with dogleg fallbacks rounds corners and paces on ledges. `grep movedir\|movecount src/` is **empty** — there is no direction state of any kind on a thing, and the thing struct is exactly full at stride 128, so the two new fields need the parallel-array precedent the `thing_sec_cache` set. Baseline symptom: **E1M1 `move_blocked=247` over 350 ticks**. |
+E1M5 spawns a former human at **(−1392, 704)** and an imp at **(−1408, 672)** — **35.8 units apart
+against a 40-unit radius sum, overlapping by 4.2 units before anything moves.**
+`thing_move_clear`'s thing-vs-thing AABB pass ([things.cyr](../../src/things.cyr)) rejects any
+destination that overlaps another solid thing, and every destination does, so **both monsters are
+immobile for the entire level** — they sit at identical coordinates at tick 1 and tick 350 while
+`sees_player=1` the whole time. It reads as two monsters ignoring you from across the room.
 
-**Three facts to hold fixed or the gate is unreadable** (each verified against the source, not assumed):
+No direction search can resolve it, which is why F331-4 measured **+3%** there against −98.8%
+elsewhere. The fix belongs in the collision predicate, not the AI: vanilla's `P_CheckPosition`
+tolerates a pre-existing overlap and only blocks a move that does not *reduce* it. Candidate rule:
+if the mover already overlaps that thing, allow the step when it increases centre distance.
 
-1. `MONSTER_CHASE_SPEED = 65536` is **1 map unit/tic** against vanilla's 8 — monsters move ~8× slow,
-   which dominates any `move_blocked` reading. Changing it must be a separately-measured step.
-2. **Monsters cannot open doors** — `doors_walk_trigger` has exactly two callers, both in
-   `player.cyr`, where vanilla's `P_Move` opens them. Some fraction of those 247 blocked ticks is
-   door-shaped and will not respond to chase-direction work at all.
-3. An 8-way dispatch must be an **if/else ladder or a table, never a `switch`** — sparse/out-of-order
-   labels are the documented cycc return-address smash that bit `thing_animate`.
-
-Also: `p_random` is a single shared LCG, so a random-direction fallback shifts every downstream roll
-and will move `ranged=` for that reason alone — it must be explained, not asserted.
-
-**Gate**: `--ai-probe` fingerprint vs the v0.35.1 baseline (v0.35.1 left it byte-identical to v0.35.0, so either is valid as "before"). `move_blocked` must fall substantially;
-`wakes`/`chases` are hard invariants (neither path consumes `p_random`); `melee` is position-driven
-and *will* move; the 9 idle maps are the control and must stay byte-identical. **Capture the "before"
-side first** — no fingerprint is committed anywhere in the repo, so the 247 figure is prose until
-regenerated. `ai_stats_reset()` ([things.cyr:676](../../src/things.cyr#L676)) still has **zero
-callers**; today's totals are correct only because the probe loop is the sole thing ticking the world.
+**Gate**: a WAD-gated assert that two monsters spawned inside each other's radii can separate; plus
+the E1M5 @ −1152,864 staging, whose `move_blocked` must fall from 577. Cheap to check, and it is now
+a committed staging rather than prose — see `scripts/ai-staging-sweep.sh`.
 
 ### v0.35.1b — Real thing-z
 

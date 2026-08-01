@@ -345,6 +345,16 @@ fn things_spawn_from_map(): i64 {
     if (thing_sec_cache != 0) {
         for (var sc = 0; sc < THING_MAX; sc += 1) { store64(thing_sec_cache + sc * 8, 0 - 1); }
     }
+    # F331-4 (v0.35.1a) — the chase arrays are the same class of process-lifetime
+    # parallel state as the sector cache above, and index by the same thing index,
+    # so they need the same reset: otherwise thing i on map 2 inherits map 1's
+    # committed walk direction and its remaining commitment interval.
+    if (thing_movedir != 0) {
+        for (var md = 0; md < THING_MAX; md += 1) { store64(thing_movedir + md * 8, DI_NODIR); }
+    }
+    if (thing_movecount != 0) {
+        for (var mn = 0; mn < THING_MAX; mn += 1) { store64(thing_movecount + mn * 8, 0); }
+    }
 
     for (var i = 0; i < map_num_things; i += 1) {
         if (thing_count >= THING_MAX) { break; }
@@ -530,6 +540,210 @@ fn thing_check_sight(mx, my, tx, ty): i64 {
 # ================================================================
 # Monster AI tick
 # ================================================================
+
+# ================================================================
+# F331-4 (v0.35.1a) — vanilla 8-direction chase (P_NewChaseDir)
+# ================================================================
+# Clean-room from the documented algorithm (Black Book ch. on AI + the
+# Unofficial Specs), not from id source.
+#
+# Before this, a chaser recomputed the exact bearing to the player EVERY tick
+# via fixed_atan2 and walked straight at it, with a single axis slide as the
+# only fallback. That beelines into corners and cannot round them: there was no
+# persistent direction, no commitment interval, no turnaround, no reroll.
+#
+# Vanilla instead picks one of 8 compass directions, commits to it for a
+# randomised number of tics (movecount), and only re-picks when that expires or
+# the move fails. The direction search is: try the diagonal that closes both
+# axes; then the two cardinals (preferring the LONGER axis, and randomly
+# swapping otherwise); then the previous direction; then all eight in a
+# randomly-chosen rotation order; then the turnaround as a last resort.
+#
+# Storage is TWO PARALLEL ARRAYS, not new struct fields: the thing struct is
+# exactly full at stride 128 (offsets 0..120 all taken), and growing it is the
+# layout-change class v0.34.5 needed 18 sentinel asserts to make safe. Same
+# precedent as `thing_sec_cache`.
+enum ChaseDir {
+    DI_EAST      = 0;
+    DI_NORTHEAST = 1;
+    DI_NORTH     = 2;
+    DI_NORTHWEST = 3;
+    DI_WEST      = 4;
+    DI_SOUTHWEST = 5;
+    DI_SOUTH     = 6;
+    DI_SOUTHEAST = 7;
+    DI_NODIR     = 8;
+    # Vanilla's "don't bother re-picking a cardinal unless the target is more
+    # than 10 units off that axis" threshold, in 16.16.
+    CHASE_AXIS_EPS = 655360;
+}
+
+var thing_movedir = 0;     # parallel array: current ChaseDir per thing
+var thing_movecount = 0;   # parallel array: tics left on that commitment
+
+fn chase_arrays_init(): i64 {
+    if (thing_movedir == 0) {
+        thing_movedir = alloc(THING_MAX * 8);
+        if (thing_movedir == 0) { return 0; }
+        for (var a = 0; a < THING_MAX; a += 1) { store64(thing_movedir + a * 8, DI_NODIR); }
+    }
+    if (thing_movecount == 0) {
+        thing_movecount = alloc(THING_MAX * 8);
+        if (thing_movecount == 0) { return 0; }
+        for (var b = 0; b < THING_MAX; b += 1) { store64(thing_movecount + b * 8, 0); }
+    }
+    return 1;
+}
+
+fn thing_movedir_get(idx): i64 {
+    if (chase_arrays_init() == 0) { return DI_NODIR; }
+    if (idx < 0) { return DI_NODIR; }
+    if (idx >= THING_MAX) { return DI_NODIR; }
+    return load64(thing_movedir + idx * 8);
+}
+fn thing_movedir_set(idx, d): i64 {
+    if (chase_arrays_init() == 0) { return 0; }
+    if (idx < 0) { return 0; }
+    if (idx >= THING_MAX) { return 0; }
+    store64(thing_movedir + idx * 8, d);
+    return 0;
+}
+fn thing_movecount_get(idx): i64 {
+    if (chase_arrays_init() == 0) { return 0; }
+    if (idx < 0) { return 0; }
+    if (idx >= THING_MAX) { return 0; }
+    return load64(thing_movecount + idx * 8);
+}
+fn thing_movecount_set(idx, c): i64 {
+    if (chase_arrays_init() == 0) { return 0; }
+    if (idx < 0) { return 0; }
+    if (idx >= THING_MAX) { return 0; }
+    store64(thing_movecount + idx * 8, c);
+    return 0;
+}
+
+# Per-direction unit velocity, 16.16. The diagonals use 47000/65536 ~= 0.717,
+# which is vanilla's value — deliberately NOT 1/sqrt(2) rounded (46341): the
+# whole engine's movement cadence is calibrated to the vanilla constant.
+# if/else ladder, NEVER a `switch`: sparse/out-of-order case labels are the
+# documented cycc return-address smash that bit thing_animate.
+fn chase_dir_dx(d): i64 {
+    if (d == DI_EAST)      { return  65536; }
+    if (d == DI_NORTHEAST) { return  47000; }
+    if (d == DI_NORTH)     { return      0; }
+    if (d == DI_NORTHWEST) { return 0 - 47000; }
+    if (d == DI_WEST)      { return 0 - 65536; }
+    if (d == DI_SOUTHWEST) { return 0 - 47000; }
+    if (d == DI_SOUTH)     { return      0; }
+    if (d == DI_SOUTHEAST) { return  47000; }
+    return 0;
+}
+fn chase_dir_dy(d): i64 {
+    if (d == DI_EAST)      { return      0; }
+    if (d == DI_NORTHEAST) { return  47000; }
+    if (d == DI_NORTH)     { return  65536; }
+    if (d == DI_NORTHWEST) { return  47000; }
+    if (d == DI_WEST)      { return      0; }
+    if (d == DI_SOUTHWEST) { return 0 - 47000; }
+    if (d == DI_SOUTH)     { return 0 - 65536; }
+    if (d == DI_SOUTHEAST) { return 0 - 47000; }
+    return 0;
+}
+
+# Opposite direction, or DI_NODIR for DI_NODIR.
+fn chase_dir_opposite(d): i64 {
+    if (d == DI_NODIR) { return DI_NODIR; }
+    return (d + 4) & 7;
+}
+
+# Try to step `idx` one unit along direction d. Returns 1 and moves on success.
+# This is vanilla's P_TryWalk minus the door-opening half — doom's monsters
+# cannot open doors (`doors_walk_trigger` is player-only), which is a separate
+# roadmap item and is why some blocked ticks will not respond to this work.
+fn chase_try_walk(idx, d): i64 {
+    if (d == DI_NODIR) { return 0; }
+    var cx = thing_x(idx);
+    var cy = thing_y(idx);
+    var nx = cx + fixed_mul(chase_dir_dx(d), MONSTER_CHASE_SPEED);
+    var ny = cy + fixed_mul(chase_dir_dy(d), MONSTER_CHASE_SPEED);
+    if (thing_move_clear(idx, nx, ny) == 0) { return 0; }
+    thing_set_x(idx, nx);
+    thing_set_y(idx, ny);
+    # Commit to this direction for a randomised interval, as vanilla does.
+    thing_movedir_set(idx, d);
+    thing_movecount_set(idx, p_random_range(16));
+    # Face the direction actually being walked, which is what the sprite and
+    # other monsters' ai_in_front FOV gate both read.
+    thing_set_angle(idx, (d * 128) & ANG_MASK);
+    return 1;
+}
+
+# P_NewChaseDir — pick and commit a new direction toward (px, py).
+# Returns 1 if the monster moved this tick, 0 if fully blocked.
+fn chase_new_dir(idx, px, py): i64 {
+    var cx = thing_x(idx);
+    var cy = thing_y(idx);
+    var olddir = thing_movedir_get(idx);
+    var turnaround = chase_dir_opposite(olddir);
+
+    var deltax = px - cx;
+    var deltay = py - cy;
+
+    # The two candidate cardinals that close each axis.
+    var d1 = DI_NODIR;
+    if (deltax > CHASE_AXIS_EPS) { d1 = DI_EAST; }
+    else { if (deltax < (0 - CHASE_AXIS_EPS)) { d1 = DI_WEST; } }
+    var d2 = DI_NODIR;
+    if (deltay > CHASE_AXIS_EPS) { d2 = DI_NORTH; }
+    else { if (deltay < (0 - CHASE_AXIS_EPS)) { d2 = DI_SOUTH; } }
+
+    # Straight diagonal first — it closes both axes at once.
+    if (d1 != DI_NODIR && d2 != DI_NODIR) {
+        var diag = DI_NORTHEAST;
+        if (deltay < 0) {
+            if (deltax > 0) { diag = DI_SOUTHEAST; } else { diag = DI_SOUTHWEST; }
+        } else {
+            if (deltax > 0) { diag = DI_NORTHEAST; } else { diag = DI_NORTHWEST; }
+        }
+        if (diag != turnaround) {
+            if (chase_try_walk(idx, diag) == 1) { return 1; }
+        }
+    }
+
+    # Prefer the LONGER axis; otherwise randomly swap, so a monster does not
+    # always resolve ties the same way and grind on the same corner.
+    var adx = deltax; if (adx < 0) { adx = 0 - adx; }
+    var ady = deltay; if (ady < 0) { ady = 0 - ady; }
+    if (p_random() > 200 || ady > adx) {
+        var swap = d1; d1 = d2; d2 = swap;
+    }
+    if (d1 == turnaround) { d1 = DI_NODIR; }
+    if (d2 == turnaround) { d2 = DI_NODIR; }
+
+    if (d1 != DI_NODIR) { if (chase_try_walk(idx, d1) == 1) { return 1; } }
+    if (d2 != DI_NODIR) { if (chase_try_walk(idx, d2) == 1) { return 1; } }
+
+    # No direct path — keep going the old way if that still works.
+    if (olddir != DI_NODIR) { if (chase_try_walk(idx, olddir) == 1) { return 1; } }
+
+    # Sweep all eight, in a randomly-chosen rotation so a stuck monster does not
+    # bias one way forever.
+    if ((p_random() & 1) != 0) {
+        for (var t1 = DI_EAST; t1 <= DI_SOUTHEAST; t1 += 1) {
+            if (t1 != turnaround) { if (chase_try_walk(idx, t1) == 1) { return 1; } }
+        }
+    } else {
+        for (var t2 = DI_SOUTHEAST; t2 >= DI_EAST; t2 -= 1) {
+            if (t2 != turnaround) { if (chase_try_walk(idx, t2) == 1) { return 1; } }
+        }
+    }
+
+    # Last resort: reverse.
+    if (turnaround != DI_NODIR) { if (chase_try_walk(idx, turnaround) == 1) { return 1; } }
+
+    thing_movedir_set(idx, DI_NODIR);
+    return 0;
+}
 
 enum MonsterConst {
     MONSTER_CHASE_SPEED = 65536;
@@ -874,24 +1088,18 @@ fn thing_ai_tick(idx): i64 {
         # core (player_check_position blocks solid walls z-independently and
         # closed doors via its ceiling-gap test). Try the diagonal; if blocked,
         # slide along a single axis so a monster can round a corner; else hold.
-        var ang = fixed_atan2(player_y - ty, player_x - tx);
-        var mx = fixed_mul(fixed_cos(ang), MONSTER_CHASE_SPEED);
-        var my = fixed_mul(fixed_sin(ang), MONSTER_CHASE_SPEED);
-        thing_set_angle(idx, ang);
-        if (thing_move_clear(idx, tx + mx, ty + my) == 1) {
-            thing_set_x(idx, tx + mx);
-            thing_set_y(idx, ty + my);
-        } else {
-            if (thing_move_clear(idx, tx + mx, ty) == 1) {
-                thing_set_x(idx, tx + mx);
-            } else {
-                if (thing_move_clear(idx, tx, ty + my) == 1) {
-                    thing_set_y(idx, ty + my);
-                } else {
-                    ai_stat_move_blocked += 1;
-                }
-            }
-        }
+        # F331-4 (v0.35.1a): vanilla 8-direction chase, replacing the per-tick
+        # atan2 beeline + single axis slide. Vanilla's A_Chase re-picks only
+        # when the commitment interval expires OR the committed move fails:
+        #   if (--movecount < 0 || !P_Move(actor)) P_NewChaseDir(actor);
+        # Committing for a few tics is what lets a monster round a corner
+        # instead of re-aiming into it every tick.
+        var mc = thing_movecount_get(idx) - 1;
+        thing_movecount_set(idx, mc);
+        var moved = 0;
+        if (mc >= 0) { moved = chase_try_walk(idx, thing_movedir_get(idx)); }
+        if (moved == 0) { moved = chase_new_dir(idx, player_x, player_y); }
+        if (moved == 0) { ai_stat_move_blocked += 1; }
 
         # In range + visible: arm the attack wind-up. This MUST be exclusive
         # with the give-up-timer reset below (via if/else): when this branch
