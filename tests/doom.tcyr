@@ -551,7 +551,7 @@ fn main() {
 
     # ============================================================
     # ============================================================
-    test_group("F331-4: vanilla 8-direction chase (v0.35.1a)");
+    test_group("F331-4: vanilla 8-direction chase (v0.35.2)");
     # ============================================================
     # The direction tables are the load-bearing part: a sign error in one entry
     # sends monsters away from the player in one octant only, which no aggregate
@@ -673,7 +673,7 @@ fn main() {
     # close distance on open ground — i.e. the new check must not freeze it.
     thing_count = 0;
     var mv = things;                          # demon 200 units ahead, chasing
-    # MELEE-ONLY on purpose (v0.35.1a). This was TTYPE_IMP, and the
+    # MELEE-ONLY on purpose (v0.35.2). This was TTYPE_IMP, and the
     # "still chasing" assert below was silently RNG-POSITION-DEPENDENT: imps are
     # ranged, and the ranged arm fires on `p_random() >= mchance` with
     # mchance = dist-64 = 136 at 200 units — roughly a coin flip. Demonstrated by

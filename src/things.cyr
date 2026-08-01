@@ -345,7 +345,7 @@ fn things_spawn_from_map(): i64 {
     if (thing_sec_cache != 0) {
         for (var sc = 0; sc < THING_MAX; sc += 1) { store64(thing_sec_cache + sc * 8, 0 - 1); }
     }
-    # F331-4 (v0.35.1a) — the chase arrays are the same class of process-lifetime
+    # F331-4 (v0.35.2) — the chase arrays are the same class of process-lifetime
     # parallel state as the sector cache above, and index by the same thing index,
     # so they need the same reset: otherwise thing i on map 2 inherits map 1's
     # committed walk direction and its remaining commitment interval.
@@ -542,7 +542,7 @@ fn thing_check_sight(mx, my, tx, ty): i64 {
 # ================================================================
 
 # ================================================================
-# F331-4 (v0.35.1a) — vanilla 8-direction chase (P_NewChaseDir)
+# F331-4 (v0.35.2) — vanilla 8-direction chase (P_NewChaseDir)
 # ================================================================
 # Clean-room from the documented algorithm (Black Book ch. on AI + the
 # Unofficial Specs), not from id source.
@@ -1088,7 +1088,7 @@ fn thing_ai_tick(idx): i64 {
         # core (player_check_position blocks solid walls z-independently and
         # closed doors via its ceiling-gap test). Try the diagonal; if blocked,
         # slide along a single axis so a monster can round a corner; else hold.
-        # F331-4 (v0.35.1a): vanilla 8-direction chase, replacing the per-tick
+        # F331-4 (v0.35.2): vanilla 8-direction chase, replacing the per-tick
         # atan2 beeline + single axis slide. Vanilla's A_Chase re-picks only
         # when the commitment interval expires OR the committed move fails:
         #   if (--movecount < 0 || !P_Move(actor)) P_NewChaseDir(actor);

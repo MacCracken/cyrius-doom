@@ -26,7 +26,7 @@ checklist items already ship. Only two things stand in the way, and they are ind
 
 | Blocker | Release | Why it is the blocker |
 |---|---|---|
-| Episode end | **v0.35.2** | `level_advance` wraps E1M8 → E1M1 ([level.cyr:136](../../src/level.cyr#L136)) — there is no finale, so the game literally cannot be finished. |
+| Episode end | **v0.35.4** | `level_advance` wraps E1M8 → E1M1 ([level.cyr:136](../../src/level.cyr#L136)) — there is no finale, so the game literally cannot be finished. |
 | X11 backend | **v0.37.0** | The only unmet "multiple display backends" item; fb0 / Wayland / AGNOS-setu all ship. |
 
 Everything else below is quality, fidelity, robustness, or performance.
@@ -58,7 +58,13 @@ gated on a PPM A/B. Nothing below is.
 monsters do, where things sit in z, and how a level ends. The PPM A/B gate stops being sufficient here, so
 each release below names a gameplay gate instead.
 
-### v0.35.1c — Monsters that spawn overlapping are permanently immobile
+### v0.35.3 — Thing physics: real z, and monsters that cannot move
+
+Two collision/physics items that used to be letter-suffixed slots (`v0.35.1b`, `v0.35.1c`).
+They share a subsystem and a gate style — mutation-proven layout and predicate asserts rather than a
+behaviour fingerprint — so they are one cut.
+
+#### Overlapping spawns — monsters immobile for a whole level
 
 **Found 2026-08-01 while gating F331-4**, by diagnosing the one staging where the 8-direction chase
 did *not* help instead of dismissing it as noise.
@@ -79,7 +85,7 @@ if the mover already overlaps that thing, allow the step when it increases centr
 the E1M5 @ −1152,864 staging, whose `move_blocked` must fall from 577. Cheap to check, and it is now
 a committed staging rather than prose — see `scripts/ai-staging-sweep.sh`.
 
-### v0.35.1b — Real thing-z
+#### Real thing-z
 
 | # | Item | Detail |
 |---|------|--------|
@@ -88,11 +94,11 @@ a committed staging rather than prose — see `scripts/ai-staging-sweep.sh`.
 | — | **Precise missile-vs-wall trace** | z-aware, replacing the `player_check_position` approximation that lets a rocket clip on tall steps in 2.5D. |
 | F331-2 | **Vanilla ledge-glide z** | tmfloorz contacted-line tracking replacing the instant z-snap + drop-off escape-rule cure. Lowest value of the four; drop if the cut gets heavy. |
 
-**Gate**: after v0.35.1a. Exit: mutation-proven thing-struct layout asserts (the v0.34.5 `MASKED_ENTRY`
+**Gate**: after v0.35.2. Exit: mutation-proven thing-struct layout asserts (the v0.34.5 `MASKED_ENTRY`
 sentinel pattern — a missed offset here is silent corruption), plus a WAD-gated regression that a monster
 below a sill no longer sees over it.
 
-### v0.35.2 — Episode end ⭐ *critical path*
+### v0.35.4 — Episode end ⭐ *critical path*
 
 | # | Item | Detail |
 |---|------|--------|
@@ -102,17 +108,17 @@ below a sill no longer sees over it.
 
 **Gate**: nothing blocks it — schedulable any time after v0.34.7.
 
-### v0.35.3 — Combat cosmetics + two dormant one-liners
+### v0.35.5 — Combat cosmetics + two dormant one-liners
 
 BEXP rocket-explosion frames (detonation is instant today) · full xdeath giblet animation on overkill ·
 animated multi-frame muzzle flash (chaingun/rocket show only frame A — needs a flash counter decoupled from
 `weapon_fire_max`) · **G-11** BFG is collectible but unselectable (fix ships here; play-verification is
 registered-WAD gated) · **G-10** diagonal movement calls `doors_walk_trigger` twice with identical arguments.
 
-**Gate**: after v0.35.1. Exit: staged-viewpoint PPMs at successive ticks per animation; a WAD-free assert
+**Gate**: after v0.35.2. Exit: staged-viewpoint PPMs at successive ticks per animation; a WAD-free assert
 that a diagonal step produces exactly one trigger call.
 
-### v0.35.4 — Audio + music fidelity
+### v0.35.6 — Audio + music fidelity
 
 **MUSIC-2** MUS percussion (channel 15 is dropped entirely — E1M1's track is drum-driven, so this is the
 high-impact one) · **MUSIC-3** pitch bend + expression/pan controllers · **AUDIO-6** gate the PC-speaker
@@ -121,7 +127,7 @@ beep when `audio_dev != 0` (resolve the `sound.cyr`/`audio.cyr` include-order co
 
 **Gate**: none. Exit: `fuzz_mus` over the new paths + a deterministic PCM dump of E1M1's track.
 
-### v0.35.4b — `texture.cyr` Result adoption
+#### `texture.cyr` Result adoption (was the `4b` slot)
 
 Deferred out of v0.34.9. Typed `texture_get_column` / `texture_init` errors, aligning the texture
 boundary with the `Result<T, E>` treatment `wad.cyr` already has. It was slotted into the capacity
@@ -132,7 +138,7 @@ change into a cut gated on "shareware output must not move" would have muddied b
 **Gate**: independent. Exit: byte-identical 9-map A/B (a typed-error refactor must not move pixels)
 plus the existing texture asserts re-pointed at the new signatures.
 
-### v0.35.5 — Lighting + plane parity
+### v0.35.7 — Lighting + plane parity
 
 Closes the last of the v0.28.7 sub-audit: **brightness/lighting A-B vs the COLORMAP reference** (write the
 per-light-level PPM diff to `docs/audit/`) · **RC-S8** sprite dimming still uses an ad-hoc `/96` ramp
@@ -146,7 +152,7 @@ viewpoints (E1M1's blue pool is FLAT14, not NUKAGE), so the SLADRIP animation fi
 gated by WAD-gated unit asserts rather than the PPM sweep. Stage a viewpoint onto a SLADRIP wall
 here, where staged-viewpoint work already lives, and add it to the captured set.
 
-### v0.35.6 — Engine-invariant audit (verification-first)
+### v0.35.8 — Engine-invariant audit (verification-first)
 
 The original Black Book sub-audits, deliberately run **after** the gameplay arc so they assert the shipped
 engine rather than one mid-rewrite: BSP traversal invariants (`bsp_point_on_side` parity, front-to-back walk
@@ -155,18 +161,18 @@ C3 bounds half shipped in 0.33.8 — only the parity half remains) · visplane b
 things, `plane_dropped` stays 0) · **G-13** sector-0 degenerate leaf → −1 plus the caller sweep the
 containment audit produces.
 
-**Gate**: after v0.35.1. Exit: new assert groups per item — this cut's deliverable *is* tests.
+**Gate**: after v0.35.2. Exit: new assert groups per item — this cut's deliverable *is* tests.
 
 ---
 
-## v0.35.7–v0.38.0 — Desktop, input, and synthesis
+## v0.35.9–v0.38.0 — Desktop, input, and synthesis
 
 Ordered so the `win_*` seam churns exactly once: scaling → pointer → X11.
 
 | Release | Theme | Contents |
 |---|---|---|
-| **v0.35.7** | Desktop present polish | **WF-4** aspect-correct (1.2× vertical) + fill-to-window modes · **WF-3** HiDPI / fractional scale (`set_buffer_scale`, `wp_fractional_scale_v1` + viewporter) · **WF-7** re-present in the death-wait loop so the death frame rescales · **WF-6** per-event size table for the remaining fixed-offset wire handlers. Independent of the entire gameplay arc. |
-| **v0.36.0** | **Mouse / pointer input** (WF-1) | The last input mode DOOM expects on a desktop. `wl_pointer` off the seat → turn/fire/use through the existing bitmask flags; a `win_next_pointer` seam entry (fb0/AGNOS/PPM return no-pointer); `zwp_relative_pointer` + `zwp_pointer_constraints` for real mouse-look; a sensitivity option following the Sound-menu live-preview pattern. **After v0.35.7** — the seam must be settled first. |
+| **v0.35.9** | Desktop present polish | **WF-4** aspect-correct (1.2× vertical) + fill-to-window modes · **WF-3** HiDPI / fractional scale (`set_buffer_scale`, `wp_fractional_scale_v1` + viewporter) · **WF-7** re-present in the death-wait loop so the death frame rescales · **WF-6** per-event size table for the remaining fixed-offset wire handlers. Independent of the entire gameplay arc. |
+| **v0.36.0** | **Mouse / pointer input** (WF-1) | The last input mode DOOM expects on a desktop. `wl_pointer` off the seat → turn/fire/use through the existing bitmask flags; a `win_next_pointer` seam entry (fb0/AGNOS/PPM return no-pointer); `zwp_relative_pointer` + `zwp_pointer_constraints` for real mouse-look; a sensitivity option following the Sound-menu live-preview pattern. **After v0.35.9** — the seam must be settled first. |
 | **v0.37.0** ⭐ | **Native X11 backend** (WF-5) | *Critical path.* `src/platform/x11/{wire,client}.cyr` mirroring the wayland/ split; MIT-SHM or PutImage present; `PM_X11` in `PresentMode`; full keyboard + the pointer seam from v0.36.0; lifecycle incl. focus clearing the input latches the way Wayland and setu already do. Closes the v1.0.0 "multiple display backends" item. |
 | **v0.38.0** | **OPL2 FM synthesis via GENMIDI** | The biggest remaining fidelity win and a genuinely large module: GENMIDI parsing (GM → 2-op OPL2 patches incl. the percussion bank), an OPL2 emulator (operator FM, ADSR, feedback) in pure 16.16, routing the MUS sequencer into OPL channels, and OPL rhythm mode replacing v0.35.4's noise-voice stand-in. **After v0.35.4.** |
 
@@ -174,7 +180,7 @@ Ordered so the `win_*` seam churns exactly once: scaling → pointer → X11.
 
 ## v1.0.0 — Ship
 
-**Blocked only on v0.35.2 and v0.37.0.** Checklist items 4 (runs on AGNOS), 5 (runs on /dev/fb0) and 6 (in
+**Blocked only on v0.35.4 and v0.37.0.** Checklist items 4 (runs on AGNOS), 5 (runs on /dev/fb0) and 6 (in
 the AGNOS initrd) already ship — correct them to ✅ with their evidence at tag time, and fold item 2 (X11)
 into v0.37.0 as one row rather than two.
 

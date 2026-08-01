@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.35.2] - 2026-08-01 — vanilla 8-direction chase (`move_blocked` −98.8%)
+
 ### Changed
 
 - **F331-4 — vanilla 8-direction chase (`P_NewChaseDir`), replacing the per-tick atan2 beeline.**
@@ -102,7 +104,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Continues the gameplay arc with the half of v0.35.1 that is **repair**. The roadmap row also carried
 F331-4 (`P_NewChaseDir` 8-direction chase); it is re-slotted to **v0.35.2** for the same reason
 v0.35.0 split sight from movement — a behaviour rewrite behind the same fingerprint diff as two bug
-fixes makes any unexpected delta ambiguous about its cause. F331-2 stays deferred to v0.35.1b.
+fixes makes any unexpected delta ambiguous about its cause. F331-2 stays deferred to v0.35.3.
 
 **Both fixes are invisible to every pre-existing gate, by construction** — `--ppm`, `--ai-probe` and
 the whole suite each load exactly one map, and no spawn view closes a door on a monster. So the
