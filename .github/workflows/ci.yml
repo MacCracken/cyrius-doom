@@ -48,6 +48,14 @@ jobs:
           echo "$CYRIUS_VERSION" > "$HOME/.cyrius/current"
           echo "$HOME/.cyrius/bin" >> $GITHUB_PATH
           echo "CYRIUS_HOME=$HOME/.cyrius" >> $GITHUB_ENV
+          # CYRIUS_STRICT_PIN turns "cyrius.cyml pins X but cycc is Y" from a
+          # WARNING into a hard error (exit 1, no binary). CI installs the pin
+          # itself so it can never legitimately drift — but the installer's
+          # pre-flight can fall back, and a warning in a 500-line log is a
+          # warning nobody reads. Verified locally 2026-08-01: with the pin at
+          # 6.4.78 and cycc 6.5.4, plain build exits 0 with a warning, and
+          # CYRIUS_STRICT_PIN=1 exits 1 with "toolchain drift (CYRIUS_STRICT_PIN)".
+          echo "CYRIUS_STRICT_PIN=1" >> $GITHUB_ENV
 
       - name: Lock file present
         # cyrius.lock is the supply-chain integrity anchor for the
@@ -92,7 +100,7 @@ jobs:
           retention-days: 5
 
   test:
-    name: Test (WAD-free subset — 37 asserts)
+    name: Test (WAD-free subset, every tests/*.tcyr)
     needs: [build]
     runs-on: ubuntu-latest
     steps:
@@ -128,6 +136,14 @@ jobs:
           echo "$CYRIUS_VERSION" > "$HOME/.cyrius/current"
           echo "$HOME/.cyrius/bin" >> $GITHUB_PATH
           echo "CYRIUS_HOME=$HOME/.cyrius" >> $GITHUB_ENV
+          # CYRIUS_STRICT_PIN turns "cyrius.cyml pins X but cycc is Y" from a
+          # WARNING into a hard error (exit 1, no binary). CI installs the pin
+          # itself so it can never legitimately drift — but the installer's
+          # pre-flight can fall back, and a warning in a 500-line log is a
+          # warning nobody reads. Verified locally 2026-08-01: with the pin at
+          # 6.4.78 and cycc 6.5.4, plain build exits 0 with a warning, and
+          # CYRIUS_STRICT_PIN=1 exits 1 with "toolchain drift (CYRIUS_STRICT_PIN)".
+          echo "CYRIUS_STRICT_PIN=1" >> $GITHUB_ENV
 
       - name: Lock file present
         run: |
@@ -163,11 +179,23 @@ jobs:
           # tests/regression_asr.tcyr sat RED for two weeks after v0.33.6 changed
           # asr() to floor negatives (RC-F2) without anyone noticing — CI never
           # executed it. Globbing means a new suite is gated the moment it lands.
+          #
+          # The success match is ANCHORED, and that is not pedantry: the old
+          # `grep -q "0 failed"` matched as a SUBSTRING, so "10 failed",
+          # "20 failed" … "100 failed" all contained "0 failed" and the gate
+          # reported PASS. A suite failing exactly 10, 20, 30 … tests was
+          # invisible — the same blindness as the regression_asr.tcyr incident
+          # described above, one line below the comment describing it.
+          # Verified: `echo "356 passed, 10 failed" | grep -q "0 failed"` -> match.
+          # Also require the summary line to be a real summary, so a crashed or
+          # non-compiling suite (which prints no summary at all) cannot pass by
+          # emitting nothing.
           fail=0
           for t in tests/*.tcyr; do
             echo "=== $t ==="
             cyrius test "$t" 2>&1 | tee /tmp/test_output
-            tail -1 /tmp/test_output | grep -q "0 failed" || { echo "FAILED: $t"; fail=1; }
+            tail -1 /tmp/test_output | grep -qE '^[0-9]+ passed, 0 failed' \
+              || { echo "FAILED: $t"; fail=1; }
           done
           exit $fail
 

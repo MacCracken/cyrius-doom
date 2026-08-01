@@ -54,6 +54,10 @@ jobs:
           echo "$CYRIUS_VERSION" > "$HOME/.cyrius/current"
           echo "$HOME/.cyrius/bin" >> $GITHUB_PATH
           echo "CYRIUS_HOME=$HOME/.cyrius" >> $GITHUB_ENV
+          # Hard-fail on toolchain drift rather than warn — a release binary
+          # built by a compiler other than the cyrius.cyml pin is exactly the
+          # thing the pin exists to prevent. See the same block in ci.yml.
+          echo "CYRIUS_STRICT_PIN=1" >> $GITHUB_ENV
 
       - name: Build (release — dead code NOPed via CYRIUS_DCE)
         env:

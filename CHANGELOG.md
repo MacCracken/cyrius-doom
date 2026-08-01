@@ -7,6 +7,145 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Toolchain pin `cycc 6.4.78` → `6.5.4`** (13 upstream releases: 6.4.79–6.4.86, 6.5.0–6.5.4).
+  **All output byte-identical** — 9 maps + 5 menus, and the `--ai-probe` behaviour fingerprint over
+  12 map/staging combinations, match the 6.4.78 build exactly.
+  - **The bump is worth more than "newer": 6.4.80 fixed a CRITICAL const-fold defect that was live on
+    the pin doom was sitting on.** `1 - 2 + 3` folded to **5**, not 2 — the `_cfo` rewind class,
+    third occurrence, and a class **cyrius-doom itself first surfaced** (2026-06-11, EIMUL → v6.4.74's
+    17 `PARSE_TERM` sites → v6.4.80's 16 `PEXPR` sites). Confirmed here by compiling and running the
+    probe on each installed pin: **6.4.74 = 5, 6.4.78 = 5, 6.4.79 = 5, 6.4.80 = 2, 6.5.4 = 2**.
+    The trigger is narrower than "constant arithmetic" — it needs `<enum-or-literal> - <literal>
+    <+|-|&|\|^> <literal>` with a negative intermediate, in function-body scope; all-enum chains,
+    parenthesised forms and any runtime operand were already correct.
+    **doom never triggered it**: a scan of the whole compile set — `src/**`, `tests/`, `fuzz/`,
+    `benches/`, *and* the vendored `lib/`/`vendor/` — finds **zero** occurrences of the shape. So this
+    is a latent hazard retired, not a bug fixed; but it is the reason not to sit on an old pin.
+  - **Resolved dep set is unchanged**: 36 file entries + 1 bsp commit line = 37, verify **36/0**,
+    regenerated clean (`rm -rf lib && cyrius deps`). Only **4 of 36** files changed content —
+    `io.cyr` (`xrmdir` added, 6.5.2), `vec.cyr` (`vec_sort_by` / `vec_select_nth` introsort, 6.5.4),
+    `sakshi.cyr` (2.4.6 → 2.4.7), `syscalls_x86_64_agnos.cyr` (GPU-recovery + `uptime_us` wrappers).
+    `alloc.cyr` and every `syscalls_*` peer doom actually runs on are byte-identical, so the heap and
+    syscall-wrapper layers cannot have shifted.
+  - **Binary 472,920 → 477,072 B** host (agnos 459,432 → 463,632). **The whole +4,152 B is the new
+    `lib/vec.cyr` introsort**, which is auto-prepended into every build and which doom never calls —
+    cyrius's own 6.5.4 entry records the identical +4,152 B on `cycc`. It lands entirely in the
+    NOP-sled: unreachable fns 532 → 543 (100,054 → 103,280 B under `CYRIUS_DCE=1`).
+  - **No source change was required.** The two consumer-visible hazards in the span were checked
+    against the tree rather than assumed: 6.5.1 made *an integer literal passed to a `: cstring`
+    parameter* a hard error (both targets compile clean, so doom has none), and 6.5.1/6.5.2 narrowed
+    the reserved `_int`/`_str`/`_cstr` overload-dispatch suffixes — sakshi 2.4.7 renamed
+    `_sk_write_int`/`_sk_write_str` for exactly that reason, and doom calls neither.
+  - **`wl__emit(s, n)` / `wl__emit_str(s)` ([client.cyr:121](src/platform/wayland/client.cyr#L121))
+    is the same naming shape sakshi 2.4.7 fixed, and it is inert** — verified, not assumed: a probe
+    reproducing the shape (2-arity base, 1-arity `_str` sibling, string literal as arg 1) compiles to
+    the base on **both** 6.4.78 and 6.5.4, because the arity mismatch blocks the route. Worth
+    renaming as hygiene; not a defect on either pin.
+  - Zero symbol collisions between doom's 563 fns and everything 6.5.x added to `lib/`
+    (`vec_sort_by`, `vec_select_nth`, the `_vec_*` helpers, `xrmdir`, `sys_gpu_recover_op`,
+    `sys_uptime_us`).
+  - One immaterial cost, recorded so it is not re-discovered: 6.5.1's `PARSE_RETURN` tail-path divert
+    means a handful of `return f(<literal>)` forms inside `lib/str.cyr` / `lib/fs.cyr` no longer get
+    TCO. None are recursive, none are on doom's render or tick path, and the bench is flat — noted,
+    not a concern.
+  - **Bench variance-neutral, no claim made**: `render_frame` best-of-mins 359.989 → 359.354 µs,
+    true spawn frame 539.314 → 534.153 µs, `fixed_mul` 3 ns, `texture_get_column` 395 ns on both.
+  - `cyrius audit` output is **identical across the bump** (same 4 fmt files, same 20 lint warnings,
+    same 245 undocumented public fns). Its `bench` step is red on **both** pins for a benign reason —
+    `cyrius bench` runs `benches/doom.bcyr` with no WAD argument, so the harness prints its usage line.
+  - **AGNOS QEMU `doom-directmap-smoke.sh` PASS on the final 6.5.4 `build/doom_agnos`** — 144 distinct
+    colours, direct-map floor band `[11, 12, 12, 16, 19, 22, 18]` (identical to the 0.34.4 / 0.35.0
+    record), and a **4×-block pixel-diff against the Linux `--ppm` that is 100.00% exact — 0 of 64,000
+    px differ**, viewport and HUD alike. This is the one gate the Linux A/B could not stand in for:
+    `syscalls_x86_64_agnos.cyr` is among the 4 stdlib files whose content changed.
+  - Tests **240 / 33 / 12** WAD-free and **366 / 366** full; fuzz **×7** clean
+    (50000 / 1000 / 2000 / 1000 / 1000 / 2000 / 1000).
+
+- **Dependencies re-checked, none moved.** `bsp` **1.2.1**, vendored `vani-core` **1.1.2** and
+  vendored `setu` **0.7.0** are each at the newest tag on the remote *and* byte-identical to that
+  tag's upstream `dist/` bundle — verified by `git ls-remote --tags` plus a content diff, not by
+  reading the `# Version:` headers.
+
+- **`docs/development/state.md`'s "Architecture surface" line said vani 1.1.1 / setu 0.5.1** while the
+  versions table three sections above it said 1.1.2 / 0.7.0. The table had been kept current at each
+  refresh and this line had not. Corrected, with the drift noted inline so the correction is legible.
+
+### Fixed
+
+- **CI's test gate could not see a suite that failed exactly 10, 20, 30 … tests.**
+  [ci.yml:170](.github/workflows/ci.yml#L170) asserted success with
+  `grep -q "0 failed"` — an **unanchored substring** match, so `"356 passed, 10 failed"` and
+  `"266 passed, 100 failed"` both contain `0 failed` and the gate reported PASS. Verified, not
+  theorised: `echo "356 passed, 10 failed" | grep -q "0 failed"` matches. This sat directly beneath
+  the comment explaining the `regression_asr.tcyr` incident — a suite that sat red for two weeks
+  because CI never ran it — which makes it the same blindness one line later. Now anchored to
+  `^[0-9]+ passed, 0 failed`, which additionally fails a suite that crashes or fails to compile
+  (no summary line at all). Mutation-checked against 3-, 10-, 20-, 100-failure lines, an empty line
+  and a compile error — all now FAIL — while all three real suites still PASS.
+
+- **CI and release now hard-fail on toolchain drift.** `CYRIUS_STRICT_PIN=1` is exported alongside
+  `CYRIUS_HOME` in both `ci.yml` jobs and in `release.yml`, turning *"cyrius.cyml pins X but cycc is
+  Y"* from a warning into `error: … (CYRIUS_STRICT_PIN)` with exit 1 and no binary emitted. Verified
+  locally: with the pin at 6.4.78 against cycc 6.5.4, a plain build exits **0** with a warning and the
+  strict build exits **1**. This closes a real gap — the project had no way to *force* pinned codegen,
+  only to notice drift in a log nobody reads, and a release binary built by a compiler other than the
+  pin is precisely what the pin exists to prevent.
+
+- CI's test job was still named *"Test (WAD-free subset — 37 asserts)"*; the subset has been every
+  `tests/*.tcyr` since v0.34.5 and is 285 asserts. Renamed to stop the count rotting again.
+
+### Known issues
+
+- **The thing-sector cache is never reset on level change — monsters can be permanently asleep from
+  E1M2 onward. Shipped in v0.35.0; found here, not yet fixed.** `thing_sec_cache`
+  ([things.cyr:163](src/things.cyr#L163)) is allocated once and has **no reset path anywhere**. Its
+  only invalidator is called from `thing_set_x` / `thing_set_y`, but `things_spawn_from_map` writes
+  positions **raw** ([things.cyr:354-355](src/things.cyr#L354)) and so bypasses it — as do both
+  projectile spawners into reused slots. After a second `load_map`, thing *i* carries the **previous
+  map's** sector index. The consumer is v0.35.0's own REJECT pre-test
+  ([things.cyr:789](src/things.cyr#L789)), where a set bit is *authoritative* and returns early: a
+  stale-but-in-range index silently means "provably cannot see you" and the monster never scans again.
+
+  **Measured on the shipped binary**, not inferred — every consecutive shareware transition is
+  affected:
+
+  | transition | monsters | stale | false-blind (monster, player-sector) pairs |
+  |---|---|---|---|
+  | E1M1 → E1M2 | 41 | **36** | **1,176** |
+  | E1M4 → E1M5 | 91 | **91** | 1,242 |
+  | E1M5 → E1M6 | 118 | 85 | 1,001 |
+  | E1M8 → E1M9 | 72 | 38 | 598 |
+  | E1M7 → E1M8 | 27 | 27 | 7 |
+
+  Stated with its limits: the sweep treats *every* sector as a hypothetical player sector rather than
+  only reachable ones, and noise still wakes a monster (`things_noise_alert` is not REJECT-gated), so
+  the accurate claim is **"asleep until shot at or noise-alerted"**, not "inert". It is invisible to
+  every current gate by construction — `--ppm`, `--ai-probe` and the whole test suite each load
+  exactly one map. Slotted as **PRE-1** at the head of v0.35.1; it is a prerequisite for RC-G1, which
+  promotes `thing_sector` from an optimisation hint to a correctness input, but it is a shipped bug in
+  its own right.
+
+- **`CYRIUS_IR=3` miscompiles doom on cycc 6.5.4 — do not use it for a release build.** cyrius 6.5.2
+  announced the optimizing IR substrate as unblocked (corpus mismatches 35 → 8); **doom is one of the
+  remaining 8.** It compiles and links clean, and then:
+  - **9 of 9 map renders differ** from the default build (all 5 menus match).
+  - The E1M1 thing census moves — `6 monsters / 52 items / 33 decor` becomes `6 / 51 / 34`, so a
+    classification boundary is being evaluated differently.
+  - `test_doom` drops to **363 / 366**. All three failures are the weapon-fire path
+    (`pistol fires with ammo`, `pistol deducts 1 bullet`, `fist always fires`), each getting 0 where 1
+    is expected — `player_try_fire` returns the wrong value.
+  - The binary is *larger*, not smaller: 477,072 → **518,032 B (+8.6 %)**.
+
+  **Bisected to one pass — LASE apply.** `CYRIUS_IR=3 CYRIUS_LASE_OFF=1` restores **366 / 366**;
+  `CYRIUS_FOLD_OFF=1` changes nothing. A **second, separable defect** surfaced while bisecting:
+  `CYRIUS_LASE_OFF=1` is **silently ignored when `CYRIUS_FOLD_OFF=1` is also set** — cycc's own `ir:`
+  line still reports `756 LASE (2649B applied)`, byte-identical to `FOLD_OFF` alone. That is a
+  recurrence of the class 6.5.2 fixed (`_read_env`'s shared `_env_scratch` buffer rendering the IR
+  knobs inert) and it makes multi-knob bisection upstream untrustworthy. Both are cyrius-side; default
+  codegen is unaffected and is what every gate above was measured on. Roadmap **HOLD-C stays closed**.
+
 ## [0.35.0] - 2026-07-27 — monster sight + wake: REJECT, stagger, and the front-180 gate
 
 Opens the gameplay arc. The 0.34.x band was gated on byte-identical pixels; this cut changes what

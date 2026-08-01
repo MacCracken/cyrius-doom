@@ -61,18 +61,39 @@ each release below names a gameplay gate instead.
 ### v0.35.1 — Monster movement: doors, chase, and the ledge cases
 
 **Re-slotted from v0.35.0.** That cut shipped the two items about how a monster decides it has SEEN
-you (OP-5b, EF-2); these two are about how it MOVES. They were split because four behaviour changes
+you (OP-5b, EF-2); these are about how it MOVES. They were split because four behaviour changes
 behind one fingerprint diff makes any unexpected delta ambiguous about its cause.
+
+**Re-grounded against the source 2026-08-01, not against the previous version of this file** — which
+is how **PRE-1** surfaced. Each row below now carries file:line anchors and the facts that change how
+it should be scoped; two roadmap claims needed correcting (RC-G1's "crush/reverse" is reverse-only in
+vanilla, and the resolver RC-G1 was slotted to reuse is sound in shape but stale in practice).
 
 | # | Item | Detail |
 |---|------|--------|
-| RC-G1 | **Monsters aren't obstruction-checked by closing doors** | Only the player is. The per-thing sector resolver this needs **already shipped** in v0.35.0 (`thing_sector`, cached + invalidated on move), so this is now just the door-side wiring — crush/reverse on a monster in the doorway. |
-| F331-4 | **`P_NewChaseDir` 8-direction chase** | Chasers head straight at the player via `fixed_atan2` with a single axis-slide fallback; vanilla's 8-direction walk with dogleg fallbacks rounds corners and paces on ledges. The v0.35.0 baseline shows the symptom as a number: **E1M1 `move_blocked=247` over 350 ticks** — monsters spending most of an engagement stuck against geometry. |
-| F331-2 | **Vanilla ledge-glide z** | tmfloorz contacted-line tracking replacing the instant z-snap + drop-off escape-rule cure. Lowest value of the three; drop if the cut gets heavy. |
+| **PRE-1** ⚠ | **Reset the thing-sector cache on map load — a LIVE bug, not just a prerequisite** | **Ships broken in v0.35.0.** `thing_sec_cache` ([things.cyr:163](../../src/things.cyr#L163)) has no reset path, and `things_spawn_from_map` writes positions **raw** ([:354-355](../../src/things.cyr#L354)), bypassing the only invalidator. After a level change, thing *i* keeps the previous map's sector — and the v0.35.0 REJECT pre-test ([:789](../../src/things.cyr#L789)) treats a set bit as authoritative, so the monster **never scans again**. Measured on the shipped binary: E1M1→E1M2 leaves **36 of 41 monsters stale with 1,176 false-blind (monster, player-sector) pairs**; every consecutive shareware transition is affected (E1M4→E1M5 91/91 stale, 1,242 pairs). Invisible to every current gate — `--ppm`, `--ai-probe` and the whole suite each load exactly one map. Fix: clear all `THING_MAX` entries in `things_spawn_from_map`, plus invalidate after the two raw projectile-spawn writes ([:1241](../../src/things.cyr#L1241), [:1325](../../src/things.cyr#L1325)). **Must land before or with RC-G1**, which promotes `thing_sector` from an optimisation hint to a correctness input — but it is worth shipping on its own merits first. |
+| RC-G1 | **Monsters aren't obstruction-checked by closing doors** | Only the player is — [doors.cyr:373-377](../../src/doors.cyr#L373) tests `player_find_sector() == sec` and nothing else; the code says so itself two lines above. Consequence today: a door closes on a monster, which is **not** damaged (there is no crush damage anywhere) and cannot leave, because any exit crosses the door linedef and `move_check_linedef`'s ceiling test sees `0 < PLAYER_HEIGHT` — entombed permanently, still solid, still counted. The per-thing sector resolver **already shipped** in v0.35.0, so this is door-side wiring — but see **PRE-1**, and note vanilla semantics are **reverse, not crush** (`T_VerticalDoor`'s down case passes `crush=false`), so "crush/reverse" resolves to reverse-only until a crusher thinker exists. Two sub-decisions the source forces: thing height at offset 88 is written `56 << 16` at [things.cyr:404](../../src/things.cyr#L404) and **never read** (no accessor exists), and the loop must pre-filter on `TF_SOLID` so corpses don't hold doors open forever. |
+| F331-4 | **`P_NewChaseDir` 8-direction chase** | Chasers head straight at the player via `fixed_atan2` with a single axis-slide fallback ([things.cyr:853-870](../../src/things.cyr#L853)); vanilla's 8-direction walk with dogleg fallbacks rounds corners and paces on ledges. `grep movedir\|movecount src/` is **empty** — there is no direction state of any kind on a thing, and the thing struct is exactly full at stride 128, so the two new fields need the parallel-array precedent `thing_sec_cache` set. The v0.35.0 baseline shows the symptom as a number: **E1M1 `move_blocked=247` over 350 ticks**. **Three facts to hold fixed or the gate is unreadable**: (a) `MONSTER_CHASE_SPEED = 65536` is 1 unit/tic against vanilla's 8 — monsters move ~8× slow, which dominates any `move_blocked` reading, and changing it must be a separately-measured step; (b) **monsters cannot open doors** (`doors_walk_trigger` has two callers, both in `player.cyr`), so some fraction of those 247 blocked ticks is door-shaped and will not respond to chase-direction work at all; (c) an 8-way dispatch must be an if/else ladder or table, **never a `switch`** — sparse/out-of-order labels are the documented cycc return-address smash that bit `thing_animate`. Also: `p_random` is a shared LCG sequence, so a random-direction fallback shifts every downstream roll and will move `ranged=` for that reason alone. |
+| F331-2 | **Vanilla ledge-glide z** | tmfloorz contacted-line tracking replacing the instant z-snap ([player.cyr:631-636](../../src/player.cyr#L631)) + the drop-off escape rule ([player.cyr:258-298](../../src/player.cyr#L258)) it exists to cure. **Recommend deferring to v0.35.1b and doing it there**: it rewrites the collision core both the player and every monster move through, `move_check_position` currently returns a bare 0/1 and accumulates nothing, and monsters have nowhere to *store* a floorz until RC-S6 populates thing-z — so v0.35.1b is the cheaper ordering. It also deletes a rule that exists because of a real field bug (the armor-platform wedge, [player.cyr:122-128](../../src/player.cyr#L122)), and **neither `--ai-probe` nor the PPM A/B can see a regression here** — the probe never moves the player and `--ppm` renders a static viewpoint. Needs its own accumulator asserts. Lowest value of the four; drop if the cut gets heavy. |
 
 **Gate**: `--ai-probe` fingerprint vs the v0.35.0 baseline — `move_blocked` must fall substantially
-and wake/chase counts must not regress; plus a WAD-gated assert that a monster in a closing door is
-crushed or reverses it.
+and wake/chase counts must not regress; plus a WAD-gated assert that a monster in a closing door
+reverses it.
+
+Three gate details worth pinning before the cut starts, because each one can make the gate lie:
+
+1. **The 247 baseline is prose in this file only.** No fingerprint capture is committed anywhere in
+   the repo, so the "before" side must be regenerated from a v0.35.0 build. Capture it *first*.
+2. **Read the fields differently.** `wakes` and `chases` are hard invariants (neither path consumes
+   `p_random`), `melee` is position-driven and *will* move as pathing changes, and `ranged` moves from
+   the shared-LCG shift alone — so it must be explained, not asserted. The 9 idle maps are the cheap
+   control: idle monsters never reach `STATE_CHASE`, so those fingerprints must stay byte-identical.
+3. **PRE-1 needs its own gate, and the arc's gate cannot provide it** — `--ai-probe` loads one map.
+   It needs a two-map assert: resolve `thing_sector(i)` on one map, load a second, assert it equals
+   `map_point_sector(thing_x(i), thing_y(i))`. Mutation proof: revert the reset, the assert fails.
+   `ai_stats_reset()` also exists at [things.cyr:676](../../src/things.cyr#L676) with **zero callers** —
+   today's totals are correct only because the probe loop is the sole thing ticking the world, so any
+   future pre-probe warm-up would silently pollute them.
 
 ### v0.35.1b — Real thing-z
 
@@ -210,6 +231,29 @@ strength reduction, IR-driven DCE for a *real* binary shrink — today `CYRIUS_D
 place — and linear-scan regalloc, the single biggest projected win) · bench formatter `min > max` lives in
 the cyrius stdlib · `#io` effect annotations await a stable annotation surface · **WF-2** GPU present needs
 the mabda dep + a dmabuf/EGL path.
+
+> **Measured 2026-08-01 on the 6.5.4 pin — the substrate is NOT yet usable for doom, so this hold stands.**
+> cyrius 6.5.2 announced the `CYRIUS_IR=3` optimizing substrate as unblocked (default-vs-IR=3 corpus
+> mismatches 35 → 8). **doom is one of the 8.** An `CYRIUS_IR=3` build compiles and links clean, but:
+>
+> | | default 6.5.4 | `CYRIUS_IR=3` |
+> |---|---|---|
+> | binary | 477,072 B | **518,032 B (+8.6 %, larger)** |
+> | 9-map `--ppm` A/B | — | **9 / 9 differ** (5 / 5 menus match) |
+> | E1M1 thing census | 6 mon / 52 items / 33 decor | **6 / 51 / 34** — a classification boundary moved |
+> | `test_doom` | 366 / 366 | **363 / 366** |
+>
+> **Bisected to a single pass: LASE apply.** `CYRIUS_IR=3 CYRIUS_LASE_OFF=1` restores **366/366**;
+> `CYRIUS_FOLD_OFF=1` does not help. The three failures are all the weapon-fire path
+> (`pistol fires with ammo`, `pistol deducts 1 bullet`, `fist always fires` — each getting 0 where 1 is
+> expected), so `player_try_fire` returns the wrong value under applied LASE.
+>
+> **Second, separable defect found while bisecting**: `CYRIUS_LASE_OFF=1` is **silently ignored when
+> `CYRIUS_FOLD_OFF=1` is also set** — the compiler's own `ir:` line reports `756 LASE (2649B applied)`
+> with both knobs set, byte-for-byte the same as `FOLD_OFF` alone. That is a recurrence of the class
+> cyrius **6.5.2** fixed (`_read_env`'s shared `_env_scratch` making the IR knobs inert), and it means
+> multi-knob bisection is currently untrustworthy upstream. **Both worth filing on cyrius**; until the
+> LASE defect is fixed, `CYRIUS_IR=3` must not be used for a doom release build.
 
 ### HOLD-D — post-v1.0.0
 
