@@ -27,7 +27,7 @@ checklist items already ship. Only two things stand in the way, and they are ind
 | Blocker | Release | Why it is the blocker |
 |---|---|---|
 | Episode end | **v0.35.6** | `level_advance` wraps E1M8 → E1M1 ([level.cyr:136](../../src/level.cyr#L136)) — there is no finale, so the game literally cannot be finished. |
-| X11 backend | **v0.37.0** | The only unmet "multiple display backends" item; fb0 / Wayland / AGNOS-setu all ship. |
+| X11 backend | **v0.37.0** | The only unmet "multiple display backends" item; fb0 / Wayland ship. ⛔ **AGNOS-setu does NOT ship** (corrected 2026-08-03): its TCP-on-loopback transport is retired as the **wrong primitive** for a local display protocol, and doom has no honest agnos proof over it — the `aethersafha-doom-smoke.sh` greens came from the deleted `AETHERSAFHA_SETU_SELFTEST` kernel hook. (Scope note: the handshake could not complete on an ordinary boot only **before agnos 1.56.34 / `net_src_for`**; afterwards other clients did connect un-rigged, QEMU `-smp 1`. doom was not one of them.) doom's only honest agnos display path today is `PM_FB0` (blit#39). See agnos `planning/ipc.md` §9-§10. |
 
 Everything else below is quality, fidelity, robustness, or performance.
 
@@ -159,8 +159,16 @@ Ordered so the `win_*` seam churns exactly once: scaling → pointer → X11.
 the AGNOS initrd) already ship — correct them to ✅ with their evidence at tag time, and fold item 2 (X11)
 into v0.37.0 as one row rather than two.
 
-Ship criteria: a full E1M1→E1M8 playthrough under skill_normal on **each** of the four backends (fb0,
-Wayland, X11, AGNOS/setu); the full CLAUDE.md closeout pass (every `tests/*.tcyr`, bench vs the prior
+> ⛔ **Corrected 2026-08-03 — "runs on AGNOS" means `PM_FB0` (blit#39 fullscreen) ONLY.** The `PM_SETU`
+> windowed backend has no honest agnos proof: its TCP-on-loopback transport is retired as the wrong
+> primitive for a local display protocol, and the smokes that showed doom as a window built their
+> kernel with the now-deleted `AETHERSAFHA_SETU_SELFTEST` hook (`net_ip = 0x7F000001`). Do not tick an
+> AGNOS-setu box on that evidence. (Other clients *did* connect un-rigged once `net_src_for` landed in
+> agnos 1.56.34 — QEMU `-smp 1`, 2026-08-02 — but doom was not one of them, so nothing here changes.) The setu path returns when it rides the agnos socket (`anu`) — agnos `planning/ipc.md`
+> §9-§10.
+
+Ship criteria: a full E1M1→E1M8 playthrough under skill_normal on **each** shipping backend (fb0,
+Wayland, X11 — ⛔ NOT AGNOS/setu, retracted above); the full CLAUDE.md closeout pass (every `tests/*.tcyr`, bench vs the prior
 closeout, `CYRIUS_DCE=1` NOP-sled recorded, security re-scan, clean-from-scratch build); and tag-time doc
 truth across VERSION, `cyrius.cyml`, the CHANGELOG header, `state.md`, `completed-phases.md` and the tag.
 

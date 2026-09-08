@@ -14,6 +14,29 @@
 #
 # This file is agnos-only: main.cyr includes it under #ifdef CYRIUS_TARGET_AGNOS after
 # vendor/setu.cyr (the setu_* client API) and before framebuf.cyr / input.cyr.
+#
+# ⛔ THE TRANSPORT UNDER THIS BACKEND IS RETIRED (2026-08-03) — retired as the WRONG PRIMITIVE for
+# a local display protocol, which is not the same claim as "it was broken". setu's control channel
+# spoke TCP on loopback:7700, and a local display protocol has nothing to route, nothing to
+# checksum, no window to negotiate and no business owning a port. On the mechanism: BEFORE agnos
+# 1.56.34 / `net_src_for` the compositor↔client handshake could not close on an ordinary boot
+# (every outbound segment claimed `net_ip` as its source, so a SYN to 127.0.0.1 was answered on a
+# 4-tuple the client's own conn never matched). AFTER `net_src_for` it DID complete un-rigged —
+# `agnos/scripts/harness/aethersafha-clients-test.py` reached "connected: 2, presented: 2" on
+# 2026-08-02 with `puka` and the real dhancha `crab`. ⚠ Scope that honestly: QEMU at `-smp 1`,
+# never shown on iron, and `-smp 4` fault-kills. It is not the reason the transport is retired.
+# ⛔ DOOM WAS NEVER HONESTLY A WINDOW ON agnos, and the un-rigged run above does NOT change that —
+# doom was not one of those two clients. `aethersafha-doom-smoke.sh` and
+# `aethersafha-doom-input-smoke.sh` passed only because they built their kernel with
+# `AETHERSAFHA_SETU_SELFTEST=1`, which assigned `net_ip = 0x7F000001` and made src and dst agree
+# by accident. Both scripts and the hook are DELETED; those greens are FALSE GREENS and must not
+# be cited. The replacement transport is the agnos socket (`anu`) — agnos
+# `docs/development/planning/ipc.md` §9/§10. ⚠ `vendor/setu.cyr` here is HAND-VENDORED with no
+# `[deps.setu]` stanza, so it will never update mechanically — read its top banner before
+# trusting anything in it.
+# ⭐ The PM_SETU backend code, the shared-buffer present and the FULL_KEYS held-key handling are
+# NOT withdrawn — only the transport they dial and the agnos proofs built on it. The blit#39
+# fullscreen path (PM_FB0) is doom's only honest agnos display path today.
 
 var doom_setu_client = 0;      # *SetuClient (setu.cyr), 0 = not connected
 var doom_setu_msg = 0;         # persistent SetuMsg scratch (lazy) — the poll runs ≥35×/s and
@@ -23,9 +46,12 @@ var doom_setu_focus = 1;       # compositor focus (SETU_INPUT_FOCUS); input_poll
                                # all key latches when 0 — else a held key whose RELEASE went
                                # to the newly-focused window walks the player forever (P-2)
 
-# Connect to the compositor (loopback:7700; the path arg is advisory). Returns 1 on
-# success — framebuf_init then sets present_mode = PM_SETU — or 0 when no compositor is
-# listening, in which case the caller keeps the blit#39 fullscreen fallback.
+# Connect to the compositor (⛔ loopback:7700 — RETIRED, see the file header; the path arg is
+# advisory and always was). Returns 1 on success — framebuf_init then sets
+# present_mode = PM_SETU — or 0 when no compositor is listening, in which case the caller keeps
+# the blit#39 fullscreen fallback.
+# ⚠ On an ordinary agnos boot this returned 0 every time, and the "no compositor listening"
+# reading was wrong: the transport was failing, not the compositor missing.
 fn doom_setu_open(): i64 {
     var c = setu_client_connect("/tmp/aethersafha-setu.sock");
     if (c == 0) { return 0; }
@@ -55,9 +81,15 @@ fn doom_setu_present_buf(pix, w, h): i64 {
 # input_poll_setu uses the value as persistent make/break held state, like the raw-scancode
 # path, and reads doom_setu_focus to clear latches on focus loss (P-2).
 #ifdef DOOM_SETU_KEYLOG
-# Diagnostic (off by default): emit a marker per received key event so the input smoke
-# (agnos scripts/aethersafha-doom-input-smoke.sh) can confirm BOTH press and release reach
-# doom over setu — a "dsetu-release" line proves aethersafha no longer drops key-UP.
+# Diagnostic (off by default): emit a marker per received key event so an input harness can
+# confirm BOTH press and release reach doom over setu — a "dsetu-release" line proves
+# aethersafha no longer drops key-UP.
+# ⛔ 2026-08-03: this used to name `agnos scripts/aethersafha-doom-input-smoke.sh`. That script
+# is DELETED — it built its kernel with the AETHERSAFHA_SETU_SELFTEST hook (`net_ip = 0x7F000001`),
+# which — on the agnos of that date, before `net_src_for` (1.56.34) — is the only reason the setu
+# connect it depended on completed at all, so its greens were false. There is no agnos input
+# harness for this today; it returns when setu rides the agnos
+# socket (`anu`). See agnos docs/development/planning/ipc.md §9-§10.
 fn _dsetu_keylog(v): i64 {
     if (v == 0) { return syscall(1, 1, "dsetu-release\n", 14); }
     return syscall(1, 1, "dsetu-press\n", 12);

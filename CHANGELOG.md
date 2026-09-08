@@ -1677,17 +1677,35 @@ hardening it enabled.
   auto-downgrades to `PM_FB0` (fullscreen blit#39) when no compositor is listening, and
   `--fb0` forces fullscreen. Vendors `vendor/setu.cyr` (setu 0.5.0) + adds `net`/`result`/
   `assert` to the stdlib. Builds clean `--agnos` and host (Linux Wayland path untouched).
-  **QEMU-validated** (`agnos scripts/aethersafha-doom-smoke.sh`, reusing the
+  ~~**QEMU-validated** (`agnos scripts/aethersafha-doom-smoke.sh`, reusing the
   `AETHERSAFHA_SETU_SELFTEST` hook with doom seeded as the first-resident setu client): the
   compositor spawns doom, doom loads `/DOOM1.WAD`, connects over setu, and presents — the
   screendump shows the DOOM title screen composited as a window on the desktop next to crab,
-  with the game loop live (map/things stats printing).
+  with the game loop live (map/things stats printing).~~
+
+  > ⛔ **RETRACTED 2026-08-03 — this QEMU validation was a FALSE GREEN.** It "reused the
+  > `AETHERSAFHA_SETU_SELFTEST` hook", and that hook is precisely the rigging: it assigned
+  > `net_ip = 0x7F000001` in the kernel, making src == dst == 127.0.0.1 so agnos `tcp_find_conn`
+  > matched. Without it, on the agnos of that era — **before `net_src_for` landed in agnos
+  > 1.56.34** — doom's setu-over-TCP connect to the compositor could not complete on an ordinary
+  > boot. (`net_src_for` later fixed exactly that defect, and an un-rigged client↔compositor
+  > connect *was* then demonstrated on 2026-08-02 for `puka` and `crab` — QEMU `-smp 1` only,
+  > never iron. doom was not among them, so this entry's claim stays void either way.)
+  > The hook, its `build.sh` define and `aethersafha-doom-smoke.sh` were all
+  > deleted 2026-08-03. **The `PM_SETU` backend code itself is not withdrawn** — what is void is
+  > the claim that it was proven working on agnos, and the TCP transport it dialled over. It must
+  > be re-proven once setu rides the agnos socket (`anu`). See agnos
+  > `docs/development/planning/ipc.md` §9-§10.
   - **Held-key input — real make/break.** doom opts into setu 0.5.0 FULL key events
     (`setu_client_request_keys` / `SETU_SURF_FULL_KEYS`), so aethersafha delivers key
     **press AND release**; `input_poll_setu` tracks persistent held state exactly like
     doom's raw-scancode path — **hold W to keep moving**, no reliance on key-repeat.
-    QEMU-validated (`agnos scripts/aethersafha-doom-input-smoke.sh`, USB-xHCI keyboard +
-    HMP `sendkey`): doom receives a balanced **10 press / 10 release** over setu. Requires
+    ~~QEMU-validated (`agnos scripts/aethersafha-doom-input-smoke.sh`, USB-xHCI keyboard +
+    HMP `sendkey`): doom receives a balanced **10 press / 10 release** over setu.~~
+    ⛔ **RETRACTED 2026-08-03 — FALSE GREEN.** `aethersafha-doom-input-smoke.sh` also built its
+    kernel with `AETHERSAFHA_SETU_SELFTEST=1`; the events only flowed because that hook's
+    `net_ip = 0x7F000001` assignment made the setu TCP connect possible. Script and hook are
+    deleted; the 10/10 count is not evidence. See agnos `planning/ipc.md` §9-§10. Requires
     setu ≥ 0.5.0 + aethersafha (which honours the flag per-surface); press-only nav clients
     (crab) are unaffected.
 
