@@ -53,16 +53,16 @@ enum MixConst {
     # it -> the cyclic DMA replays ~28ms of stale ring = echo. Keep the ring topped to
     # a deep, jitter-tolerant target instead, driven by snd_avail#69 ground truth.
     AUDIO_AGNOS_TARGET   = 12288;  # steady-state ring depth in FRAMES (~256 ms @48k). Raised 3072->8192
-                                   # ->12288 across iron burns: each deepening shrank the echo (=> it IS
-                                   # underrun-replay) but 8192/~171ms still left a residual, so real
-                                   # ALC897/iron either stalls >171ms OR LPIB-tracking (snd_hw_frames) is
-                                   # inaccurate on hardware (LPIB is a known-unreliable HDA register). 12288
-                                   # = 75% of the 16384 ring — a near-max DIAGNOSTIC depth: if this kills
-                                   # the echo it's underrun-depth (then tune DOWN for latency); if it still
-                                   # echoes at ~256ms buffer it is NOT underrun (=> LPIB/servicer). ~256ms
-                                   # latency is high for in-game SFX — a validation value, to be trimmed.
+    # ->12288 across iron burns: each deepening shrank the echo (=> it IS
+    # underrun-replay) but 8192/~171ms still left a residual, so real
+    # ALC897/iron either stalls >171ms OR LPIB-tracking (snd_hw_frames) is
+    # inaccurate on hardware (LPIB is a known-unreliable HDA register). 12288
+    # = 75% of the 16384 ring — a near-max DIAGNOSTIC depth: if this kills
+    # the echo it's underrun-depth (then tune DOWN for latency); if it still
+    # echoes at ~256ms buffer it is NOT underrun (=> LPIB/servicer). ~256ms
+    # latency is high for in-game SFX — a validation value, to be trimmed.
     AUDIO_AGNOS_MAXITERS = 10;     # cap mix-chunks/tick. Cold rebuild 0->12288 = 9 chunks (9*1371=12339);
-                                   # 10 gives margin. Invariant: MAXITERS >= ceil(TARGET/1371)+1 = 10.
+    # 10 gives margin. Invariant: MAXITERS >= ceil(TARGET/1371)+1 = 10.
     AUDIO_RING_FR        = 16384;  # ring size mirror for the fill telemetry (fill = RING_FR-1 - avail).
     RING_FRAMES          = 16384;  # kernel SND_CBL_FRAMES mirror; fill = (RING_FRAMES-1) - snd_avail.
 }
@@ -206,8 +206,8 @@ fn audio_init(): i64 {
     audio_dev = asl + 1;
     sakshi_info("audio: HDA snd band open", 24);
     return 0;                                  # agnos done — the ALSA tail below
-                                               # (sw_params/prepare/fd/FCNTL) is
-                                               # Linux-only; the snd_* band needs none.
+    # (sw_params/prepare/fd/FCNTL) is
+    # Linux-only; the snd_* band needs none.
     #else
     audio_dev = audio_open_best();
     if (audio_dev == 0) {

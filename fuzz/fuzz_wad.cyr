@@ -75,9 +75,17 @@ fn main() {
             file_write(fd, buf, size);
             file_close(fd);
 
-            # Try to open as WAD (must not crash, may return error)
-            var rc = wad_open(tmppath);
-            if (rc == 0) {
+            # Try to open as WAD (must not crash, may return error).
+            #
+            # ⚠ This read `var rc = wad_open(tmppath); if (rc == 0)`, which
+            # was written against the PRE-v0.27.3 `wad_open` that returned a
+            # 0/-1 sentinel. v0.27.3 made it Result-bearing, and under the
+            # boxed form `rc` was a heap POINTER — never 0 — so this branch
+            # went permanently dead and the fuzzer stopped exercising the
+            # lump path entirely, while still printing "iterations OK".
+            # cyrius 6.6.0's value form forces the correct pair bind.
+            var wtag, werr = wad_open(tmppath);
+            if (is_ok(wtag) == 1) {
                 # Parsed successfully -- try lump operations
                 if (wad_numlumps > 0) {
                     wad_find_lump("E1M1");

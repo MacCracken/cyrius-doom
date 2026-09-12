@@ -192,9 +192,15 @@ fn doom_main(): i64 {
     # `wad_open` + PLAYPAL load via `?`; any `Err` short-circuits
     # back here.  Match on the typed payload to log the cause and
     # exit with a non-zero status.
-    var br = boot_init(wadpath);
-    if (is_err_result(br) == 1) {
-        match load64(br + 8) {
+    #
+    # cyrius 6.6.0 value form: `Result` is `: stack`, so `boot_init`
+    # hands back a (tag, payload) REGISTER PAIR.  Bind both halves —
+    # `var br = boot_init(...)` would keep the tag and drop the payload,
+    # and the old `load64(br + 8)` payload read dereferenced the tag
+    # (0 or 1) → SIGSEGV.  The payload is now just `berr`.
+    var btag, berr = boot_init(wadpath);
+    if (is_err_result(btag) == 1) {
+        match berr {
             WadOpenFailed   => { sakshi_error("cannot open WAD file", 20); }
             WadBadMagic     => { sakshi_error("not a WAD file", 14); }
             WadIoFailed     => { sakshi_error("WAD I/O failure", 15); }

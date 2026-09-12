@@ -71,28 +71,50 @@ fn main() {
     args_init();
     tables_init();
 
-    if (argc() < 2) {
-        syscall(1, 2, "usage: bench <wadfile>\n", 22);
-        syscall(60, 1);
+    # WAD path is OPTIONAL. Without it, run the WAD-free subset (the
+    # fixed-point / trig rows below) and exit 0 — mirroring what
+    # tests/doom.tcyr already does with "(WAD tests skipped ...)".
+    #
+    # It used to `exit 1` on a missing arg, which made bare `cyrius bench`
+    # — the runner invokes each harness with NO arguments — permanently RED
+    # on a surface that compiles perfectly: "0 passed, 1 failed" every run,
+    # with nothing wrong but the usage gate. The WAD is gitignored ("user
+    # provides their own"), so CI could never satisfy it either.
+    # `sh scripts/bench-history.sh` still passes the WAD and is unaffected:
+    # with a WAD argument every row runs in exactly the order it always did,
+    # so bench-history.csv stays row-over-row comparable.
+    var wadpath = 0;
+    if (argc() >= 2) { wadpath = argv(1); }
+
+    if (wadpath != 0) {
+        # ⚠ This was a bare `wad_open(wadpath);` that DISCARDED the Result.
+        # An unreadable or non-WAD path left wad_numlumps == 0 and the bench
+        # sailed on: wad_find_lump returned -1, the palette load no-op'd, and
+        # every WAD row below then measured an EMPTY world and printed
+        # plausible-looking timings. A typo'd WAD path produced numbers, not
+        # an error — and those numbers land in bench-history.csv.
+        var otag, oerr = wad_open(wadpath);
+        if (is_err_result(otag) == 1) {
+            syscall(1, 2, "bench: cannot open WAD\n", 23);
+            return 1;
+        }
+        var pd = wad_read_lump(wad_find_lump("PLAYPAL"));
+        if (pd != 0) { framebuf_set_palette(pd); }
+        framebuf_init();
+        render_load_colormap();
+        texture_init();
+        render_load_sky();
+        sprite_init();
+        map_load("E1M1");
+        map_find_player_start();
+
+        view_x = player_start_x();
+        view_y = player_start_y();
+        view_angle = player_start_angle();
+
+        _b_startan = texture_find("STARTAN3");
+        _b_texcol = alloc(256);
     }
-
-    wad_open(argv(1));
-    var pd = wad_read_lump(wad_find_lump("PLAYPAL"));
-    if (pd != 0) { framebuf_set_palette(pd); }
-    framebuf_init();
-    render_load_colormap();
-    texture_init();
-    render_load_sky();
-    sprite_init();
-    map_load("E1M1");
-    map_find_player_start();
-
-    view_x = player_start_x();
-    view_y = player_start_y();
-    view_angle = player_start_angle();
-
-    _b_startan = texture_find("STARTAN3");
-    _b_texcol = alloc(256);
 
     var benches = vec_new();
     var BATCH = 10000;
@@ -144,6 +166,16 @@ fn main() {
         bench_batch_stop(b5, BATCH);
     }
     vec_push(benches, b5);
+
+    # Everything from here down reads the WAD (lumps, textures, the E1M1
+    # map, the render/sprite/things frame). With no WAD, report the rows
+    # measured so far and exit CLEAN — a skipped row is not a failure.
+    if (wadpath == 0) {
+        syscall(1, 1, "\n=== DOOM Benchmarks (WAD-free subset) ===\n", 43);
+        bench_report_all(benches);
+        syscall(1, 1, "(WAD benches skipped - pass a WAD path to run the full suite)\n", 62);
+        return 0;
+    }
 
     # --- WAD ops ---
     var b6 = bench_new("wad_find_lump");

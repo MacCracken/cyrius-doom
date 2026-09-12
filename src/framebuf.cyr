@@ -329,7 +329,7 @@ fn framebuf_blit(): i64 {
         # Replicate the just-built row to fill the scale block.
         for (var ry = 1; ry < fb_scale; ry += 1) {
             memcpy(fb_buf + (dy0 + ry) * fb_pitch + fb_xoff * bpp_bytes,
-            first, row_bytes);
+              first, row_bytes);
         }
     }
     return 0;
@@ -417,7 +417,7 @@ fn framebuf_flip(): i64 {
         # bits are simply ignored (unscaled 320x200 at the centered offset — degraded
         # but harmless); ship this doom with kernel >= 1.44.20.
         syscall(39, fb_buf, SCREEN_WIDTH, SCREEN_HEIGHT,
-        (fb_scale << 32) | (fb_yoff << 16) | fb_xoff);
+          (fb_scale << 32) | (fb_yoff << 16) | fb_xoff);
     }
     return 0;
     #endif

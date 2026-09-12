@@ -40,11 +40,11 @@
 
 var doom_setu_client = 0;      # *SetuClient (setu.cyr), 0 = not connected
 var doom_setu_msg = 0;         # persistent SetuMsg scratch (lazy) — the poll runs ≥35×/s and
-                               # agnos alloc() never frees, so a per-poll setu_msg_new() is a
-                               # continuous heap leak (audit 2026-07-12 P-4/M-5)
+# agnos alloc() never frees, so a per-poll setu_msg_new() is a
+# continuous heap leak (audit 2026-07-12 P-4/M-5)
 var doom_setu_focus = 1;       # compositor focus (SETU_INPUT_FOCUS); input_poll_setu clears
-                               # all key latches when 0 — else a held key whose RELEASE went
-                               # to the newly-focused window walks the player forever (P-2)
+# all key latches when 0 — else a held key whose RELEASE went
+# to the newly-focused window walks the player forever (P-2)
 
 # Connect to the compositor (⛔ loopback:7700 — RETIRED, see the file header; the path arg is
 # advisory and always was). Returns 1 on success — framebuf_init then sets

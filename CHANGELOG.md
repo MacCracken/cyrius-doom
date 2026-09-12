@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.35.5] - 2026-09-11
+
+### Changed
+
+- **Toolchain `6.5.4` → `6.6.2`.** Migrated to the `Result` value form:
+  3 first-party file(s) changed. Every surface re-verified — build, tests, and any
+  bench/fuzz/distlib target the repo ships.
+
+
 ## [0.35.4] - 2026-08-01 — real thing-z (RC-S6), and the per-sprite BSP walk deleted
 
 Thing offset 16 has been written as literal `0` and **never read** since the engine's first commit.

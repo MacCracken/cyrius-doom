@@ -159,10 +159,10 @@ fn wl__copy_cstr(dst, off, src, cap): i64 {
 fn wl__sock_path(buf): i64 {
     var wd = getenv("WAYLAND_DISPLAY");
     if (wd != 0) { if (load8(wd) == 0x2F) {                 # absolute path -> use directly
-        var n = wl__copy_cstr(buf, 0, wd, WL_PATH_MAX);
-        if (n < 0) { return 0 - 1; }
-        store8(buf + n, 0); return n;
-    } }
+            var n = wl__copy_cstr(buf, 0, wd, WL_PATH_MAX);
+            if (n < 0) { return 0 - 1; }
+            store8(buf + n, 0); return n;
+        } }
     var rt = getenv("XDG_RUNTIME_DIR");
     if (rt == 0) { return 0 - 1; }
     var n = wl__copy_cstr(buf, 0, rt, WL_PATH_MAX);

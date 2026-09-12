@@ -102,7 +102,7 @@ fn render_draw_sky_column(col, y1, y2): i64 {
     if (sky_w <= 0) { return 0; }
     if (sky_h <= 0) { return 0; }
     render_draw_tex_column(col, y1, y2, sky_tex_idx, render_sky_u(col, sky_w),
-    y1 << 16, FIXED_ONE, 0);
+      y1 << 16, FIXED_ONE, 0);
     return 0;
 }
 
@@ -173,21 +173,21 @@ fn render_set_weapon(weapon_id): i64 {
     switch (weapon_id) {
         case 1: { memcpy(weapon_prefix, "PUNG", 4); weapon_fire_max = 4; weapon_fire_ticks = 3; weapon_y_lift = 14; }
         case 2: { memcpy(weapon_prefix, "PISG", 4); weapon_fire_max = 5; weapon_fire_ticks = 3;
-                  memcpy(weapon_flash_prefix, "PISF", 4); weapon_flash_max = 1; }
+            memcpy(weapon_flash_prefix, "PISF", 4); weapon_flash_max = 1; }
         case 3: { memcpy(weapon_prefix, "SHTG", 4); weapon_fire_max = 4; weapon_fire_ticks = 6;
-                  memcpy(weapon_flash_prefix, "SHTF", 4); weapon_flash_max = 2; }
+            memcpy(weapon_flash_prefix, "SHTF", 4); weapon_flash_max = 2; }
         # Chaingun/rocket guns have only 2 frames (A,B), so weapon_fire_frame
         # only ever reaches 1 — flash_max is capped at 1 to match (their CHGFB0 /
         # MISFB0-D0 frames need an independent flash counter; tracked on roadmap).
         case 4: { memcpy(weapon_prefix, "CHGG", 4); weapon_fire_max = 2; weapon_fire_ticks = 4;
-                  memcpy(weapon_flash_prefix, "CHGF", 4); weapon_flash_max = 1; }
+            memcpy(weapon_flash_prefix, "CHGF", 4); weapon_flash_max = 1; }
         case 5: { memcpy(weapon_prefix, "MISG", 4); weapon_fire_max = 2; weapon_fire_ticks = 20;
-                  memcpy(weapon_flash_prefix, "MISF", 4); weapon_flash_max = 1; }
+            memcpy(weapon_flash_prefix, "MISF", 4); weapon_flash_max = 1; }
         case 6: { memcpy(weapon_prefix, "SAWG", 4); weapon_fire_max = 4; weapon_fire_ticks = 2; }
         case 7: { memcpy(weapon_prefix, "PLSG", 4); weapon_fire_max = 2; weapon_fire_ticks = 2;
-                  memcpy(weapon_flash_prefix, "PLSF", 4); weapon_flash_max = 1; }
+            memcpy(weapon_flash_prefix, "PLSF", 4); weapon_flash_max = 1; }
         default: { memcpy(weapon_prefix, "PISG", 4); weapon_fire_max = 5; weapon_fire_ticks = 3;
-                  memcpy(weapon_flash_prefix, "PISF", 4); weapon_flash_max = 1; }
+            memcpy(weapon_flash_prefix, "PISF", 4); weapon_flash_max = 1; }
     }
 
     weapon_fire_frame = 0;
@@ -593,8 +593,8 @@ var masked_dropped = 0;
 var masked_warned = 0;
 
 fn render_store_masked(sx1, sx2, mid_tex, lightnum_val, scale1_val, scale2_val,
-rtx1_val, rty1_val, rtx2_val, rty2_val, u_v1_val, u_v2_val, sd_yoff_val,
-floor_h_val, ceil_h_val, back_floor_h_val, back_ceil_h_val, dpb): i64 {
+  rtx1_val, rty1_val, rtx2_val, rty2_val, u_v1_val, u_v2_val, sd_yoff_val,
+  floor_h_val, ceil_h_val, back_floor_h_val, back_ceil_h_val, dpb): i64 {
     if (masked_segs == 0) { masked_segs = alloc(MASKED_MAX * MASKED_ENTRY_SIZE); }
     if (masked_count >= MASKED_MAX) { masked_dropped += 1; return 0; }
     var base = masked_segs + masked_count * MASKED_ENTRY_SIZE;
@@ -1115,7 +1115,7 @@ fn render_seg(seg_idx): i64 {
     var is_sky = 0;
     var sky_name = map_sector_ceil_tex(sector_idx);
     if (load8(sky_name) == 70 && load8(sky_name + 1) == 95 &&
-    load8(sky_name + 2) == 83 && load8(sky_name + 3) == 75) {
+      load8(sky_name + 2) == 83 && load8(sky_name + 3) == 75) {
         is_sky = 1;
     }
 
@@ -1187,7 +1187,7 @@ fn render_seg(seg_idx): i64 {
             back_ceil_h = map_sector_ceilh(back_sector);
             var bsky_name = map_sector_ceil_tex(back_sector);
             if (load8(bsky_name) == 70 && load8(bsky_name + 1) == 95 &&
-            load8(bsky_name + 2) == 83 && load8(bsky_name + 3) == 75) {
+              load8(bsky_name + 2) == 83 && load8(bsky_name + 3) == 75) {
                 back_is_sky = 1;
             }
         }
@@ -1217,8 +1217,8 @@ fn render_seg(seg_idx): i64 {
         if (mid_tex >= 0) {
             if (is_closed == 0) {
                 render_store_masked(sx1, sx2, mid_tex, lightnum, wscale1, wscale2,
-                rtx1, rty1, rtx2, rty2, u_v1, u_v2, sd_yoff,
-                floor_h, ceil_h, back_floor_h, back_ceil_h, dont_peg_bottom);
+                  rtx1, rty1, rtx2, rty2, u_v1, u_v2, sd_yoff,
+                  floor_h, ceil_h, back_floor_h, back_ceil_h, dont_peg_bottom);
             }
         }
     }
@@ -1314,16 +1314,16 @@ fn render_seg(seg_idx): i64 {
     if (is_twosided != 0) {
         if (upper_tex >= 0) {
             upper_vmid = render_vmid(render_anchor_upper(ceil_h, back_ceil_h,
-            texture_height(upper_tex), dont_peg_top), sd_yoff, eye_h);
+                texture_height(upper_tex), dont_peg_top), sd_yoff, eye_h);
         }
         if (lower_tex >= 0) {
             lower_vmid = render_vmid(render_anchor_lower(back_floor_h, ceil_h,
-            dont_peg_bottom), sd_yoff, eye_h);
+                dont_peg_bottom), sd_yoff, eye_h);
         }
     } else {
         if (mid_tex >= 0) {
             mid_vmid = render_vmid(render_anchor_mid(ceil_h, floor_h,
-            texture_height(mid_tex), dont_peg_bottom), sd_yoff, eye_h);
+                texture_height(mid_tex), dont_peg_bottom), sd_yoff, eye_h);
         }
     }
 
@@ -1486,11 +1486,11 @@ fn render_seg(seg_idx): i64 {
                             # than pinned to the floored ceil_screen row.
                             var upper_ystart = upper_vmid + (ceil_screen - HALF_HEIGHT) * ty_step;
                             render_draw_tex_column(col, ceil_screen, upper_y2,
-                            upper_tex, tex_u, upper_ystart, ty_step, col_light);
+                              upper_tex, tex_u, upper_ystart, ty_step, col_light);
                         }
                     } else {
                         framebuf_vline(col, ceil_screen, upper_y2,
-                        render_shade(wall_base_pal, col_light));
+                          render_shade(wall_base_pal, col_light));
                     }
                 }
             }
@@ -1512,11 +1512,11 @@ fn render_seg(seg_idx): i64 {
                         # depth-dependent), and keeping it would defeat the fix.
                         var lower_ystart = lower_vmid + (lower_y1 - HALF_HEIGHT) * ty_step;
                         render_draw_tex_column(col, lower_y1, floor_screen,
-                        lower_tex, tex_u, lower_ystart, ty_step, col_light);
+                          lower_tex, tex_u, lower_ystart, ty_step, col_light);
                     }
                 } else {
                     framebuf_vline(col, lower_y1, floor_screen,
-                    render_shade(128, col_light));
+                      render_shade(128, col_light));
                 }
             }
 
@@ -1551,11 +1551,11 @@ fn render_seg(seg_idx): i64 {
                     # than pinned to the floored ceil_screen row.
                     var mid_ystart = mid_vmid + (ceil_screen - HALF_HEIGHT) * ty_step;
                     render_draw_tex_column(col, ceil_screen, floor_screen,
-                    mid_tex, tex_u, mid_ystart, ty_step, col_light);
+                      mid_tex, tex_u, mid_ystart, ty_step, col_light);
                 }
             } else {
                 framebuf_vline(col, ceil_screen, floor_screen,
-                render_shade(wall_base_pal, col_light));
+                  render_shade(wall_base_pal, col_light));
             }
 
             store64(clip_solid + col * 8, 1);
@@ -1819,7 +1819,7 @@ fn render_masked_one(mi): i64 {
     # DONTPEGBOTTOM, minus viewz, plus rowoffset) instead of pinned to the
     # floored open_top row. Per-entry, so hoisted out of the column loop.
     var m_vmid = render_vmid(render_anchor_mid(open_ceil, open_floor, tex_h, m_dpb),
-    myoff, eye_h);
+      myoff, eye_h);
 
     # OP-8: same loop-invariant hoist as the wall pass — only `depth` varies per
     # column, so the projection numerators are per-entry constants. Bit-exact.

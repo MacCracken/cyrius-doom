@@ -163,7 +163,7 @@ fn main() {
     assert_eq(MASKED_ENTRY_SIZE, 144, "MASKED_ENTRY_SIZE = 144 (18 fields x 8)");
     masked_count = 0;
     render_store_masked(101, 102, 103, 104, 105, 106, 107, 108, 109, 110,
-    111, 112, 113, 114, 115, 116, 117, 118);
+      111, 112, 113, 114, 115, 116, 117, 118);
     assert_eq(masked_count, 1, "store bumps masked_count");
     var mb = masked_segs;
     assert_eq(load64(mb), 101, "base+0   = sx1");
@@ -186,7 +186,7 @@ fn main() {
     assert_eq(load64(mb + 136), 118, "base+136 = dont_peg_bottom");
     # Second entry must land exactly one stride on, or entry N>0 reads entry N-1's tail.
     render_store_masked(201, 202, 203, 204, 205, 206, 207, 208, 209, 210,
-    211, 212, 213, 214, 215, 216, 217, 218);
+      211, 212, 213, 214, 215, 216, 217, 218);
     assert_eq(load64(masked_segs + 144), 201, "entry 1 starts at base + 144");
     assert_eq(load64(masked_segs + 144 + 136), 218, "entry 1 tail field intact");
     assert_eq(load64(mb + 136), 118, "entry 0 tail NOT overwritten by entry 1");
@@ -226,33 +226,33 @@ fn main() {
     var up_row = HALF_HEIGHT - (t_ceil - 60);
     var up_vmid = render_vmid(render_anchor_upper(t_ceil, t_bceil, t_th, 1), t_yoff, t_view);
     assert_eq(up_vmid + (up_row - HALF_HEIGHT) * t_step, t_yoff << 16,
-    "upper DONTPEGTOP reproduces ystart = yoff");
+      "upper DONTPEGTOP reproduces ystart = yoff");
     # upper, default: shipped ystart = (tex_h - (ceil_h - back_ceil_h) + yoff).
     var up_vmid2 = render_vmid(render_anchor_upper(t_ceil, t_bceil, t_th, 0), t_yoff, t_view);
     assert_eq(up_vmid2 + (up_row - HALF_HEIGHT) * t_step,
-    (t_th - (t_ceil - t_bceil) + t_yoff) << 16,
-    "upper default reproduces ystart = tex_h - (ceil - bceil) + yoff");
+      (t_th - (t_ceil - t_bceil) + t_yoff) << 16,
+      "upper default reproduces ystart = tex_h - (ceil - bceil) + yoff");
     # one-sided mid, default: shipped ystart = yoff at the ceil row.
     var md_vmid = render_vmid(render_anchor_mid(t_ceil, t_floor, t_th, 0), t_yoff, t_view);
     assert_eq(md_vmid + (up_row - HALF_HEIGHT) * t_step, t_yoff << 16,
-    "mid default reproduces ystart = yoff");
+      "mid default reproduces ystart = yoff");
     # one-sided mid, DONTPEGBOTTOM: shipped = (tex_h - (ceil_h - floor_h) + yoff).
     var md_vmid2 = render_vmid(render_anchor_mid(t_ceil, t_floor, t_th, 1), t_yoff, t_view);
     assert_eq(md_vmid2 + (up_row - HALF_HEIGHT) * t_step,
-    (t_th - (t_ceil - t_floor) + t_yoff) << 16,
-    "mid DONTPEGBOTTOM reproduces ystart = tex_h - (ceil - floor) + yoff");
+      (t_th - (t_ceil - t_floor) + t_yoff) << 16,
+      "mid DONTPEGBOTTOM reproduces ystart = tex_h - (ceil - floor) + yoff");
     # lower, DONTPEGBOTTOM: shipped = (ceil_h - back_floor + yoff) at the back-floor row.
     var lo_row = HALF_HEIGHT - (t_bceil - 60);
     var lo_vmid = render_vmid(render_anchor_lower(t_bceil, t_ceil, 1), t_yoff, t_view);
     assert_eq(lo_vmid + (lo_row - HALF_HEIGHT) * t_step,
-    (t_ceil - t_bceil + t_yoff) << 16,
-    "lower DONTPEGBOTTOM reproduces ystart = ceil - back_floor + yoff");
+      (t_ceil - t_bceil + t_yoff) << 16,
+      "lower DONTPEGBOTTOM reproduces ystart = ceil - back_floor + yoff");
     # A clamped start row must CONTINUE the texture, not restart it — the
     # pre-existing upper/one-sided-mid bug TX-3 subsumes. Ten rows lower must
     # read exactly ten world units further down the texture.
     assert_eq((md_vmid + (up_row + 10 - HALF_HEIGHT) * t_step)
-    - (md_vmid + (up_row - HALF_HEIGHT) * t_step), 10 * t_step,
-    "a clipped start row advances V, never restarts it");
+      - (md_vmid + (up_row - HALF_HEIGHT) * t_step), 10 * t_step,
+      "a clipped start row advances V, never restarts it");
 
     # ============================================================
     test_group("world-anchored ray-cast (TX-MASKED / TX-2)");
@@ -584,15 +584,15 @@ fn main() {
     var zeye = 100 << 16;
     var zvy  = 200 << 16;
     assert_eq(sprite_bottom_row(zeye, zeye, zvy), HALF_HEIGHT,
-              "a thing at eye height projects to the horizon");
+      "a thing at eye height projects to the horizon");
     assert_lt(sprite_bottom_row(200 << 16, zeye, zvy), HALF_HEIGHT,
-              "a thing ABOVE the eye projects above the horizon");
+      "a thing ABOVE the eye projects above the horizon");
     assert_gt(sprite_bottom_row(50 << 16, zeye, zvy), HALF_HEIGHT,
-              "a thing BELOW the eye projects below it");
+      "a thing BELOW the eye projects below it");
     # Monotone in z — the property a pixel diff cannot distinguish from an
     # inversion in a range nothing visible happens to occupy.
     assert_lt(sprite_bottom_row(150 << 16, zeye, zvy), sprite_bottom_row(120 << 16, zeye, zvy),
-              "sprite_bottom_row is monotone in z");
+      "sprite_bottom_row is monotone in z");
 
     # Projectile launch z. MUTANT M6 (using raw 32, or aliasing the HORIZONTAL
     # MISSILE_SPAWN_OFFSET) dies here; MUTANT M7 (writing z only for a fresh slot)
@@ -602,13 +602,13 @@ fn main() {
     var zr1 = thing_spawn_missile(0, 0, 0);
     if (zr1 >= 0) {
         assert_eq(thing_z(zr1), (64 << 16) + (32 << 16),
-                  "a rocket launches at player_z + 32 units (16.16, not raw)");
+          "a rocket launches at player_z + 32 units (16.16, not raw)");
         thing_set_flags(zr1, 0);                 # spend it, freeing the slot
         player_z = 200 << 16;                    # shooter is now somewhere higher
         var zr2 = thing_spawn_missile(0, 0, 0);
         assert_eq(zr2, zr1, "the spent slot is recycled (non-vacuity)");
         assert_eq(thing_z(zr2), (200 << 16) + (32 << 16),
-                  "a RECYCLED slot gets the new launch z, not the old one");
+          "a RECYCLED slot gets the new launch z, not the old one");
     }
 
     # ============================================================
@@ -626,16 +626,16 @@ fn main() {
     var ov_rr = 40 << 16;
     # (a) not currently overlapping => no licence, regardless of destination
     assert_eq(thing_overlap_escapes(0, 0, 10 << 16, 0, 100 << 16, 0, ov_rr), 0,
-              "clear mover gets no escape licence");
+      "clear mover gets no escape licence");
     # (b) overlapping, moving AWAY => allowed
     assert_eq(thing_overlap_escapes(0, 0, 0 - (10 << 16), 0, 20 << 16, 0, ov_rr), 1,
-              "overlapped mover may increase separation");
+      "overlapped mover may increase separation");
     # (c) overlapping, moving CLOSER => still blocked (cannot burrow deeper)
     assert_eq(thing_overlap_escapes(0, 0, 10 << 16, 0, 20 << 16, 0, ov_rr), 0,
-              "overlapped mover may NOT decrease separation");
+      "overlapped mover may NOT decrease separation");
     # (d) overlapping, separation unchanged => blocked (strictly-greater, not >=)
     assert_eq(thing_overlap_escapes(0, 0, 0, 0, 20 << 16, 0, ov_rr), 0,
-              "a zero-progress step is not an escape");
+      "a zero-progress step is not an escape");
 
     # End-to-end through thing_move_clear: two overlapping solid monsters must
     # be able to separate, and must still not be able to close on each other.
@@ -671,15 +671,15 @@ fn main() {
     #     dest (-2,-4) -> |18|,|36| both < 40, still overlapping, separation UP
     #     dest ( 2, 4) -> |14|,|28| both < 40, still overlapping, separation DOWN
     assert_eq(thing_move_clear(0, 0 - (2 << 16), 0 - (4 << 16)), 1,
-              "an overlapped monster CAN step away while still overlapping");
+      "an overlapped monster CAN step away while still overlapping");
     assert_eq(thing_move_clear(0, 2 << 16, 4 << 16), 0,
-              "... but still cannot step further INTO it");
+      "... but still cannot step further INTO it");
 
     # And the precondition itself: a mover that is NOT overlapping must get no
     # licence even when the step increases separation, or the rule would quietly
     # become "any retreat is always legal".
     assert_eq(thing_overlap_escapes(0, 0, 0 - (10 << 16), 0, 100 << 16, 0, ov_rr), 0,
-              "a CLEAR mover retreating gets no licence (precondition is load-bearing)");
+      "a CLEAR mover retreating gets no licence (precondition is load-bearing)");
 
     # ============================================================
     test_group("F331-4: vanilla 8-direction chase (v0.35.2)");
@@ -1370,7 +1370,7 @@ fn main() {
         }
         assert(rj_pairs > 0, "REJECT sweep examined sector pairs");
         assert_eq(rj_disagree, 0,
-        "REJECT never claims BLOCKED where the real sight walk says visible");
+          "REJECT never claims BLOCKED where the real sight walk says visible");
         # Self-check: the sweep must actually have found blocked pairs, or the
         # assert above is vacuous (the same zero-coverage trap as fuzz_flat).
         assert(rj_blocked > 0, "the REJECT sweep found blocked pairs (not vacuous)");
@@ -1479,7 +1479,7 @@ fn main() {
         # (a) the old by-name path chases its own content around the table.
         var wp_after = texture_find("SLADRIP1");
         assert(wp_after != wp_before,
-        "by-name lookup FOLLOWS the rotation to a new slot (why the animation was invisible)");
+          "by-name lookup FOLLOWS the rotation to a new slot (why the animation was invisible)");
 
         # (b) the frozen index stays put and therefore serves the NEXT frame.
         var wp_changed = 0;
@@ -1493,7 +1493,7 @@ fn main() {
             }
         }
         assert(wp_changed > 0,
-        "frozen index serves DIFFERENT pixels after a rotation (the animation advances)");
+          "frozen index serves DIFFERENT pixels after a rotation (the animation advances)");
 
         # (c) THE RENDER-PATH GUARD. The two asserts above are properties of the
         # texture TABLE and hold no matter what render_seg does — they document
@@ -1511,7 +1511,7 @@ fn main() {
         var wp_cached = sidedef_tex_mid(wp_sd);
         anim_rotate_tex_3(anim_sladrip);
         assert_eq(sidedef_tex_mid(wp_sd), wp_cached,
-        "OP-7 index is STABLE across a rotation (render must not re-resolve by name)");
+          "OP-7 index is STABLE across a rotation (render must not re-resolve by name)");
         # And the cache must survive a map reload by being rebuilt, not stale.
         assert_eq(map_load("E1M1"), 0, "E1M1 reloads");
         texture_build_map_caches();
@@ -1611,19 +1611,19 @@ fn main() {
         player_x = 3100 << 16; player_y = 0 - (3400 << 16);
         player_z = 0 - (24 << 16);
         assert_eq(thing_move_clear(0, thing_x(0) - 65536, thing_y(0)), 0,
-            "pier imp refuses the west ledge (vanilla MF_DROPOFF)");
+          "pier imp refuses the west ledge (vanilla MF_DROPOFF)");
         player_z = 104 << 16;
         assert_eq(thing_move_clear(0, thing_x(0) - 65536, thing_y(0)), 0,
-            "west verdict invariant under player_z (pre-fix: walked off the cliff)");
+          "west verdict invariant under player_z (pre-fix: walked off the cliff)");
         # Open ground far from any ledge line: a chase step is legal and
         # equally player_z-invariant (pre-fix a LOW player froze HIGH-ground
         # monsters this way).
         store64(tmv, 2000 << 16); store64(tmv + 8, 0 - (3300 << 16));
         assert_eq(thing_move_clear(0, thing_x(0) + 65536, thing_y(0)), 1,
-            "open-ground chase step legal");
+          "open-ground chase step legal");
         player_z = 0 - (300 << 16);
         assert_eq(thing_move_clear(0, thing_x(0) + 65536, thing_y(0)), 1,
-            "open-ground verdict invariant under player_z");
+          "open-ground verdict invariant under player_z");
         thing_count = 0;
 
         # ============================================================
@@ -1812,9 +1812,9 @@ fn main() {
         # RC-G4: sight through the closed door must be blocked (it used to
         # skip every two-sided line — bullets/wake straight through doors).
         assert_eq(thing_check_sight(1420 << 16, (0 - 2496) << 16, 1600 << 16, (0 - 2496) << 16), 0,
-        "sight blocked through the closed door");
+          "sight blocked through the closed door");
         assert_eq(thing_check_sight(1420 << 16, (0 - 2496) << 16, 1470 << 16, (0 - 2496) << 16), 1,
-        "sight clear between two open points");
+          "sight clear between two open points");
 
         # RC-G5: a rocket fired point-blank at the closed door must NOT
         # materialize on the far side (spawn offset is 32 units, the door
@@ -1825,7 +1825,7 @@ fn main() {
         var mi_idx = thing_spawn_missile(player_x, player_y, 0);
         assert(mi_idx >= 0, "missile spawned");
         assert_eq(thing_check_sight(player_x, player_y, thing_x(mi_idx), thing_y(mi_idx)), 1,
-        "missile spawn point is on the shooter's side of the door");
+          "missile spawn point is on the shooter's side of the door");
         thing_set_flags(mi_idx, 0);
 
         # RC-G3: E only activates a special the use RAY crosses — facing away
@@ -2033,7 +2033,7 @@ fn main() {
         thing_count = thing_count - 1;
         for (var g1t2 = 0; g1t2 < 600; g1t2 += 1) { doors_tick(); }
         assert_eq(load64(map_sectors + 4 * MAP_SECTOR_SIZE + 8), 0,
-                  "RC-G1: door fully closes once the monster is gone");
+          "RC-G1: door fully closes once the monster is gone");
 
         # A CORPSE must not hold the door open — death re-flags to
         # TF_ACTIVE|TF_CORPSE with SOLID cleared, and the scan filters on SOLID.
@@ -2049,7 +2049,7 @@ fn main() {
         door_open(4);
         for (var g1t3 = 0; g1t3 < 700; g1t3 += 1) { doors_tick(); }
         assert_eq(load64(map_sectors + 4 * MAP_SECTOR_SIZE + 8), 0,
-                  "RC-G1: a CORPSE in the doorway does not hold the door open");
+          "RC-G1: a CORPSE in the doorway does not hold the door open");
         thing_set_flags(g1c2, 0);
         thing_count = thing_count - 1;
 
@@ -2103,8 +2103,8 @@ fn main() {
             var pr1_m2 = thing_spawn_missile(1056 << 16, (0 - 3320) << 16, 0);
             assert_eq(pr1_m2, pr1_m1, "PRE-1: the spent projectile slot is recycled");
             assert_eq(thing_sector(pr1_m2),
-                      map_point_sector(thing_x(pr1_m2), thing_y(pr1_m2)),
-                      "PRE-1: a recycled projectile slot re-resolves its sector");
+              map_point_sector(thing_x(pr1_m2), thing_y(pr1_m2)),
+              "PRE-1: a recycled projectile slot re-resolves its sector");
         }
 
         wad_close();

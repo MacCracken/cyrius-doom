@@ -141,10 +141,10 @@ fn win_poll_events(win): i64 {
     # configure — else a compositor that persistently sends a sub-320x200 (or huge)
     # size we clamp away would report RESIZE every frame → shm rebuild churn.
     if (wl_cfg_w > 0) { if (wl_cfg_h > 0) {
-        var cw, ch = win__clamp_size(wl_cfg_w, wl_cfg_h);
-        if (cw != win_w) { m = m | WIN_EV_RESIZE; }
-        if (ch != win_h) { m = m | WIN_EV_RESIZE; }
-    } }
+            var cw, ch = win__clamp_size(wl_cfg_w, wl_cfg_h);
+            if (cw != win_w) { m = m | WIN_EV_RESIZE; }
+            if (ch != win_h) { m = m | WIN_EV_RESIZE; }
+        } }
     return m;
 }
 

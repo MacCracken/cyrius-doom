@@ -163,7 +163,7 @@ fn main() {
                 if (d < nlumps - 1) {
                     # "FLATnn" with a fuzzed tail so hashes vary and collide.
                     _fz_name(e + 8, 70, 76, 65, 84,
-                    48 + (d % 10), 48 + ((d / 10) % 10), _fz_byte() % 90, 0);
+                      48 + (d % 10), 48 + ((d / 10) % 10), _fz_byte() % 90, 0);
                 }
             }
         }
