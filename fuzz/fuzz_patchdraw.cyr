@@ -1,0 +1,306 @@
+# Fuzz: DIFFERENTIAL — the two range-clamped patch decoders vs a reference.
+#
+# v0.35.6 rewrote render_blit_psprite (the HUD gun) and st_draw_patch_shaded
+# (every status-bar / menu / title patch) to clamp their column and row ranges
+# instead of testing each pixel with `continue`. The rewrite was forced: both
+# are for > while > for nests, a shape cyrius still mis-binds `continue` in as
+# of 6.6.6. A clamp is only a correct replacement if it draws EXACTLY the pixels
+# the per-pixel tests would have — an off-by-one at an edge loses or smears a
+# row or column, and no crash-only fuzz can see that.
+#
+# So each iteration draws one hostile or edge-straddling patch through the REAL
+# decoder into the framebuffer and through a REFERENCE decoder into a second
+# buffer, then requires the two to be byte-identical. The reference keeps the
+# original per-pixel bounds tests, written with nested ifs and early returns so
+# it contains no `continue` at all (the defect it would otherwise share).
+#
+# Positions are biased to straddle every screen edge, with occasional far
+# (±2^40) offsets to exercise the clamp arithmetic. The anti-vacuous counters
+# printed at the end show that pixels were drawn and that both axes clipped.
+#
+# Run: cyrius build fuzz/fuzz_patchdraw.cyr build/fuzz_patchdraw && ./build/fuzz_patchdraw
+
+include "lib/string.cyr"
+include "lib/alloc.cyr"
+include "lib/vec.cyr"
+include "lib/str.cyr"
+include "lib/fmt.cyr"
+include "lib/io.cyr"
+include "lib/args.cyr"
+include "lib/assert.cyr"
+include "lib/sakshi.cyr"
+
+include "lib/bsp.cyr"
+include "src/fixed.cyr"
+include "src/tables.cyr"
+include "src/wad.cyr"
+# framebuf.cyr references win_*/present_mode in its #ifndef-AGNOS branch, so
+# this (Linux) fuzz build needs the platform files too.
+include "src/platform/wayland/wire.cyr"
+include "src/platform/wayland/client.cyr"
+include "src/platform/wayland/shm.cyr"
+include "src/platform/window.cyr"
+include "src/framebuf.cyr"
+include "src/map.cyr"
+include "src/texture.cyr"
+include "src/render.cyr"
+include "src/input.cyr"
+include "src/player.cyr"
+include "src/things.cyr"
+include "src/sprite.cyr"
+include "src/status.cyr"
+
+# Cross-module side-effects the (compiled but unreached) player/things code
+# references — stub so they resolve. Neither decoder touches any of them.
+fn sound_pistol(): i64 { return 0; }
+fn sound_shotgun(): i64 { return 0; }
+fn sound_plasma(): i64 { return 0; }
+fn sound_explode(): i64 { return 0; }
+fn sound_weapon_dry(): i64 { return 0; }
+fn sound_player_pain(): i64 { return 0; }
+fn sound_monster_pain(): i64 { return 0; }
+fn sound_monster_die(): i64 { return 0; }
+fn sound_item_pickup(): i64 { return 0; }
+fn audio_play_name(lump_name): i64 { return 0; }
+fn audio_play_at(lump_name, sx, sy): i64 { return 0; }
+fn level_add_kill(): i64 { return 0; }
+fn level_add_item(): i64 { return 0; }
+fn tick_get_count(): i64 { return 0; }
+fn doors_walk_trigger(ox, oy, nx, ny): i64 { return 0; }
+
+var _fz_state = 0x9E3779B97F4A7C15;
+
+fn _fz_rand(): i64 {
+    _fz_state = _fz_state * 6364136223846793005 + 1442695040888963407;
+    return _fz_state;
+}
+
+fn _fz_byte(): i64 {
+    var r = _fz_rand() >>> 24;
+    if (r < 0) { r = 0 - r; }
+    return r % 256;
+}
+
+# Uniform-ish integer in [lo, hi].
+fn _fz_range(lo, hi): i64 {
+    var r = _fz_rand() >>> 16;
+    if (r < 0) { r = 0 - r; }
+    return lo + r % (hi - lo + 1);
+}
+
+fn _fz_st16(buf, v): i64 {
+    store8(buf, v & 255);
+    store8(buf + 1, (v >>> 8) & 255);
+    return 0;
+}
+
+fn _fz_st32(buf, v): i64 {
+    store8(buf, v & 255);
+    store8(buf + 1, (v >>> 8) & 255);
+    store8(buf + 2, (v >>> 16) & 255);
+    store8(buf + 3, (v >>> 24) & 255);
+    return 0;
+}
+
+# ── reference decoder (per-pixel bounds tests, no `continue`) ────────
+var ref_buf = 0;
+var ref_drawn = 0;
+var ref_clip_x = 0;
+var ref_clip_y = 0;
+
+fn ref_pixel(x, y, c): i64 {
+    store8(ref_buf + y * SCREEN_WIDTH + x, c);
+    ref_drawn += 1;
+    return 0;
+}
+
+# One column's post walk. hud == 0: always shade (psprite); hud == 1: shade
+# only when light > 0 (st_draw_patch_shaded's `shade` rule).
+fn ref_column(buf, sz, pend, col, scr_x, y0, hud, light): i64 {
+    if (8 + col * 4 + 4 > sz) { return 0; }
+    var col_off = read_le32(buf + 8 + col * 4);
+    if (col_off >= sz) { return 0; }
+    var post = buf + col_off;
+    var safety = 0;
+    while (safety < PATCH_POST_MAX) {
+        if (post + 1 >= pend) { return 0; }
+        var td = load8(post);
+        if (td == 255) { return 0; }
+        var length = load8(post + 1);
+        if (post + 4 + length > pend) { return 0; }
+        var pixels = post + 3;
+        for (var r = 0; r < length; r += 1) {
+            var scr_y = y0 + td + r;
+            if (scr_y >= 0 && scr_y < SCREEN_HEIGHT) {
+                var pal = load8(pixels + r);
+                if (hud == 0) { pal = render_shade(pal, light); }
+                if (hud == 1 && light > 0) { pal = render_shade(pal, light); }
+                ref_pixel(scr_x, scr_y, pal);
+            } else {
+                ref_clip_y += 1;
+            }
+        }
+        post += 4 + length;
+        safety += 1;
+    }
+    return 0;
+}
+
+fn ref_psprite(buf, psz, light): i64 {
+    var pw = read_le16(buf);
+    if (pw > TEX_COMP_W_MAX) { pw = TEX_COMP_W_MAX; }
+    var loff = read_le16(buf + 4);
+    var toff = read_le16(buf + 6);
+    if (loff >= 0x8000) { loff -= 0x10000; }
+    if (toff >= 0x8000) { toff -= 0x10000; }
+    var sx = 1 - loff + weapon_bob_x;
+    var sy = 16 - toff + weapon_bob_y - weapon_y_lift;
+    var pend = buf + psz;
+    for (var col = 0; col < pw; col += 1) {
+        var scr_x = sx + col;
+        if (scr_x >= 0 && scr_x < SCREEN_WIDTH) {
+            ref_column(buf, psz, pend, col, scr_x, sy, 0, light);
+        } else {
+            ref_clip_x += 1;
+        }
+    }
+    return 0;
+}
+
+fn ref_hud(buf, px, py, shade, sz): i64 {
+    if (sz < 8) { return 0; }
+    var pend = buf + sz;
+    var pw = read_le16(buf);
+    if (pw > TEX_COMP_W_MAX) { pw = TEX_COMP_W_MAX; }
+    for (var col = 0; col < pw; col += 1) {
+        var scr_x = px + col;
+        if (scr_x >= 0 && scr_x < SCREEN_WIDTH) {
+            ref_column(buf, sz, pend, col, scr_x, py, 1, shade);
+        } else {
+            ref_clip_x += 1;
+        }
+    }
+    return 0;
+}
+
+# ── patch generator ─────────────────────────────────────────────────
+# Mostly well-formed patches (a column directory pointing at real post chains)
+# so the draw loops actually run, with random corruption layered on top.
+fn gen_patch(buf, psz): i64 {
+    for (var j = 0; j < psz; j = j + 1) { store8(buf + j, _fz_byte()); }
+    if (psz < 8) { return 0; }
+    var w = _fz_range(0, 90);
+    if (_fz_byte() < 20) { w = _fz_range(90, 400); }
+    _fz_st16(buf, w);
+    _fz_st16(buf + 2, _fz_range(0, 255));
+    if (_fz_byte() < 128) {
+        # near-screen offsets: the patch straddles an edge
+        _fz_st16(buf + 4, _fz_range(0 - 360, 60) & 0xFFFF);
+        _fz_st16(buf + 6, _fz_range(0 - 260, 60) & 0xFFFF);
+    }
+    var dir_end = 8 + w * 4;
+    if (dir_end >= psz) { return 0; }
+    # post chains in [dir_end, psz): td, length, pad, pixels..., pad
+    var p = dir_end;
+    while (p + 4 < psz) {
+        var room = psz - p - 4;
+        var len = _fz_range(0, 140);
+        if (len > room) { len = room; }
+        store8(buf + p, _fz_range(0, 254));
+        store8(buf + p + 1, len);
+        p += 4 + len;
+        if (_fz_byte() < 70 && p < psz) { store8(buf + p, 255); p += 1; }
+    }
+    for (var col = 0; col < w; col += 1) {
+        if (_fz_byte() < 200) {
+            _fz_st32(buf + 8 + col * 4, _fz_range(dir_end, psz - 1));
+        }
+    }
+    return 0;
+}
+
+fn main() {
+    alloc_init();
+    args_init();
+    tables_init();
+    framebuf_init();
+
+    var iters = 20000;
+    if (argc() > 1) { iters = str_to_int(str_from(argv(1))); }
+    if (argc() > 2) { _fz_state = str_to_int(str_from(argv(2))); }
+
+    ref_buf = alloc(SCREEN_WIDTH * SCREEN_HEIGHT);
+    # A random COLORMAP so render_shade does real lookups (and its light clamp
+    # runs) — both decoders see the same table.
+    colormap = alloc(34 * 256);
+    for (var k = 0; k < 34 * 256; k += 1) { store8(colormap + k, _fz_byte()); }
+
+    var buf = alloc(4096);
+    var mism = 0;
+    var n_psprite = 0;
+    var n_hud = 0;
+
+    for (var i = 0; i < iters; i = i + 1) {
+        var psz = _fz_range(8, 3000);
+        if (_fz_byte() < 12) { psz = _fz_range(0, 12); }
+        gen_patch(buf, psz);
+
+        var bg = _fz_byte();
+        memset(screen_buf, bg, SCREEN_WIDTH * SCREEN_HEIGHT);
+        memset(ref_buf, bg, SCREEN_WIDTH * SCREEN_HEIGHT);
+
+        if ((i & 1) == 0 && psz >= 8) {
+            # render_draw_weapon only calls the blit with 8 <= psz.
+            weapon_bob_x = _fz_range(0 - 40, 40);
+            weapon_bob_y = _fz_range(0 - 40, 40);
+            weapon_y_lift = _fz_range(0, 160);
+            var light = _fz_range(0 - 4, 36);
+            render_blit_psprite(buf, psz, light);
+            ref_psprite(buf, psz, light);
+            n_psprite += 1;
+        } else {
+            var px = _fz_range(0 - 420, 740);
+            var py = _fz_range(0 - 300, 500);
+            var far = _fz_byte();
+            if (far < 12) { px = 1 << 40; }
+            if (far >= 12 && far < 24) { px = 0 - (1 << 40); }
+            if (far >= 24 && far < 36) { py = 1 << 40; }
+            if (far >= 36 && far < 48) { py = 0 - (1 << 40); }
+            var shade = _fz_range(0 - 3, 35);
+            st_draw_patch_shaded(buf, px, py, shade, psz);
+            ref_hud(buf, px, py, shade, psz);
+            n_hud += 1;
+        }
+
+        if (memeq(screen_buf, ref_buf, SCREEN_WIDTH * SCREEN_HEIGHT) != 1) {
+            mism += 1;
+            if (mism <= 5) {
+                syscall(1, 1, "MISMATCH iter ", 14); fmt_int(i);
+                syscall(1, 1, " psz ", 5); fmt_int(psz);
+                syscall(1, 1, "\n", 1);
+            }
+        }
+    }
+
+    syscall(1, 1, "fuzz_patchdraw: ", 16);
+    fmt_int(iters);
+    syscall(1, 1, " iterations, psprite ", 21); fmt_int(n_psprite);
+    syscall(1, 1, " hud ", 5); fmt_int(n_hud);
+    syscall(1, 1, " | ref px drawn ", 16); fmt_int(ref_drawn);
+    syscall(1, 1, " clipped-cols ", 14); fmt_int(ref_clip_x);
+    syscall(1, 1, " clipped-rows ", 14); fmt_int(ref_clip_y);
+    syscall(1, 1, " | mismatches ", 14); fmt_int(mism);
+    syscall(1, 1, "\n", 1);
+    if (mism != 0) { return 1; }
+    if (ref_drawn == 0 || ref_clip_x == 0 || ref_clip_y == 0) {
+        syscall(1, 1, "fuzz_patchdraw: VACUOUS (nothing drawn or nothing clipped)\n", 60);
+        return 2;
+    }
+    syscall(1, 1, "fuzz_patchdraw: ", 16);
+    fmt_int(iters);
+    syscall(1, 1, " iterations OK\n", 15);
+    return 0;
+}
+
+var r = main();
+syscall(60, r);

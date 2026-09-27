@@ -63,6 +63,34 @@ fn sound_door_open(): i64 { return 0; }
 fn level_exit_normal(): i64 { return 0; }
 fn level_exit_secret(): i64 { return 0; }
 
+# v0.35.6 interactables helpers (WAD-gated groups at the end of main).
+fn iv_place(x, y, ang): i64 {
+    player_x = x << 16;
+    player_y = y << 16;
+    player_angle = ang;
+    var s = player_find_sector();
+    if (s >= 0) { player_z = map_sector_floorh(s) << 16; }
+    return 0;
+}
+fn iv_load(nm): i64 {
+    map_load(nm);
+    texture_build_map_caches();
+    doors_init();
+    thing_count = 0;
+    iv_place(0, 0, 0);
+    return 0;
+}
+fn iv_floor(s): i64 { return load64(map_sectors + s * MAP_SECTOR_SIZE); }
+fn iv_ceil(s): i64 { return load64(map_sectors + s * MAP_SECTOR_SIZE + 8); }
+fn iv_ticks(n): i64 {
+    for (var t = 0; t < n; t += 1) { doors_tick(); }
+    return 0;
+}
+# Walk the player across a line: (ax,ay) -> (bx,by) in raw map units.
+fn iv_cross(ax, ay, bx, by): i64 {
+    return doors_walk_trigger(ax << 16, ay << 16, bx << 16, by << 16);
+}
+
 fn main() {
     alloc_init();
     args_init();
@@ -923,10 +951,14 @@ fn main() {
     assert_eq(bhit, 1, "ray passes the spent barrel and hits the monster (idx 1)");
     assert_eq(thing_health(1), 90, "monster behind the barrel took the shot");
 
-    # Decoration death still advances to an inert corpse (does not freeze).
+    # The death sequence still does not freeze — and, v0.35.6 (P-1), it no longer
+    # leaves a corpse either: that "inert corpse" was drawn from BAR1's missing H-L
+    # frames, i.e. as an intact BAR1A0 barrel nothing could touch. Vanilla plays
+    # BEXP A..E (5+5+5+10+10 = 35 tics) and REMOVES the barrel.
     var bg = 0;
-    while (thing_state(0) == STATE_DIE && bg < 20) { thing_ai_tick(0); bg += 1; }
-    assert_eq(thing_state(0), STATE_DEAD, "spent barrel advances to an inert corpse");
+    while (thing_state(0) == STATE_DIE && bg < 60) { thing_ai_tick(0); bg += 1; }
+    assert_eq(bg, 35, "barrel death sequence runs 35 tics (BEXP 5+5+5+10+10)");
+    assert_eq(thing_flags(0) & TF_ACTIVE, 0, "a spent barrel is REMOVED, not left standing (P-1)");
 
     # ============================================================
     test_group("player: inventory carry across levels (F-G6)");
@@ -1033,6 +1065,145 @@ fn main() {
     assert_eq(player_armor, 0, "armor depletes to 0");
     assert_eq(player_armor_class, 0, "class cleared when armor hits 0");
     assert_eq(player_health, 65, "depleting armor still absorbs its remaining 5 (100-35)");
+
+    # ============================================================
+    test_group("pickups: vanilla touch, refusals, switching, counting (v0.35.6 P-3/4/5/6/9/10/11)");
+    # ============================================================
+    # Radius and z are set explicitly: item radius 20, player radius 16 -> the
+    # vanilla contact box is |dx| < 36 and |dy| < 36; z within [-8, +56] of feet.
+    player_x = 0; player_y = 0; player_z = 0; player_health = 100; game_skill = 3;
+    thing_count = 0;
+    store64(pk, 30 << 16); store64(pk + 8, 0); store64(pk + 16, 0);
+    store64(pk + 32, TTYPE_CLIP); store64(pk + 80, 20 << 16); store64(pk + 104, TF_ACTIVE | TF_PICKUP);
+    thing_count = 1;
+    player_weapons = 6; player_weapon = 2; player_ammo_bullets = 50;
+    things_check_pickups();
+    assert_eq(player_ammo_bullets, 60, "P-3: a clip 30u away is touched (box 36; the old 20u circle missed it)");
+    store64(pk, 36 << 16); store64(pk + 104, TF_ACTIVE | TF_PICKUP);
+    things_check_pickups();
+    assert_eq(player_ammo_bullets, 60, "P-3: |dx| = 36 is outside the contact box");
+    store64(pk, 30 << 16); store64(pk + 8, 30 << 16);
+    things_check_pickups();
+    assert_eq(player_ammo_bullets, 70, "P-3: a diagonal (30,30) item is touched — a box, not a circle");
+    store64(pk, 0); store64(pk + 8, 0); store64(pk + 16, 57 << 16); store64(pk + 104, TF_ACTIVE | TF_PICKUP);
+    things_check_pickups();
+    assert_eq(player_ammo_bullets, 70, "P-9: an item 57 above the feet is out of reach");
+    store64(pk + 16, 0 - (9 << 16));
+    things_check_pickups();
+    assert_eq(player_ammo_bullets, 70, "P-9: an item 9 below the feet is out of reach");
+    store64(pk + 16, 0 - (8 << 16));
+    things_check_pickups();
+    assert_eq(player_ammo_bullets, 80, "P-9: 8 below the feet is still in reach");
+    store64(pk + 16, 0);
+    player_ammo_bullets = 200;
+    store64(pk + 104, TF_ACTIVE | TF_PICKUP);
+    things_check_pickups();
+    assert((thing_flags(0) & TF_ACTIVE) != 0, "P-4: a clip at 200 bullets stays on the floor");
+    player_weapons = 6 | 8; player_weapon = 2; player_ammo_shells = 50;
+    store64(pk + 32, TTYPE_SHOTGUN); store64(pk + 104, TF_ACTIVE | TF_PICKUP);
+    things_check_pickups();
+    assert((thing_flags(0) & TF_ACTIVE) != 0, "P-4: an owned shotgun at full shells stays");
+    player_ammo_shells = 10;
+    things_check_pickups();
+    assert_eq(player_ammo_shells, 18, "P-4: an owned shotgun is still taken for its 8 shells");
+    assert_eq(player_weapon, 2, "P-5: taking an owned shotgun for ammo (not from empty) keeps the pistol");
+    player_weapons = 6 | 64;
+    store64(pk + 32, TTYPE_CHAINSAW); store64(pk + 104, TF_ACTIVE | TF_PICKUP);
+    things_check_pickups();
+    assert((thing_flags(0) & TF_ACTIVE) != 0, "P-4: a second chainsaw stays");
+    player_weapons = 6; player_weapon = 2; player_ammo_shells = 0;
+    store64(pk + 32, TTYPE_SHOTGUN); store64(pk + 104, TF_ACTIVE | TF_PICKUP);
+    things_check_pickups();
+    assert_eq(player_weapon, 3, "P-5: picking up the shotgun selects it");
+    assert((player_weapons & 8) != 0, "P-5: ...and owns it");
+    player_weapon = 1; player_weapons = 6; player_ammo_bullets = 0;
+    store64(pk + 32, TTYPE_CLIP); store64(pk + 104, TF_ACTIVE | TF_PICKUP);
+    things_check_pickups();
+    assert_eq(player_weapon, 2, "P-5: bullets from empty on the fist select the pistol");
+    player_weapon = 1; player_weapons = 6 | 16; player_ammo_bullets = 0;
+    store64(pk + 104, TF_ACTIVE | TF_PICKUP);
+    things_check_pickups();
+    assert_eq(player_weapon, 4, "P-5: ...or the chaingun when it is owned");
+    player_weapon = 1; player_ammo_bullets = 5;
+    store64(pk + 104, TF_ACTIVE | TF_PICKUP);
+    things_check_pickups();
+    assert_eq(player_weapon, 1, "P-5: ammo that was not empty does not switch");
+    game_skill = 1; player_ammo_bullets = 0; player_weapon = 2;
+    store64(pk + 104, TF_ACTIVE | TF_PICKUP);
+    things_check_pickups();
+    assert_eq(player_ammo_bullets, 20, "P-11: a clip gives double (20) on skill 1");
+    game_skill = 3;
+    player_health = 0;
+    store64(pk + 32, TTYPE_STIMPACK); store64(pk + 104, TF_ACTIVE | TF_PICKUP);
+    things_check_pickups();
+    assert_eq(player_health, 0, "P-10: a dead player does not pick up a stimpack");
+    assert((thing_flags(0) & TF_ACTIVE) != 0, "P-10: ...which stays on the floor");
+    player_health = 100;
+    player_weapons = 6; player_weapon = 2; player_ammo_bullets = 50; player_ammo_shells = 0;
+    assert_eq(thing_counts_item(TTYPE_HEALTH_POTION), 1, "P-6: a health bonus counts toward items %");
+    assert_eq(thing_counts_item(TTYPE_ARMOR_BONUS), 1, "P-6: an armor bonus counts");
+    assert_eq(thing_counts_item(TTYPE_SOULSPHERE), 1, "P-6: the soulsphere counts");
+    assert_eq(thing_counts_item(TTYPE_CLIP), 0, "P-6: ammo does not count");
+    assert_eq(thing_counts_item(TTYPE_SHOTGUN), 0, "P-6: weapons do not count");
+    assert_eq(thing_counts_item(5), 0, "P-6: keys do not count");
+    assert_eq(thing_counts_item(TTYPE_MEDIKIT), 0, "P-6: medikits do not count");
+    assert_eq(thing_counts_item(TTYPE_ARMOR_GREEN), 0, "P-6: armor does not count");
+
+    # ============================================================
+    test_group("explosions: vanilla splash + delayed barrel blast (v0.35.6 P-7/P-12)");
+    # ============================================================
+    # Distance = max(|dx|,|dy|) minus the target's radius, floored at 0; damage =
+    # 128 minus that many units. The old centre-to-centre Euclidean falloff hit
+    # too softly (player touching a barrel: 102, vanilla 118).
+    var r128 = 128 << 16;
+    assert_eq(splash_damage_at(50 << 16, 0, PLAYER_RADIUS, r128, 128), 94, "P-7: player 50u from a blast takes 128 - (50 - 16)");
+    assert_eq(splash_damage_at(30 << 16, 0, 20 << 16, r128, 128), 118, "P-7: an imp 30u away takes 118 (was 98)");
+    assert_eq(splash_damage_at(40 << 16, 40 << 16, PLAYER_RADIUS, r128, 128), 104, "P-7: the distance is max(|dx|,|dy|), not Euclidean");
+    assert_eq(splash_damage_at(0 - (10 << 16), 0, 20 << 16, r128, 128), 128, "P-7: inside the target's radius -> the full 128");
+    assert_eq(splash_damage_at(148 << 16, 0, 20 << 16, r128, 128), 0, "P-7: 128 from the target's edge is out of range");
+    assert_eq(splash_damage_at(147 << 16, 0, 20 << 16, r128, 128), 1, "P-7: 127 from the edge still scrapes 1");
+    # P-12: a chain ripples. Barrel B 30u from barrel A, player far away: A's
+    # blast lands 15 tics after it dies, not on the killing tick.
+    thing_count = 0;
+    var ba = things;
+    store64(ba, 0); store64(ba + 8, 0);
+    store64(ba + 32, TTYPE_BARREL); store64(ba + 40, STATE_SPAWN);
+    store64(ba + 48, 20); store64(ba + 56, CAT_DECOR); store64(ba + 80, 10 << 16);
+    store64(ba + 104, TF_ACTIVE | TF_SOLID | TF_SHOOTABLE); store64(ba + 112, 0);
+    var bb2 = things + THING_SIZE;
+    store64(bb2, 30 << 16); store64(bb2 + 8, 0);
+    store64(bb2 + 32, TTYPE_BARREL); store64(bb2 + 40, STATE_SPAWN);
+    store64(bb2 + 48, 20); store64(bb2 + 56, CAT_DECOR); store64(bb2 + 80, 10 << 16);
+    store64(bb2 + 104, TF_ACTIVE | TF_SOLID | TF_SHOOTABLE); store64(bb2 + 112, 0);
+    thing_count = 2;
+    player_x = 5000 << 16; player_y = 5000 << 16; player_health = 100;
+    thing_damage(0, 100);
+    assert_eq(thing_health(1), 20, "P-12: killing a barrel does not blow its neighbour on the same tick");
+    # AI then animate, in things_tick's order — thing_animate must not overwrite
+    # the BEXP letter with the generic H..K death frames.
+    for (var bt = 0; bt < 14; bt += 1) { thing_ai_tick(0); thing_animate(0); thing_ai_tick(1); thing_animate(1); }
+    assert_eq(thing_state(1), STATE_SPAWN, "P-12: ...nor 14 tics later");
+    thing_ai_tick(0);
+    thing_animate(0);
+    assert_eq(thing_state(1), STATE_DIE, "P-12: the blast lands at the 15th tic and chains");
+    assert_eq(thing_frame(0), 3, "P-1: the exploding barrel is on BEXP frame D when it blasts");
+    # P-8: the thing a rocket HITS takes (1..8) x 20 on impact, then the splash.
+    # A baron 100u ahead: the rocket bursts ~28u from its centre, 4u from its
+    # edge, so the splash alone is 124 — anything past 128 proves the impact roll.
+    thing_count = 0;
+    var bn = things;
+    store64(bn, 100 << 16); store64(bn + 8, 0); store64(bn + 16, 0);
+    store64(bn + 32, TTYPE_BARON); store64(bn + 40, STATE_SPAWN); store64(bn + 48, 1000);
+    store64(bn + 56, CAT_MONSTER); store64(bn + 80, 24 << 16);
+    store64(bn + 104, TF_ACTIVE | TF_SOLID | TF_SHOOTABLE); store64(bn + 112, 0);
+    thing_count = 1;
+    player_x = 0; player_y = 0; player_angle = 0; player_health = 100;
+    var rk = thing_spawn_missile(0, 0, 0);
+    assert(rk >= 0, "P-8: rocket spawned");
+    var rkt = 0;
+    while (thing_flags(rk) != 0 && rkt < 30) { thing_missile_tick(rk); rkt += 1; }
+    assert(thing_health(0) <= 1000 - 144, "P-8: a direct rocket hit deals impact damage on top of the splash");
+    player_x = 0; player_y = 0; player_health = 100;
 
     # ============================================================
     test_group("collision: player vs solid things");
@@ -1804,6 +1975,39 @@ fn main() {
         assert(spr_changed > 50, "barrel dead ahead renders (was deleted by far-portal clip)");
 
         # ============================================================
+        test_group("sprite: partly occluded thing draws its visible columns (v0.35.6)");
+        # ============================================================
+        # At the E1M1 spawn view a barrel stands just right of the dark pillar,
+        # its LEFT columns hidden behind it. Through cyrius 6.6.2 the per-column
+        # `if (clip_t > clip_b) continue;` in sprite_render_all was compiled to
+        # jump to the SPRITE loop's latch (nested-continue patch-slot steal), so
+        # the first occluded column dropped the whole thing — the barrel was
+        # never drawn. ~98 px of it must now paint (x 275-281, y 108-125 in the
+        # --ppm frame); the broken build changes 0 px here.
+        view_x = player_start_x();
+        view_y = player_start_y();
+        view_angle = player_start_angle();
+        render_frame();
+        var occ_before = alloc(13 * 25);
+        var obi = 0;
+        for (var oy = 104; oy <= 128; oy += 1) {
+            for (var ox = 272; ox <= 284; ox += 1) {
+                store8(occ_before + obi, framebuf_get_pixel(ox, oy));
+                obi += 1;
+            }
+        }
+        sprite_render_all();
+        var occ_changed = 0;
+        obi = 0;
+        for (var oy = 104; oy <= 128; oy += 1) {
+            for (var ox = 272; ox <= 284; ox += 1) {
+                if (framebuf_get_pixel(ox, oy) != load8(occ_before + obi)) { occ_changed += 1; }
+                obi += 1;
+            }
+        }
+        assert(occ_changed > 50, "barrel beside the E1M1 spawn pillar renders its unoccluded columns");
+
+        # ============================================================
         test_group("gameplay: closed doors block sight/use/missiles (RC-G3/G4/G5)");
         # ============================================================
         # E1M1's spawn-room door (lines 151/152, back sector 4) is CLOSED at
@@ -1875,7 +2079,7 @@ fn main() {
         # (lower-wait-RAISE), re-sealing the path. DS_FLOOR_LOWER lowers and latches.
         doors_init();
         var f0 = load64(map_sectors + 4 * MAP_SECTOR_SIZE);          # sector 4 floor (offset 0)
-        floor_lower_start(4, f0 - 64);
+        floor_lower_start(4, f0 - 64, FLOOR_Q_SLOW);
         assert_eq(door_count, 1, "floor-lower spawns a thinker");
         for (var dt = 0; dt < 200; dt += 1) { doors_tick(); }
         assert_eq(load64(map_sectors + 4 * MAP_SECTOR_SIZE), f0 - 64, "floor lowered to target");
@@ -1884,7 +2088,7 @@ fn main() {
         assert_eq(load64(map_sectors + 4 * MAP_SECTOR_SIZE), f0 - 64, "floor STAYS down (a lift would have raised)");
         # Lower-only: target at/above the current floor does nothing (no slot).
         doors_init();
-        floor_lower_start(4, load64(map_sectors + 4 * MAP_SECTOR_SIZE) + 32);
+        floor_lower_start(4, load64(map_sectors + 4 * MAP_SECTOR_SIZE) + 32, FLOOR_Q_SLOW);
         assert_eq(door_count, 0, "floor-lower with target above floor is a no-op");
         # Neighbor-floor helpers: highest-neighbor >= lowest (which includes self).
         assert(find_highest_neighbor_floor(4) >= find_lowest_neighbor_floor(4), "highest neighbor floor >= lowest");
@@ -2105,6 +2309,224 @@ fn main() {
             assert_eq(thing_sector(pr1_m2),
               map_point_sector(thing_x(pr1_m2), thing_y(pr1_m2)),
               "PRE-1: a recycled projectile slot re-resolves its sector");
+        }
+
+        # ============================================================
+        test_group("interactables: progression switches raise their sectors (v0.35.6 U-1/U-2)");
+        # ============================================================
+        # Without these, E1M4 / E1M9 had no reachable exit and E1M3's secret exit
+        # was dead. Every press goes through the REAL use ray from a standing spot.
+        iv_load("E1M4");
+        iv_place(0 - 1088, 1528, 256);
+        doors_use();
+        iv_ticks(400);
+        assert_eq(iv_floor(52), 192, "E1M4 L592 (18): exit bridge 52 rises 128 -> 192");
+        assert_eq(door_line_used(592), 1, "E1M4 L592 (18): the S1 switch is used up");
+        iv_load("E1M9");
+        var iv_src = map_sidedef_sector(map_linedef_side_right(567));
+        iv_place(384, 1432, 768);
+        doors_use();
+        iv_ticks(400);
+        assert_eq(iv_floor(17), 88, "E1M9 L567 (20): exit bridge 17 rises 0 -> 88");
+        assert_eq(sector_flat_floor(17), sector_flat_floor(iv_src), "E1M9 L567 (20): 17 takes the switch side's flat (the cache the renderer reads)");
+        assert_eq(load64(map_sectors + 17 * MAP_SECTOR_SIZE + 40), 0, "E1M9 L567 (20): the nukage special is cleared");
+        iv_load("E1M3");
+        iv_place(0 - 2403, 0 - 931, 128);
+        doors_use();
+        iv_ticks(400);
+        assert_eq(iv_floor(66), 64, "E1M3 L360 (20): secret-exit bridge 66 rises 0 -> 64");
+        iv_load("E1M3");
+        iv_place(0 - 1300, 0 - 768, 512);
+        doors_use();
+        iv_ticks(400);
+        assert_eq(iv_floor(48), 88, "E1M3 L1020 (20): pit escape — 48 rises -32 -> 88");
+        assert_eq(iv_floor(49), 88, "E1M3 L1020 (20): pit escape — 49 rises -32 -> 88");
+
+        # ============================================================
+        test_group("interactables: stairs build step by step (v0.35.6 U-3/W-1)");
+        # ============================================================
+        # E1M8 L233 (S1 7): fourteen 8-unit steps from -136 to -128 .. -24. Steps
+        # are found by the builder, not tagged, so assert the whole staircase.
+        iv_load("E1M8");
+        iv_place(320, 4392, 256);
+        doors_use();
+        assert_eq(door_count, 14, "E1M8 L233 (7): the builder starts 14 step movers");
+        iv_ticks(600);
+        var iv_sum = 0;
+        var iv_lo = 100000;
+        var iv_hi = 0 - 100000;
+        var iv_steps = 0;
+        for (var ss = 53; ss <= 67; ss += 1) {
+            var sf = iv_floor(ss);
+            if (sf != 0 - 136) {
+                iv_steps += 1;
+                iv_sum += sf;
+                if (sf < iv_lo) { iv_lo = sf; }
+                if (sf > iv_hi) { iv_hi = sf; }
+            }
+        }
+        assert_eq(iv_steps, 14, "E1M8 L233 (7): 14 of sectors 53..67 moved");
+        assert_eq(iv_lo, 0 - 128, "E1M8 L233 (7): first step at -136 + 8");
+        assert_eq(iv_hi, 0 - 24, "E1M8 L233 (7): top step at -136 + 14*8");
+        assert_eq(iv_sum, 14 * (0 - 128) + 8 * (13 * 14 / 2), "E1M8 L233 (7): steps are exactly -128, -120, .., -24 (sum)");
+        # E1M3 L967 (W1 8): the normal-exit staircase, 16 -> 13, ten steps to 128,
+        # an 8-unit step below the 136 landing.
+        iv_load("E1M3");
+        iv_place(0 - 248, 0 - 1600, 0);
+        iv_cross(0 - 264, 0 - 1600, 0 - 248, 0 - 1600);
+        assert_eq(door_count, 10, "E1M3 L967 (8): ten step movers");
+        iv_ticks(600);
+        assert_eq(iv_floor(16), 56, "E1M3 L967 (8): first step 16 at 48 + 8");
+        assert_eq(iv_floor(19), 80, "E1M3 L967 (8): fourth step 19 at 48 + 32");
+        assert_eq(iv_floor(13), 128, "E1M3 L967 (8): top step 13 at 48 + 80");
+        assert_eq(door_line_used(967), 1, "E1M3 L967 (8): W1 line used up");
+
+        # ============================================================
+        test_group("interactables: walk specials (v0.35.6 W-1/W-2)");
+        # ============================================================
+        iv_load("E1M5");
+        iv_place(888, 240, 0);
+        iv_cross(888, 256, 888, 240);
+        iv_ticks(600);
+        assert_eq(iv_floor(91), 56, "E1M5 L271 (22): the walkway 91 rises out of the nukage, -24 -> 56");
+        # W-2: E1M9 L450 (WR 88, 384 units long) crossed 165 units from its middle
+        # — the old midpoint prefilter (128) silently dropped this crossing.
+        iv_load("E1M9");
+        iv_place(2168, 229, 0);
+        iv_cross(2184, 229, 2168, 229);
+        assert_eq(door_count, 1, "E1M9 L450 (88): a crossing far from the midpoint still fires (W-2)");
+        iv_load("E1M1");
+        iv_place(3008, 0 - 4152, 0);
+        iv_cross(3008, 0 - 4168, 3008, 0 - 4152);
+        iv_ticks(300);
+        assert_eq(iv_floor(59), 0 - 40, "E1M1 L308 (36): 59 drops to highest neighbour + 8 (the route to secrets 2 and 3)");
+        iv_load("E1M4");
+        iv_place(1608, 1728, 0);
+        iv_cross(1592, 1728, 1608, 1728);
+        iv_ticks(400);
+        assert_eq(iv_floor(79), 104, "E1M4 L382 (5): 79 rises to its lowest neighbouring ceiling");
+        iv_load("E1M5");
+        iv_place(0 - 1152, 888, 0);
+        iv_cross(0 - 1152, 904, 0 - 1152, 888);
+        iv_ticks(400);
+        assert_eq(iv_floor(20), 0 - 200, "E1M5 L184 (98): 20 turbo-lowers to highest neighbour + 8");
+        assert_eq(iv_floor(35), 0 - 200, "E1M5 L184 (98): 35 turbo-lowers with it");
+        assert_eq(door_line_used(184), 0, "E1M5 L184 (98): WR stays repeatable");
+        iv_load("E1M4");
+        iv_place(136, 792, 0);
+        iv_cross(120, 792, 136, 792);
+        assert_eq(door_count, 4, "E1M4 L348 (86): all four tagged doors start");
+
+        # ============================================================
+        test_group("interactables: door / lift / floor mover fidelity (v0.35.6 U-4/6/11/13/14/15)");
+        # ============================================================
+        iv_load("E1M1");
+        iv_place(1024, 0 - 3616, 0);
+        door_open(4);
+        var iv_topen = 0 - 1;
+        var iv_tclose = 0 - 1;
+        for (var dti = 1; dti < 1000; dti += 1) {
+            doors_tick();
+            if (iv_topen < 0) { if (door_state(0) == DS_OPEN) { iv_topen = dti; } }
+            if (iv_tclose < 0) { if (door_state(0) == DS_CLOSING) { iv_tclose = dti; } }
+        }
+        assert_eq(iv_tclose - iv_topen, 150, "U-4: a DR door holds open 150 tics (was 105)");
+        # U-6: E1M7's sector-135 lift closes floor-to-ceiling at 144. Rising onto a
+        # player it must go back down, never squeezing below player height.
+        iv_load("E1M7");
+        iv_place(1024, 0 - 3616, 0);
+        lift_activate(135);
+        var iv_g = 0;
+        while (door_state(0) != DS_LIFT_WAIT) { doors_tick(); iv_g += 1; if (iv_g > 2000) { break; } }
+        iv_place(104, 0 - 2176, 0);
+        assert_eq(player_find_sector(), 135, "U-6: player placed on the lowered lift");
+        var iv_mingap = 100000;
+        for (var lgi = 0; lgi < 600; lgi += 1) {
+            doors_tick();
+            var lgap = iv_ceil(135) - iv_floor(135);
+            if (lgap < iv_mingap) { iv_mingap = lgap; }
+        }
+        assert(iv_mingap >= PLAYER_HEIGHT, "U-6: the lift never squeezes the player (reverses instead)");
+        # U-11: E1M7 — standing on lift 70, E on its edge line 645 from BEHIND.
+        iv_load("E1M7");
+        iv_place(0 - 1304, 0 - 64, 0);
+        doors_use();
+        assert_eq(door_count, 0, "U-11: a line used from its back side does nothing");
+        # U-14: E1M7 L623 (23) lowers sector 140 by 128 at vanilla slow speed.
+        iv_load("E1M7");
+        iv_place(32, 0 - 1624, 256);
+        doors_use();
+        var iv_tl = 0;
+        while (door_find_sector(140) >= 0) { doors_tick(); iv_tl += 1; if (iv_tl > 2000) { break; } }
+        assert_eq(iv_tl, 128, "U-14: special 23 lowers 1 unit/tic (128 units in 128 tics, was 32)");
+        assert_eq(iv_floor(140), 112, "U-14: special 23 lands on the lowest neighbour");
+        # U-15: E1M5 sector 121 starts with an 8-unit gap; a cycled door closes flush.
+        iv_load("E1M5");
+        iv_place(1024, 0 - 3616, 0);
+        door_open(121);
+        iv_g = 0;
+        while (door_find_sector(121) >= 0) { doors_tick(); iv_g += 1; if (iv_g > 3000) { break; } }
+        assert_eq(iv_ceil(121), iv_floor(121), "U-15: a door closes to its floor (80), not its 88 start");
+        # U-13: with every thinker slot live, an S1 switch is NOT used up.
+        iv_load("E1M4");
+        for (var fk = 0; fk < DOOR_MAX; fk += 1) { door_set_sector(fk, 100000 + fk); door_set_state(fk, DS_OPEN); }
+        door_count = DOOR_MAX;
+        iv_place(0 - 1088, 1528, 256);
+        doors_use();
+        assert_eq(door_line_used(592), 0, "U-13: a switch that started nothing stays usable");
+        assert_eq(iv_floor(52), 128, "U-13: (and nothing moved)");
+
+        # ============================================================
+        test_group("interactables: things ride moving floors (v0.35.6 P-2/U-7)");
+        # ============================================================
+        # v0.35.4 made thing-z stored; nothing updated it when a floor moved.
+        iv_load("E1M6");
+        things_spawn_from_map();
+        var iv_ss = 0 - 1;
+        for (var tsi = 0; tsi < thing_count; tsi += 1) {
+            if (thing_type(tsi) == 2013) { if ((thing_x(tsi) >>> 16) == 272) { iv_ss = tsi; } }
+        }
+        assert(iv_ss >= 0, "P-2: E1M6 soulsphere at x=272 found");
+        var iv_ssec = thing_sector(iv_ss);
+        iv_place(1024, 0 - 3616, 0);
+        lift_activate(iv_ssec);
+        iv_g = 0;
+        while (door_state(0) != DS_LIFT_WAIT) { doors_tick(); iv_g += 1; if (iv_g > 2000) { break; } }
+        assert_eq(iv_floor(iv_ssec), 0 - 80, "P-2: the soulsphere's lift reaches -80");
+        assert_eq(thing_z(iv_ss), (0 - 80) << 16, "P-2: the soulsphere rides it down (was stuck at 48)");
+
+        # ============================================================
+        test_group("interactables: monster-blocking lines, BEXP, item totals (v0.35.6 W-3/P-1/P-6)");
+        # ============================================================
+        # W-3: E1M1 L182 (BLOCKMONSTERS|TWOSIDED) edges the zig-zag bridge over
+        # the nukage. From the bridge (sector 60, floor -24) to 8u past the edge:
+        iv_load("E1M1");
+        assert_eq(move_check_position(3213 << 16, (0 - 3017) << 16, 0 - 24, 3221 << 16, (0 - 3064) << 16, 0), 0,
+          "W-3: a monster cannot step off E1M1's bridge across L182");
+        assert_eq(move_check_position(3213 << 16, (0 - 3017) << 16, 0 - 24, 3221 << 16, (0 - 3064) << 16, 1), 1,
+          "W-3: the player can (the flag stops monsters only)");
+        # P-1: every BEXP frame a dying barrel draws resolves to a real lump.
+        for (var bf = 0; bf < 5; bf += 1) {
+            var bxl, bxf = sprite_find_frame(TTYPE_BARREL_EXPLOSION, 0, bf);
+            assert(bxl >= 0, "P-1: BEXP frame resolves (A..E)");
+        }
+        # P-6: skill-3 items-% totals — vanilla's COUNTITEM set less the powerups
+        # this engine cannot pick up yet (E1M3 -1, E1M5 -3, E1M6 -4, E1M7 -2,
+        # E1M8 -2); computed independently from the THINGS lumps.
+        game_skill = 3;
+        var iv_want = alloc(9 * 8);
+        store64(iv_want, 37); store64(iv_want + 8, 42); store64(iv_want + 16, 94);
+        store64(iv_want + 24, 45); store64(iv_want + 32, 26); store64(iv_want + 40, 95);
+        store64(iv_want + 48, 82); store64(iv_want + 56, 1); store64(iv_want + 64, 43);
+        var iv_mname = alloc(8);
+        for (var mi = 0; mi < 9; mi += 1) {
+            store8(iv_mname, 69); store8(iv_mname + 1, 49); store8(iv_mname + 2, 77);
+            store8(iv_mname + 3, 49 + mi); store8(iv_mname + 4, 0);
+            map_load(iv_mname);
+            things_spawn_from_map();
+            var icount = 0;
+            for (var ti2 = 0; ti2 < thing_count; ti2 += 1) { icount += thing_counts_item(thing_type(ti2)); }
+            assert_eq(icount, load64(iv_want + mi * 8), "P-6: items-% total for the map matches the COUNTITEM set");
         }
 
         wad_close();

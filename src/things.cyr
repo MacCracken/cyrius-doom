@@ -149,6 +149,14 @@ enum ThingFlags {
 enum RangedConst {
     TTYPE_IMP_FIREBALL = 9998;    # synthetic types (not DoomEd numbers)
     TTYPE_CACO_FIREBALL = 9997;
+    # v0.35.6 (P-1): a DYING barrel draws the BEXP explosion sprite. Sprite-only
+    # synthetic type — the thing keeps TTYPE_BARREL; sprite_render_all swaps it.
+    TTYPE_BARREL_EXPLOSION = 9996;
+    # Vanilla barrel death: BEXP A B C D E for 5 5 5 10 10 tics, the blast at the
+    # start of D (15 tics after death, so chains ripple outward instead of all
+    # detonating on one tick), then the barrel is REMOVED.
+    BARREL_DIE_TICS = 35;
+    BARREL_EXPLODE_AT = 20;       # tics REMAINING when D starts
     FIREBALL_SPEED = 655360;      # 10 map units/tic, << 16 (vanilla ball speed)
     MISSILE_RANGE = 134217728;    # 2048 units, << 16 — max ranged-arm distance
     RANGED_RETRY_TICS = 8;        # failed distance-roll: re-roll ~4x/s
@@ -212,6 +220,22 @@ fn thing_spawn_floor_z(idx): i64 {
 # FRAME, and thing_move_clear's cost one per move ATTEMPT.
 fn thing_update_z(idx): i64 {
     thing_set_z(idx, thing_spawn_floor_z(idx));
+    return 0;
+}
+
+# v0.35.6 (P-2 / U-7) — a sector's floor just moved: every thing STANDING in it
+# follows (vanilla P_ChangeSector keeps things on a moving floor). Projectiles are
+# skipped — they carry their own flight z and are not resting on anything. Called
+# by every floor-moving branch of doors_tick; the sector of a thing does not change
+# when its floor moves, so the cached thing_sector stays valid.
+fn things_resync_z_in_sector(sec): i64 {
+    for (var i = 0; i < thing_count; i += 1) {
+        if ((thing_flags(i) & TF_ACTIVE) != 0) {
+            if (thing_category(i) != CAT_PROJECTILE) {
+                if (thing_sector(i) == sec) { thing_update_z(i); }
+            }
+        }
+    }
     return 0;
 }
 
@@ -801,6 +825,9 @@ enum FrameConst {
 fn thing_animate(idx): i64 {
     var state = thing_state(idx);
     var frame = thing_frame(idx);
+    # v0.35.6 (P-1): a dying barrel's frame is its BEXP letter, set by barrel_tick
+    # from the tics left — the generic H..K death frames below would overwrite it.
+    if (state == STATE_DIE) { if (thing_type(idx) == TTYPE_BARREL) { return 0; } }
 
     # Each state defines a frame range
     # SPAWN/ITEM: frame A (0) only
@@ -1084,6 +1111,7 @@ fn thing_ai_tick(idx): i64 {
     # (live items, static decor) is inert here.
     if (cat != CAT_MONSTER) {
         if (state == STATE_DIE) {
+            if (thing_type(idx) == TTYPE_BARREL) { barrel_tick(idx); return 0; }
             var dt = thing_tics(idx);
             if (dt > 0) {
                 thing_set_tics(idx, dt - 1);
@@ -1309,92 +1337,184 @@ fn thing_ai_tick(idx): i64 {
 # Item pickup check
 # ================================================================
 
+# v0.35.6 (P-6) — 1 when picking `ttype` up counts toward the intermission ITEMS %.
+# Vanilla counts only its COUNTITEM set — health / armor bonuses, the soulsphere
+# and the powerups — never ammo, weapons, keys, stimpacks, medikits or armor, all
+# of which this engine used to count (E1M5: 88 items against vanilla's 29). The
+# powerups join this list when they can be picked up: counting an item nobody can
+# collect would make 100% unreachable, which is worse than a smaller total.
+fn thing_counts_item(ttype): i64 {
+    if (ttype == TTYPE_SOULSPHERE) { return 1; }
+    if (ttype == TTYPE_HEALTH_POTION) { return 1; }
+    if (ttype == TTYPE_ARMOR_BONUS) { return 1; }
+    return 0;
+}
+
+# Select weapon `w` now — the same two steps as the number-key path.
+fn player_select_weapon(w): i64 {
+    if (player_weapon != w) {
+        player_weapon = w;
+        render_set_weapon(w);
+    }
+    return 0;
+}
+
+enum AmmoKind {
+    AMMO_BULLETS = 0;
+    AMMO_SHELLS = 1;
+    AMMO_ROCKETS = 2;
+    AMMO_CELLS = 3;
+}
+
+# v0.35.6 (P-4 / P-5 / P-11) — vanilla ammo pickup. Returns 1 when ammo was taken,
+# 0 when that type is already full, in which case the item STAYS on the floor
+# (it used to vanish and still count). Doubled on skills 1 and 5. Picking up ammo
+# for a type that was EMPTY switches weapons the way vanilla does, and only off
+# the fist / pistol: bullets from the fist -> chaingun if owned, else pistol;
+# shells from fist or pistol -> shotgun; cells from fist or pistol -> plasma;
+# rockets from the fist -> launcher. (No backpack in the shareware game, so the
+# maxima are the plain 200 / 50 / 50 / 300.)
+fn player_give_ammo(kind, amount): i64 {
+    var cur = player_ammo_bullets;
+    var maxa = 200;
+    if (kind == AMMO_SHELLS)  { cur = player_ammo_shells;  maxa = 50; }
+    if (kind == AMMO_ROCKETS) { cur = player_ammo_rockets; maxa = 50; }
+    if (kind == AMMO_CELLS)   { cur = player_ammo_cells;   maxa = 300; }
+    if (cur >= maxa) { return 0; }
+    var got = amount;
+    if (game_skill == 1 || game_skill == 5) { got = amount * 2; }
+    var nv = cur + got;
+    if (nv > maxa) { nv = maxa; }
+    if (kind == AMMO_BULLETS) { player_ammo_bullets = nv; }
+    if (kind == AMMO_SHELLS)  { player_ammo_shells = nv; }
+    if (kind == AMMO_ROCKETS) { player_ammo_rockets = nv; }
+    if (kind == AMMO_CELLS)   { player_ammo_cells = nv; }
+    if (cur == 0) {
+        if (kind == AMMO_BULLETS) {
+            if (player_weapon == 1) {
+                if ((player_weapons & 16) != 0) { player_select_weapon(4); }
+                else { player_select_weapon(2); }
+            }
+        }
+        if (kind == AMMO_SHELLS) {
+            if (player_weapon == 1 || player_weapon == 2) {
+                if ((player_weapons & 8) != 0) { player_select_weapon(3); }
+            }
+        }
+        if (kind == AMMO_CELLS) {
+            if (player_weapon == 1 || player_weapon == 2) {
+                if ((player_weapons & 128) != 0) { player_select_weapon(7); }
+            }
+        }
+        if (kind == AMMO_ROCKETS) {
+            if (player_weapon == 1) {
+                if ((player_weapons & 32) != 0) { player_select_weapon(5); }
+            }
+        }
+    }
+    return 1;
+}
+
+# v0.35.6 (P-4 / P-5) — vanilla weapon pickup: its ammo first (which may itself
+# switch), then the weapon. A weapon you do NOT have is always taken and selected
+# (the E1M1 shotgun used to leave you holding the pistol). One you already have is
+# taken only if its ammo was, so an owned shotgun with full shells — or a second
+# chainsaw, which carries none (kind < 0) — stays on the floor.
+fn player_give_weapon(w, kind, amount): i64 {
+    var gave_ammo = 0;
+    if (kind >= 0) { gave_ammo = player_give_ammo(kind, amount); }
+    if ((player_weapons & (1 << w)) != 0) { return gave_ammo; }
+    player_weapons |= (1 << w);
+    player_select_weapon(w);
+    return 1;
+}
+
 fn things_check_pickups(): i64 {
-    var pickup_radius = 20 << 16;
+    # v0.35.6 (P-10): a dead player picks nothing up. Pickups run after the thing
+    # AI in the same tick and the death check comes later, so a stimpack under a
+    # player killed this tick used to undo the death (-5 + 10 = 5 health).
+    if (player_health <= 0) { return 0; }
 
     for (var i = 0; i < thing_count; i += 1) {
         var flags = thing_flags(i);
         if ((flags & TF_ACTIVE) == 0) { continue; }
         if ((flags & TF_PICKUP) == 0) { continue; }
 
-        var dist = fixed_approx_dist(player_x - thing_x(i), player_y - thing_y(i));
-        if (dist > pickup_radius) { continue; }
+        # v0.35.6 (P-3): vanilla touch is bounding-box contact — |dx| and |dy| both
+        # under item radius + player radius (20 + 16 = 36) — not a 20-unit circle,
+        # which gave about a fifth of the reach and made you stand on every item.
+        var reach = thing_radius(i) + PLAYER_RADIUS;
+        if (fixed_abs(player_x - thing_x(i)) >= reach) { continue; }
+        if (fixed_abs(player_y - thing_y(i)) >= reach) { continue; }
+        # v0.35.6 (P-9): and within reach vertically — from 8 below the feet to
+        # the player's height above them. The stored z is real since v0.35.4 and
+        # follows moving floors since P-2, so a bonus on a ledge 128 units below
+        # the E1M7 walkway is no longer collected from above.
+        var dz = thing_z(i) - player_z;
+        if (dz > (PLAYER_HEIGHT << 16)) { continue; }
+        if (dz < (0 - (8 << 16))) { continue; }
 
         var ttype = thing_type(i);
         var picked = 0;
+        var snd = 0;   # 0 DSITEMUP, 1 DSWPNUP, 2 DSGETPOW (P-14)
 
-        # Unified pickup dispatch. if/else ladder, NOT switch: sparse/out-of-order
-        # labels (5..2049) in a hot per-tick fn with post-dispatch work below — the
-        # cycc return-smash class that crashed thing_animate/doors_use twice.
-        # Defensive rewrite per the established pattern (G-7).
-        # Keys (5-13)
-        if (ttype == 5)  { player_keys |= KEY_CARD_BLUE; picked = 1; }         # BLUE
-        else { if (ttype == 6)  { player_keys |= KEY_CARD_YELLOW; picked = 1; }  # YELLOW
-            else { if (ttype == 13) { player_keys |= KEY_CARD_RED; picked = 1; }     # RED
-                # Cellpack (oddly numbered)
-                else { if (ttype == 17) { player_ammo_cells += 100; picked = 1; }
-                    # Weapons (2001-2006): bitmask 1<<N for weapon N
-                    else { if (ttype == 2001) { player_ammo_shells += 8;  player_weapons |= 8;   picked = 1; }  # SHOTGUN
-                        else { if (ttype == 2002) { player_ammo_bullets += 20; player_weapons |= 16; picked = 1; }  # CHAINGUN
-                            else { if (ttype == 2003) { player_ammo_rockets += 2; player_weapons |= 32; picked = 1; }  # LAUNCHER
-                                else { if (ttype == 2004) { player_ammo_cells += 40; player_weapons |= 128; picked = 1; }  # PLASMA
-                                    else { if (ttype == 2005) { player_weapons |= 64; picked = 1; }                            # CHAINSAW
-                                        else { if (ttype == 2006) { player_ammo_cells += 40; player_weapons |= 256; picked = 1; }  # BFG
-                                            # Ammo + health + armor cluster (2007-2019)
-                                            else { if (ttype == 2007) { player_ammo_bullets += 10; picked = 1; }  # CLIP
-                                                else { if (ttype == 2008) { player_ammo_shells += 4;  picked = 1; }   # SHELLS
-                                                    else { if (ttype == 2010) { player_ammo_rockets += 1; picked = 1; }   # ROCKET
-                                                        # STIMPACK/MEDIKIT handled outside the ladder (cap 100, skip at full)
-                                                        else { if (ttype == 2013) { player_health += 100; picked = 1; }       # SOULSPHERE (max 200)
-                                                            else { if (ttype == 2014) { player_health += 1; picked = 1; }         # HEALTH_POTION (max 200)
-                                                                # Ammo boxes (2046-2049)
-                                                                else { if (ttype == 2046) { player_ammo_rockets += 5; picked = 1; }
-                                                                    else { if (ttype == 2047) { player_ammo_cells += 20; picked = 1; }
-                                                                        else { if (ttype == 2048) { player_ammo_bullets += 50; picked = 1; }
-                                                                            else { if (ttype == 2049) { player_ammo_shells += 20; picked = 1; }
-                                                                            } } } } } } } } } } } } } } } } } }
-
-        # Stimpack/medikit heal to a MAX of 100 (DOOM maxhealth) and are NOT
-        # picked up at full health — previously they added into the shared 200
-        # clamp and were consumed even at 100 (audit pickup-rules gap).
-        if (ttype == TTYPE_STIMPACK && player_health < 100) {
-            player_health += 10;
-            if (player_health > 100) { player_health = 100; }
-            picked = 1;
+        # Flat, mutually exclusive tests on one value (return-smash-safe, G-7).
+        # Keys (5 / 6 / 13): always taken in single player.
+        if (ttype == 5)  { player_keys |= KEY_CARD_BLUE; picked = 1; }
+        if (ttype == 6)  { player_keys |= KEY_CARD_YELLOW; picked = 1; }
+        if (ttype == 13) { player_keys |= KEY_CARD_RED; picked = 1; }
+        # Weapons: bit 1 << N for weapon N, with vanilla's two-clips of ammo.
+        if (ttype == 2001) { picked = player_give_weapon(3, AMMO_SHELLS, 8); snd = 1; }    # shotgun
+        if (ttype == 2002) { picked = player_give_weapon(4, AMMO_BULLETS, 20); snd = 1; }  # chaingun
+        if (ttype == 2003) { picked = player_give_weapon(5, AMMO_ROCKETS, 2); snd = 1; }   # launcher
+        if (ttype == 2004) { picked = player_give_weapon(7, AMMO_CELLS, 40); snd = 1; }    # plasma
+        if (ttype == 2005) { picked = player_give_weapon(6, 0 - 1, 0); snd = 1; }          # chainsaw
+        if (ttype == 2006) { picked = player_give_weapon(8, AMMO_CELLS, 40); snd = 1; }    # BFG
+        # Ammo.
+        if (ttype == 2007) { picked = player_give_ammo(AMMO_BULLETS, 10); }   # clip
+        if (ttype == 2048) { picked = player_give_ammo(AMMO_BULLETS, 50); }   # box of bullets
+        if (ttype == 2008) { picked = player_give_ammo(AMMO_SHELLS, 4); }     # shells
+        if (ttype == 2049) { picked = player_give_ammo(AMMO_SHELLS, 20); }    # box of shells
+        if (ttype == 2010) { picked = player_give_ammo(AMMO_ROCKETS, 1); }    # rocket
+        if (ttype == 2046) { picked = player_give_ammo(AMMO_ROCKETS, 5); }    # box of rockets
+        if (ttype == 2047) { picked = player_give_ammo(AMMO_CELLS, 20); }     # cell
+        if (ttype == 17)   { picked = player_give_ammo(AMMO_CELLS, 100); }    # cell pack
+        # Health. Bonus and soulsphere are always taken (cap 200); stimpack and
+        # medikit heal to 100 and stay put at full health.
+        if (ttype == TTYPE_HEALTH_POTION) { player_health += 1; picked = 1; }
+        if (ttype == TTYPE_SOULSPHERE) { player_health += 100; picked = 1; snd = 2; }
+        if (ttype == TTYPE_STIMPACK) {
+            if (player_health < 100) {
+                player_health += 10;
+                if (player_health > 100) { player_health = 100; }
+                picked = 1;
+            }
         }
-        if (ttype == TTYPE_MEDIKIT && player_health < 100) {
-            player_health += 25;
-            if (player_health > 100) { player_health = 100; }
-            picked = 1;
+        if (ttype == TTYPE_MEDIKIT) {
+            if (player_health < 100) {
+                player_health += 25;
+                if (player_health > 100) { player_health = 100; }
+                picked = 1;
+            }
         }
-
-        # Armor has conditional logic (don't pick up if already at max tier).
-        # Track the class so absorption stays faithful as the count drops (G-4):
-        # green=1 (1/3), blue=2 (1/2); a bonus with no armor yet counts as green.
+        # Armor keeps its class so absorption stays faithful (G-4): green = 1
+        # (1/3), blue = 2 (1/2); a bonus with no armor yet counts as green.
         if (ttype == TTYPE_ARMOR_BONUS) { player_armor += 1; if (player_armor_class == 0) { player_armor_class = 1; } picked = 1; }
-        if (ttype == TTYPE_ARMOR_GREEN && player_armor < 100) { player_armor = 100; player_armor_class = 1; picked = 1; }
-        if (ttype == TTYPE_ARMOR_BLUE && player_armor < 200) { player_armor = 200; player_armor_class = 2; picked = 1; }
+        if (ttype == TTYPE_ARMOR_GREEN) { if (player_armor < 100) { player_armor = 100; player_armor_class = 1; picked = 1; } }
+        if (ttype == TTYPE_ARMOR_BLUE)  { if (player_armor < 200) { player_armor = 200; player_armor_class = 2; picked = 1; } }
 
-        # Clamp health + armor (soulsphere/potion/bonus can exceed 100, cap 200)
         if (player_health > 200) { player_health = 200; }
         if (player_armor > 200) { player_armor = 200; }
-
-        # DOOM maxammo (no backpack in shareware): bullets 200, shells 50,
-        # rockets 50, cells 300. Ammo was previously uncapped — you could
-        # stockpile without limit (audit pickup-rules gap). (A pure-ammo box
-        # picked up while already at max still vanishes — a smaller follow-up.)
-        if (player_ammo_bullets > 200) { player_ammo_bullets = 200; }
-        if (player_ammo_shells > 50) { player_ammo_shells = 50; }
-        if (player_ammo_rockets > 50) { player_ammo_rockets = 50; }
-        if (player_ammo_cells > 300) { player_ammo_cells = 300; }
 
         if (picked == 1) {
             # Remove item
             thing_set_flags(i, 0);
             thing_set_state(i, STATE_PICKUP);
-            level_add_item();
+            if (thing_counts_item(ttype) == 1) { level_add_item(); }
             sound_item_pickup();
-            audio_play_name("DSITEMUP");
+            if (snd == 0) { audio_play_name("DSITEMUP"); }
+            if (snd == 1) { audio_play_name("DSWPNUP"); }
+            if (snd == 2) { audio_play_name("DSGETPOW"); }
         }
     }
 
@@ -1418,6 +1538,19 @@ fn thing_damage(idx, damage): i64 {
     thing_set_health(idx, hp);
 
     if (hp <= 0) {
+        # v0.35.6 (P-1 / P-12): a barrel does not die like a monster. It used to
+        # detonate on the killing tick, play a zombie death scream (DSPODTH1),
+        # and then sit forever on frames H-L — which BAR1 does not have, so the
+        # sprite fell back to BAR1A0: an intact-looking, non-solid "ghost" barrel
+        # that bullets and the player passed through. Now: drop solid/shootable,
+        # start the BEXP sequence, and let barrel_tick blow it up and remove it.
+        if (ttype == TTYPE_BARREL) {
+            thing_set_state(idx, STATE_DIE);
+            thing_set_tics(idx, BARREL_DIE_TICS);
+            thing_set_frame(idx, 0);
+            thing_set_flags(idx, TF_ACTIVE);
+            return 0;
+        }
         # Gib on massive overkill: a death that drops hp below the negative of
         # the thing's spawn health resolves faster + more violently. (Full
         # xdeath giblet sprites aren't mapped in spr_lookup yet — follow-up.)
@@ -1427,14 +1560,6 @@ fn thing_damage(idx, damage): i64 {
         thing_set_tics(idx, die_tics);
         sound_monster_die();
         audio_play_at("DSPODTH1", thing_x(idx), thing_y(idx));
-        # Barrels detonate instead of dying quietly — radius damage + chain.
-        # Drop shootable/solid the instant they blow (keeping TF_ACTIVE for the
-        # explosion sprite + death-frame progression) so a spent barrel stops
-        # absorbing shots aimed at the monster behind it (audit F-G5).
-        if (ttype == TTYPE_BARREL) {
-            thing_set_flags(idx, TF_ACTIVE);
-            thing_explode(idx, 128 << 16, 128);
-        }
         return 0;
     }
 
@@ -1471,6 +1596,46 @@ fn thing_damage(idx, damage): i64 {
 # barrel killed here re-enters thing_damage -> thing_explode, but the
 # STATE_DIE guard above stops it detonating twice, so the recursion is bounded
 # by the chain length.
+# v0.35.6 (P-1 / P-12) — one tic of a dying barrel. `t` is the tics REMAINING.
+fn barrel_tick(idx): i64 {
+    var t = thing_tics(idx) - 1;
+    thing_set_tics(idx, t);
+    if (t == BARREL_EXPLODE_AT) { thing_explode(idx, 128 << 16, 128); }
+    if (t <= 0) {
+        thing_set_flags(idx, 0);           # gone, as vanilla removes it after BEXP E
+        thing_set_state(idx, STATE_NONE);
+        return 0;
+    }
+    thing_set_frame(idx, barrel_bexp_frame(t));
+    return 0;
+}
+
+# Remaining tics -> BEXP frame letter index (A..E hold 5, 5, 5, 10, 10 tics).
+fn barrel_bexp_frame(t): i64 {
+    if (t > 30) { return 0; }
+    if (t > 25) { return 1; }
+    if (t > 20) { return 2; }
+    if (t > 10) { return 3; }
+    return 4;
+}
+
+# v0.35.6 (P-7) — vanilla splash damage for a target `(dx, dy)` from the blast
+# (16.16) with radius `target_radius`: the distance is the LARGER of |dx| and |dy|
+# — not a Euclidean estimate — measured to the target's EDGE (minus its radius,
+# floored at 0), and the damage is `maxdmg` minus that many map units. The old
+# centre-to-centre Euclidean falloff hit too softly and chained too short: a
+# player touching a barrel took 102 (vanilla 118), and E1M1's barrel pair at
+# (2944,-4320) / (2832,-4240) failed to chain.
+fn splash_damage_at(dx, dy, target_radius, radius, maxdmg): i64 {
+    var d = fixed_abs(dx);
+    var ady = fixed_abs(dy);
+    if (ady > d) { d = ady; }
+    d = d - target_radius;
+    if (d < 0) { d = 0; }
+    if (d >= radius) { return 0; }
+    return maxdmg - fixed_to_int(d);
+}
+
 fn thing_explode(src_idx, radius, maxdmg): i64 {
     var cx = thing_x(src_idx);
     var cy = thing_y(src_idx);
@@ -1482,26 +1647,19 @@ fn thing_explode(src_idx, radius, maxdmg): i64 {
         var flags = thing_flags(i);
         if ((flags & TF_ACTIVE) == 0) { continue; }
         if ((flags & TF_SHOOTABLE) == 0) { continue; }
-        var dist = fixed_approx_dist(thing_x(i) - cx, thing_y(i) - cy);
-        if (dist >= radius) { continue; }
+        var dmg = splash_damage_at(thing_x(i) - cx, thing_y(i) - cy, thing_radius(i), radius, maxdmg);
+        if (dmg <= 0) { continue; }
         # Splash is line-of-sight gated (RC-G5, vanilla P_RadiusAttack):
         # distance alone let barrel/rocket blasts damage through solid walls
         # and closed doors.
         if (thing_check_sight(cx, cy, thing_x(i), thing_y(i)) == 0) { continue; }
-        # Linear falloff: maxdmg at the center, 0 at the radius edge.
-        var falloff = fixed_div(dist, radius);
-        var dmg = maxdmg - fixed_to_int(falloff * maxdmg);
-        if (dmg > 0) { thing_damage(i, dmg); }
+        thing_damage(i, dmg);
     }
 
-    # Splash the player too (same LOS gate).
-    var pdist = fixed_approx_dist(player_x - cx, player_y - cy);
-    if (pdist < radius) {
-        if (thing_check_sight(cx, cy, player_x, player_y) == 1) {
-            var pf = fixed_div(pdist, radius);
-            var pdmg = maxdmg - fixed_to_int(pf * maxdmg);
-            if (pdmg > 0) { player_take_damage(pdmg); }
-        }
+    # Splash the player too (same rule, same LOS gate).
+    var pdmg = splash_damage_at(player_x - cx, player_y - cy, PLAYER_RADIUS, radius, maxdmg);
+    if (pdmg > 0) {
+        if (thing_check_sight(cx, cy, player_x, player_y) == 1) { player_take_damage(pdmg); }
     }
     return 0;
 }
@@ -1782,6 +1940,10 @@ fn thing_missile_tick(idx): i64 {
         if (hd < thing_radius(i) + (16 << 16)) {
             thing_set_x(idx, nx);
             thing_set_y(idx, ny);
+            # v0.35.6 (P-8): the thing a rocket HITS takes vanilla's impact roll,
+            # (1..8) x 20, on top of the 128 splash — it took the splash alone, so
+            # the E1M8 barons needed about twice as many rockets.
+            thing_damage(i, (p_random() % 8 + 1) * 20);
             thing_missile_explode(idx);
             return 0;
         }

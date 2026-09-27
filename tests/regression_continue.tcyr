@@ -1,0 +1,204 @@
+# regression_continue.tcyr — `continue` must bind to its OWN loop in a nest
+#
+# Bug: through cyrius 6.6.2, `continue` patches lived in ONE flat 8-slot array
+# shared by every nesting level, and every loop restarted the slot index on
+# entry. A nested loop's continues overwrote the slots its enclosing loop had
+# already recorded, so:
+#   - the enclosing loop's first N continues compiled to NO-OPs (fell through);
+#   - the nested loop's continues were re-patched to the ENCLOSING loop's latch.
+# And a `while` nested in a `for` inherited for-mode, sending its continue to
+# the for's STEP. Fixed in cyrius 6.6.3; the fix also caps a whole NEST at 8
+# continues (it was 8 per loop).
+#
+# Why doom cares: sprite_render_all had exactly the stolen shape — 7 continues
+# before its per-column loop, 2 inside it. Its `lump < 0` / `psz < 8` guards
+# were dead, and `clip_t > clip_b` (a fully occluded column) jumped out of the
+# WHOLE sprite: a thing whose left edge sat behind a nearer wall was not drawn
+# at all (E1M1's spawn view lost a barrel beside the right-hand pillar).
+# render_clip_band_build had the same shape, so a drawseg that was farther than
+# the sprite at one column stopped occluding at every later column.
+#
+# Still open upstream as of cyrius 6.6.6: for > while > for, when the outer for
+# records a continue before the while and the inner for owns one, keeps the
+# pre-6.6.3 behaviour. doom no longer writes that shape (render_blit_psprite and
+# st_draw_patch_shaded clamp their ranges instead); the last group below pins
+# the clamp shape they use, which compiles correctly on every version measured.
+#
+# Every expectation is a hand-derived count, not a comparison against another
+# compiled path, so the suite cannot agree with itself about a wrong answer.
+# Measured RED on cyrius 6.6.2 and GREEN on 6.6.6.
+
+include "lib/string.cyr"
+include "lib/alloc.cyr"
+include "lib/vec.cyr"
+include "lib/str.cyr"
+include "lib/fmt.cyr"
+include "lib/assert.cyr"
+
+var c_noop = 0;
+var c_reached = 0;
+var c_inner = 0;
+var c_done = 0;
+
+fn c_reset(): i64 {
+    c_noop = 0;
+    c_reached = 0;
+    c_inner = 0;
+    c_done = 0;
+    return 0;
+}
+
+# The post-0.35.6 sprite_render_all shape: a `while` with a `break` first (the
+# masked-seg merge), 4 continues, then a column `for` owning 2 continues with
+# an innermost row `for`. si 0..3 each hit their own guard; si 4..6 reach the
+# column loop, where columns 1 and 2 are skipped and 0 and 3 draw.
+fn shape_sprite(): i64 {
+    c_reset();
+    var merged = 0;
+    for (var si = 0; si < 7; si += 1) {
+        while (merged < 100) {
+            if (merged >= si) { break; }
+            merged += 1;
+        }
+        if (si == 0) { continue; }
+        if (si == 0) { c_noop += 1; }
+        if (si == 1) { continue; }
+        if (si == 1) { c_noop += 1; }
+        if (si == 2) { continue; }
+        if (si == 2) { c_noop += 1; }
+        if (si == 3) { continue; }
+        if (si == 3) { c_noop += 1; }
+        c_reached += 1;
+        for (var c = 0; c < 4; c += 1) {
+            if (c == 1) { continue; }
+            if (c == 2) { continue; }
+            c_inner += 1;
+            for (var y = 0; y < 2; y += 1) { merged += 0; }
+        }
+        c_done += 1;
+    }
+    return 0;
+}
+
+# render_clip_band_build's shape: 3 continues, then a nested `for` owning 1.
+fn shape_clip_band(): i64 {
+    c_reset();
+    for (var di = 0; di < 5; di += 1) {
+        if (di == 0) { continue; }
+        if (di == 0) { c_noop += 1; }
+        if (di == 1) { continue; }
+        if (di == 1) { c_noop += 1; }
+        if (di == 2) { continue; }
+        if (di == 2) { c_noop += 1; }
+        c_reached += 1;
+        for (var x = 0; x < 5; x += 1) {
+            if (x < 2) { continue; }
+            c_inner += 1;
+        }
+        c_done += 1;
+    }
+    return 0;
+}
+
+# Three deep: the steal crossed any number of levels, not just one.
+fn shape_for_for_for(): i64 {
+    c_reset();
+    for (var a = 0; a < 3; a += 1) {
+        if (a == 0) { continue; }
+        if (a == 0) { c_noop += 1; }
+        for (var m = 0; m < 2; m += 1) {
+            for (var b = 0; b < 3; b += 1) {
+                if (b == 1) { continue; }
+                c_inner += 1;
+            }
+            c_reached += 1;
+        }
+        c_done += 1;
+    }
+    return 0;
+}
+
+# The mode-flag half: a `while` nested in a `for` sent its continue to the
+# for's step, abandoning the while after its first continue.
+fn shape_while_in_for(): i64 {
+    c_reset();
+    for (var i = 0; i < 3; i += 1) {
+        var w = 0;
+        while (w < 4) {
+            w += 1;
+            if (w == 2) { continue; }
+            c_inner += 1;
+        }
+        c_done += 1;
+    }
+    return 0;
+}
+
+# The shape render_blit_psprite / st_draw_patch_shaded use now: the outer for
+# keeps continues ahead of a while, but the innermost for draws a CLAMPED range
+# and owns no continue — nothing for the residual for > while > for defect to
+# steal. col 0 and 1 are rejected; each remaining col walks 2 posts of rows
+# clamped to [1, 3).
+fn shape_clamped_patch(): i64 {
+    c_reset();
+    for (var col = 0; col < 6; col += 1) {
+        if (col == 0) { continue; }
+        if (col == 0) { c_noop += 1; }
+        if (col == 1) { continue; }
+        if (col == 1) { c_noop += 1; }
+        c_reached += 1;
+        var posts = 0;
+        while (posts < 2) {
+            var row_lo = 1;
+            var row_hi = 3;
+            for (var row = row_lo; row < row_hi; row += 1) {
+                c_inner += 1;
+            }
+            posts += 1;
+        }
+        c_done += 1;
+    }
+    return 0;
+}
+
+fn main() {
+    alloc_init();
+
+    test_group("sprite_render_all shape: 4 outer continues, then a for owning 2");
+    shape_sprite();
+    assert_eq(c_noop, 0, "every outer continue skips (none is a no-op)");
+    assert_eq(c_reached, 3, "si 4..6 reach the column loop");
+    assert_eq(c_inner, 6, "columns 0 and 3 draw for each reached si");
+    assert_eq(c_done, 3, "an inner continue never leaves the outer body");
+
+    test_group("render_clip_band_build shape: 3 outer continues, then a for owning 1");
+    shape_clip_band();
+    assert_eq(c_noop, 0, "every outer continue skips");
+    assert_eq(c_reached, 2, "di 3..4 reach the column loop");
+    assert_eq(c_inner, 6, "x 2..4 occlude for each reached di");
+    assert_eq(c_done, 2, "the drawseg walk continues past a skipped column");
+
+    test_group("for > for > for: the steal crossed levels");
+    shape_for_for_for();
+    assert_eq(c_noop, 0, "outer continue skips a == 0");
+    assert_eq(c_inner, 8, "b 0 and 2 run, x2 middle, x2 outer");
+    assert_eq(c_reached, 4, "the middle loop completes every pass");
+    assert_eq(c_done, 2, "the outer body completes for a 1..2");
+
+    test_group("while nested in for: continue re-tests the while");
+    shape_while_in_for();
+    assert_eq(c_inner, 9, "w 1, 3, 4 counted for each of 3 passes");
+    assert_eq(c_done, 3, "the for body completes every pass");
+
+    test_group("clamped patch walk (psprite / HUD decoder shape)");
+    shape_clamped_patch();
+    assert_eq(c_noop, 0, "outer continues skip cols 0 and 1");
+    assert_eq(c_reached, 4, "cols 2..5 walk their posts");
+    assert_eq(c_inner, 16, "2 clamped rows x 2 posts x 4 cols");
+    assert_eq(c_done, 4, "every walked column completes");
+
+    return assert_summary();
+}
+
+var r = main();
+syscall(60, r);

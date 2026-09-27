@@ -838,3 +838,14 @@ fn sector_flat_ceil(idx): i64 {
     if (idx >= map_num_sectors) { return -1; }
     return load64(sec_flat_ceil + idx * 8);
 }
+
+# v0.35.6 — a mover that CHANGES a floor flat at runtime (specials 20 / 22) must
+# update this frozen index too: the renderer reads the cache, not the name, so a
+# name-only change would never reach the screen.
+fn sector_flat_floor_copy(dst, src): i64 {
+    if (sec_flat_floor == 0) { return 0; }
+    if (dst < 0 || src < 0) { return 0; }
+    if (dst >= map_num_sectors || src >= map_num_sectors) { return 0; }
+    store64(sec_flat_floor + dst * 8, load64(sec_flat_floor + src * 8));
+    return 0;
+}

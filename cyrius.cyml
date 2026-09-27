@@ -5,7 +5,7 @@ description = "DOOM in Cyrius — clean-room, direct framebuffer, no libc, just 
 license = "GPL-3.0-only"
 repository = "https://github.com/MacCracken/cyrius-doom"
 language = "cyrius"
-cyrius = "6.6.2"
+cyrius = "6.6.6"
 
 [build]
 src = "src/main.cyr"
@@ -34,10 +34,12 @@ stdlib = ["string", "alloc", "fmt", "vec", "str", "io", "fs", "args", "syscalls"
 # the shim → "dep vani requires 'yukti'" errors. Vendoring compiles just
 # the shim against doom's own stdlib list. Refresh: copy vani's
 # `dist/vani-core.cyr` on a vani release. Mirrors cyrius-polyomino/-bb.
-# (Provenance: vani 1.1.2 — dist is byte-identical to 1.1.1 except the version
-#  header; 1.1.2 was a toolchain-pin refresh (6.4.49→6.4.67) with zero vani
-#  source lines changed. 1.1.0 added the non-blocking sink pair audio_write_nb /
-#  audio_avail, which doom doesn't call, so they DCE out.)
+# (Provenance: vani 1.2.5 — the same release the 6.6.6 stdlib bundles as
+#  `lib/vani.cyr` (full profile); this file is its `core` profile. 1.1.2→1.2.5
+#  on the surface doom calls is hardening only — null-handle guards, an
+#  idempotent audio_close, avail_min == 0 rejected up front — and every
+#  audio_* return is still a plain i64, so 1.2.3's Result value-form break
+#  (vani_result_unwrap) cannot reach doom, which calls no vani_* fn.)
 
 # bsp — spatial geometry primitives. Consumed as a single-file vendor
 # (`lib/bsp.cyr`) produced from bsp's `dist/bsp.cyr` bundle. 1.1.1 added
@@ -47,7 +49,12 @@ stdlib = ["string", "alloc", "fmt", "vec", "str", "io", "fs", "args", "syscalls"
 # Shape mirrors `libro/cyrius.cyml`'s `[deps.sigil]` / `[deps.patra]`:
 # `modules` is the path within the upstream repo, `cyrius deps` resyncs
 # `lib/bsp.cyr` to the tag below.
+# (Provenance: bsp 1.2.5. 1.2.3 made `asr` a thin alias for native `>>>`
+#  — bit-identical across the signed range, per bsp's own differential.
+#  1.2.4's fx_div fix changes numeric output only through fx_div /
+#  bsp_ray_cast / bsp_point_seg_dist, none of which doom calls; its bsp
+#  surface is point_on_side / is_subsector / subsector_idx / node_child_l/r.)
 [deps.bsp]
 git = "https://github.com/MacCracken/bsp.git"
-tag = "1.2.1"
+tag = "1.2.5"
 modules = ["dist/bsp.cyr"]

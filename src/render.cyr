@@ -276,10 +276,20 @@ fn render_blit_psprite(buf, psz, light): i64 {
     var sy = 16 - toff + weapon_bob_y - weapon_y_lift;
     var pend = buf + psz;
 
-    for (var col = 0; col < pw; col += 1) {
+    # v0.35.6 — the on-screen tests are RANGE CLAMPS, not `continue`s. This is
+    # a for > while > for nest, and cyrius (still, as of 6.6.6) mis-binds a
+    # `continue` in the innermost `for` once the outer `for` has recorded one:
+    # the outer continue compiles to a NO-OP and the inner one jumps to the
+    # OUTER loop's latch, abandoning the rest of the column. The old
+    # `scr_x`/`scr_y` guards had exactly that shape. Clamping the ranges needs
+    # no continue, cannot be mis-bound, and skips the off-screen iterations the
+    # guards only rejected one at a time. st_draw_patch_shaded is the twin.
+    var col_lo = 0;
+    if (sx < 0) { col_lo = 0 - sx; }
+    var col_hi = pw;
+    if (sx + pw > SCREEN_WIDTH) { col_hi = SCREEN_WIDTH - sx; }
+    for (var col = col_lo; col < col_hi; col += 1) {
         var scr_x = sx + col;
-        if (scr_x < 0) { continue; }
-        if (scr_x >= SCREEN_WIDTH) { continue; }
 
         # Bound the column directory + post walk (mirrors texture_get_column).
         # The weapon/sprite/HUD patch decoders never got the C2 hardening that
@@ -300,15 +310,17 @@ fn render_blit_psprite(buf, psz, light): i64 {
             if (post + 4 + length > pend) { break; }
             var pixels = post + 3;
 
-            for (var py = 0; py < length; py += 1) {
-                var scr_y = sy + td + py;
-                if (scr_y < 0) { continue; }
-                if (scr_y >= SCREEN_HEIGHT) { continue; }
+            var post_top = sy + td;
+            var py_lo = 0;
+            if (post_top < 0) { py_lo = 0 - post_top; }
+            var py_hi = length;
+            if (post_top + length > SCREEN_HEIGHT) { py_hi = SCREEN_HEIGHT - post_top; }
+            for (var py = py_lo; py < py_hi; py += 1) {
                 # Every in-post pixel is OPAQUE — patch transparency is only
                 # the gaps BETWEEN posts. Skipping palette index 0 here (a
                 # real near-black color used in the gun's dark parts) made
                 # the weapon see-through wherever the artist used it.
-                framebuf_pixel(scr_x, scr_y, render_shade(load8(pixels + py), light));
+                framebuf_pixel(scr_x, post_top + py, render_shade(load8(pixels + py), light));
             }
             post += 4 + length;
             safety += 1;

@@ -65,9 +65,9 @@ fn level_reset_stats(): i64 {
     for (var i = 0; i < thing_count; i += 1) {
         var cat = thing_category(i);
         if (cat == CAT_MONSTER) { level_max_kills += 1; }
-        if (cat == CAT_ITEM) { level_max_items += 1; }
-        if (cat == CAT_WEAPON) { level_max_items += 1; }
-        if (cat == CAT_KEY) { level_max_items += 1; }
+        # v0.35.6 (P-6): only vanilla's COUNTITEM set — see thing_counts_item. Every
+        # item, weapon and key used to count (E1M1 52 against vanilla's 37).
+        if (thing_counts_item(thing_type(i)) == 1) { level_max_items += 1; }
     }
 
     # Count secret sectors by sector SPECIAL 9 (the loader stores special at

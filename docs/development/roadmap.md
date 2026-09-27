@@ -26,7 +26,7 @@ checklist items already ship. Only two things stand in the way, and they are ind
 
 | Blocker | Release | Why it is the blocker |
 |---|---|---|
-| Episode end | **v0.35.6** | `level_advance` wraps E1M8 → E1M1 ([level.cyr:136](../../src/level.cyr#L136)) — there is no finale, so the game literally cannot be finished. |
+| Episode end | **v0.35.8** | `level_advance` wraps E1M8 → E1M1 ([level.cyr:136](../../src/level.cyr#L136)) — there is no finale, so the game literally cannot be finished. *(The deeper blocker — E1M3 / M4 / M5 / M9 had **no reachable exit** because specials 7 / 8 / 18 / 20 / 22 were never implemented — was found by the v0.35.6 interactables review and shipped in v0.35.6; E1M8 now needs only its own pieces.)* |
 | X11 backend | **v0.37.0** | The only unmet "multiple display backends" item; fb0 / Wayland ship. ⛔ **AGNOS-setu does NOT ship** (corrected 2026-08-03): its TCP-on-loopback transport is retired as the **wrong primitive** for a local display protocol, and doom has no honest agnos proof over it — the `aethersafha-doom-smoke.sh` greens came from the deleted `AETHERSAFHA_SETU_SELFTEST` kernel hook. (Scope note: the handshake could not complete on an ordinary boot only **before agnos 1.56.34 / `net_src_for`**; afterwards other clients did connect un-rigged, QEMU `-smp 1`. doom was not one of them.) doom's only honest agnos display path today is `PM_FB0` (blit#39). See agnos `planning/ipc.md` §9-§10. |
 
 Everything else below is quality, fidelity, robustness, or performance.
@@ -58,7 +58,11 @@ gated on a PPM A/B. Nothing below is.
 monsters do, where things sit in z, and how a level ends. The PPM A/B gate stops being sufficient here, so
 each release below names a gameplay gate instead.
 
-### v0.35.5 — The `top_off` sprite-anchor revival
+> **Renumbered at v0.35.6.** v0.35.5 and v0.35.6 went to unplanned cuts — the 6.6.2 / 6.6.6 toolchain
+> bumps and the interactables review ([`completed-phases.md`](completed-phases.md)). Every planned slot
+> below moved up two, in the same order; the review's follow-ups are two new slots after Episode end.
+
+### v0.35.7 — The `top_off` sprite-anchor revival
 
 **v0.35.4 shipped real thing-z and deliberately did NOT touch this** — see
 [`completed-phases.md`](completed-phases.md). This is the item that actually moves pixels, and it is
@@ -73,27 +77,56 @@ and proved neither.
 **Gate**: this one genuinely *is* a diff to adjudicate. Capture the 14-capture A/B, then justify each
 moved sprite against its patch metadata rather than accepting the diff wholesale.
 
-### v0.35.6 — Episode end ⭐ *critical path*
+### v0.35.8 — Episode end ⭐ *critical path*
 
 | # | Item | Detail |
 |---|------|--------|
 | P4 | **E1M8 boss kill → finale** | Text screen, then the bunny scroll. Replaces the E1M1 wrap at [level.cyr:136](../../src/level.cyr#L136). |
 | MUSIC-4 | **`D_VICTOR` + `D_INTER`** | Per-map and `D_INTRO` are already wired; these two screens have no track. |
 | v1.0.0-1 | **Verify "playable start-to-finish"** | A scripted E1M1→E1M8 pty playthrough under skill_normal that reaches the finale. This *is* the v1.0.0 item-1 evidence. |
+| G-10 | **Diagonal moves run walk triggers once** | `player.cyr` calls `doors_walk_trigger` twice with identical arguments on a diagonal step — harmless for every special handled today, fatal for teleport. Exit: a WAD-free assert that a diagonal step produces exactly one trigger call. |
+| TELE-1 | **Teleporters (97 WR, 39 W1; monster-only 125/126)** | E1M8 L299-306 (the ending), E1M9 L514/515 (the monster ambush — 10 HMP kills unreachable without it), E1M5 L787-796. Front-side crossing only; destination is the type-14 thing in the lowest tagged sector; zero momentum, 18-tic freeze, telefrag, DSTELEPT. **Fix W-5 / G-10 first** (diagonal moves run walk triggers twice — the second call would sweep from the teleport destination). |
+| BOSS-1 | **E1M8 boss death** | When the last baron dies, lower tag-666 sectors (`floor_lower_to_lowest` exists). |
+| DMG-1 | **Damaging floors + radiation suit** | Types 5 / 7 / 16 (81 sectors) and **11** (E1M8's end: 20 per 32 tics, health floored at 1, exit at ≤ 10). The suit (2025) is decor today. |
 
-**Gate**: nothing blocks it — schedulable any time after v0.34.7.
+**Gate**: nothing blocks it — schedulable any time after v0.34.7. Exit: `python3 scripts/reachability.py E1M8`
+(the v0.35.6 review's model, [`docs/audit/2026-09-26-interactables-review.md`](../audit/2026-09-26-interactables-review.md))
+shows E1M8's end sector reachable — add the new specials to its `ENGINE` set — then the scripted playthrough.
 
-### v0.35.7 — Combat cosmetics + two dormant one-liners
+### v0.35.9 — Interactables II (feedback + the remaining specials)
 
-BEXP rocket-explosion frames (detonation is instant today) · full xdeath giblet animation on overkill ·
-animated multi-frame muzzle flash (chaingun/rocket show only frame A — needs a flash counter decoupled from
-`weapon_fire_max`) · **G-11** BFG is collectible but unselectable (fix ships here; play-verification is
-registered-WAD gated) · **G-10** diagonal movement calls `doors_walk_trigger` twice with identical arguments.
+From the v0.35.6 review, §3. **U-10** use-key edge latch (holding E re-fires every tick; must survive tty
+autorepeat gaps and the AGNOS kbscan drain) then **U-5** re-using a moving DR door reverses it · switch
+textures SW1 ↔ SW2 + the SR revert after 35 tics, and switch / mover / "oof" sounds (**U-9**) · gun-triggered
+**46** (E1M2's 26-sector optional area) · donut **9** (E1M2's chainsaw pillar) · doors **16 / 76** (close,
+wait 30 s, reopen) · monsters triggering walk lines and opening doors · **U-12** a closing door reverses for
+any overlapping body · **W-6** dead player's extra tick · **P-13** chainsaw lights ARMS 6 · **P-15** monster
+hitscan hits barrels · **P-16** kills credited at death, not at animation end · **P-17** rocket collision
+uses the rocket's own floor and radius.
 
-**Gate**: after v0.35.2. Exit: staged-viewpoint PPMs at successive ticks per animation; a WAD-free assert
-that a diagonal step produces exactly one trigger call.
+**Gate**: after v0.35.8 (teleports share the walk-trigger path). Exit: each special on its real line in the
+WAD-gated interactables groups, as v0.35.6 did.
 
-### v0.35.8 — Audio + music fidelity
+### v0.35.10 — Items II
+
+Backpack (type 8, E1M2–M9: max ammo doubled) · the four DOOM1 powerups (invisibility, computer map, light
+amplification, radiation suit) with timers — and then they join the items-% count (v0.35.6 §5) · monster drops
+(zombieman clip, sergeant shotgun — dropped items give half and never count) · pickup animation and full-bright
+frames (**P-19**) · HUD pickup messages and the bonus flash.
+
+**Gate**: after v0.35.8 (the radiation suit needs its damaging floors).
+
+### v0.35.11 — Combat cosmetics + a dormant one-liner
+
+BEXP rocket-explosion frames (a rocket's detonation is still instant — barrels got theirs in v0.35.6) · full
+xdeath giblet animation on overkill · animated multi-frame muzzle flash (chaingun/rocket show only frame A —
+needs a flash counter decoupled from `weapon_fire_max`) · **G-11** BFG is collectible but unselectable (fix
+ships here; play-verification is registered-WAD gated). *(G-10, the diagonal double walk trigger, moved to
+v0.35.8 at the v0.35.6 cut: teleporters depend on it.)*
+
+**Gate**: after v0.35.2. Exit: staged-viewpoint PPMs at successive ticks per animation.
+
+### v0.35.12 — Audio + music fidelity
 
 **MUSIC-2** MUS percussion (channel 15 is dropped entirely — E1M1's track is drum-driven, so this is the
 high-impact one) · **MUSIC-3** pitch bend + expression/pan controllers · **AUDIO-6** gate the PC-speaker
@@ -113,9 +146,9 @@ change into a cut gated on "shareware output must not move" would have muddied b
 **Gate**: independent. Exit: byte-identical 9-map A/B (a typed-error refactor must not move pixels)
 plus the existing texture asserts re-pointed at the new signatures.
 
-### v0.35.9 — Lighting + plane parity
+### v0.35.13 — Lighting + plane parity
 
-Closes the last of the v0.28.7 sub-audit: **brightness/lighting A-B vs the COLORMAP reference** (write the
+Sector light specials 1 / 2 / 3 / 8 / 12 / 13 / 17 (108 DOOM1 sectors) and W1 **35** (from the v0.35.6 review — the sector struct is full, so a parallel array) · Closes the last of the v0.28.7 sub-audit: **brightness/lighting A-B vs the COLORMAP reference** (write the
 per-light-level PPM diff to `docs/audit/`) · **RC-S8** sprite dimming still uses an ad-hoc `/96` ramp
 instead of the vanilla scalelight/zlight model the walls already use · half-pixel (`FRACUNIT/2`) yslope +
 column-center offsets · **F_SKY1 floors** treated as sky (rare but legal in PWADs).
@@ -127,7 +160,7 @@ viewpoints (E1M1's blue pool is FLAT14, not NUKAGE), so the SLADRIP animation fi
 gated by WAD-gated unit asserts rather than the PPM sweep. Stage a viewpoint onto a SLADRIP wall
 here, where staged-viewpoint work already lives, and add it to the captured set.
 
-### v0.35.10 — Engine-invariant audit (verification-first)
+### v0.35.14 — Engine-invariant audit (verification-first)
 
 The original Black Book sub-audits, deliberately run **after** the gameplay arc so they assert the shipped
 engine rather than one mid-rewrite: BSP traversal invariants (`bsp_point_on_side` parity, front-to-back walk
@@ -140,13 +173,13 @@ containment audit produces.
 
 ---
 
-## v0.35.10–v0.38.0 — Desktop, input, and synthesis
+## v0.35.15–v0.38.0 — Desktop, input, and synthesis
 
 Ordered so the `win_*` seam churns exactly once: scaling → pointer → X11.
 
 | Release | Theme | Contents |
 |---|---|---|
-| **v0.35.10** | Desktop present polish | **WF-4** aspect-correct (1.2× vertical) + fill-to-window modes · **WF-3** HiDPI / fractional scale (`set_buffer_scale`, `wp_fractional_scale_v1` + viewporter) · **WF-7** re-present in the death-wait loop so the death frame rescales · **WF-6** per-event size table for the remaining fixed-offset wire handlers. Independent of the entire gameplay arc. |
+| **v0.35.15** | Desktop present polish | **WF-4** aspect-correct (1.2× vertical) + fill-to-window modes · **WF-3** HiDPI / fractional scale (`set_buffer_scale`, `wp_fractional_scale_v1` + viewporter) · **WF-7** re-present in the death-wait loop so the death frame rescales · **WF-6** per-event size table for the remaining fixed-offset wire handlers. Independent of the entire gameplay arc. |
 | **v0.36.0** | **Mouse / pointer input** (WF-1) | The last input mode DOOM expects on a desktop. `wl_pointer` off the seat → turn/fire/use through the existing bitmask flags; a `win_next_pointer` seam entry (fb0/AGNOS/PPM return no-pointer); `zwp_relative_pointer` + `zwp_pointer_constraints` for real mouse-look; a sensitivity option following the Sound-menu live-preview pattern. **After v0.35.10** — the seam must be settled first. |
 | **v0.37.0** ⭐ | **Native X11 backend** (WF-5) | *Critical path.* `src/platform/x11/{wire,client}.cyr` mirroring the wayland/ split; MIT-SHM or PutImage present; `PM_X11` in `PresentMode`; full keyboard + the pointer seam from v0.36.0; lifecycle incl. focus clearing the input latches the way Wayland and setu already do. Closes the v1.0.0 "multiple display backends" item. |
 | **v0.38.0** | **OPL2 FM synthesis via GENMIDI** | The biggest remaining fidelity win and a genuinely large module: GENMIDI parsing (GM → 2-op OPL2 patches incl. the percussion bank), an OPL2 emulator (operator FM, ADSR, feedback) in pure 16.16, routing the MUS sequencer into OPL channels, and OPL rhythm mode replacing v0.35.4's noise-voice stand-in. **After v0.35.4.** |
@@ -155,7 +188,7 @@ Ordered so the `win_*` seam churns exactly once: scaling → pointer → X11.
 
 ## v1.0.0 — Ship
 
-**Blocked only on v0.35.6 and v0.37.0.** Checklist items 4 (runs on AGNOS), 5 (runs on /dev/fb0) and 6 (in
+**Blocked only on v0.35.8 and v0.37.0.** Checklist items 4 (runs on AGNOS), 5 (runs on /dev/fb0) and 6 (in
 the AGNOS initrd) already ship — correct them to ✅ with their evidence at tag time, and fold item 2 (X11)
 into v0.37.0 as one row rather than two.
 

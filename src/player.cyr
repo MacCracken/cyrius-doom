@@ -299,6 +299,12 @@ fn move_check_linedef(cx, cy, cfloor, nx, ny, radius, i, allow_drop): i64 {
 
         # Blocking line -- reject this position
         if ((flags & ML_BLOCKING) != 0) { return 0; }
+        # v0.35.6 (W-3): ML_BLOCKMONSTERS stops every MONSTER. allow_drop == 0 is
+        # exactly the monster mover (thing_move_clear); the player and missiles
+        # come through player_check_position with 1, so they pass, as in vanilla.
+        # The flag was defined and never read: 108 such lines in DOOM1, and on
+        # E1M1 monsters walked off the zig-zag bridge into the nukage (L182-187).
+        if (allow_drop == 0) { if ((flags & ML_BLOCKMONSTERS) != 0) { return 0; } }
 
         # One-sided wall (no back sector) is implicitly solid in the WAD
         # format and must block even without ML_BLOCKING set. The

@@ -92,6 +92,18 @@ jobs:
           cyrius build src/main.cyr build/doom
           echo "doom: $(wc -c < build/doom) bytes"
 
+      - name: Build (AGNOS target)
+        # AGNOS is the primary deployment target, and part of the tree only
+        # compiles under --agnos (vendor/setu.cyr, the kbscan input drain, the
+        # blit#39 present). A Linux-only build cannot see that code break: the
+        # v0.35.5 toolchain bump (6.5.4 -> 6.6.2) left vendor/setu.cyr on the
+        # retired boxed-Result form, and the AGNOS build failed for a whole
+        # release while every job here was green. This compiles it; RUNNING it
+        # is the QEMU gate's job (agnos repo), not CI's.
+        run: |
+          cyrius build --agnos src/main.cyr build/doom_agnos
+          echo "doom_agnos: $(wc -c < build/doom_agnos) bytes"
+
       - name: Upload build
         uses: actions/upload-artifact@v4
         with:

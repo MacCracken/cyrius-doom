@@ -9,11 +9,22 @@
 
 enum DoorConst {
     DOOR_MAX = 32;
-    DOOR_ENTRY_SIZE = 48;
+    DOOR_ENTRY_SIZE = 64;
     DOOR_SPEED = 2;
-    DOOR_WAIT = 105;
+    # v0.35.6 (U-4): vanilla holds a door open 150 tics — "four seconds after
+    # reaching their destination" (doomwiki Door). 105 was the LIFT wait (3 s),
+    # which is correct for lifts and was copied here.
+    DOOR_WAIT = 150;
     LIFT_SPEED = 4;
     LIFT_WAIT = 105;
+    # v0.35.6 — floor movers carry their own speed in QUARTER map units per tic,
+    # because vanilla's floor speeds are 1 (slow), 1/2 (plat raise-and-change)
+    # and 1/4 (stairs) units per tic, and sector heights here are whole units.
+    FLOOR_Q_SLOW = 4;       # 1 unit/tic   — 18, 23, 38, 102
+    FLOOR_Q_PLAT = 2;       # 1/2 unit/tic — 20, 22 (raise to next + change flat)
+    FLOOR_Q_STAIRS = 1;     # 1/4 unit/tic — 7, 8 (build stairs)
+    FLOOR_Q_TURBO = 16;     # 4 units/tic  — 70, 71
+    STAIR_STEP = 8;
 }
 
 # Door states
@@ -35,9 +46,17 @@ enum DoorState {
     # were mis-routed to lift_activate, so a "lower floor" permanently-open path
     # instead re-sealed itself after 105 tics / could crush (audit G-2 motion fix).
     DS_FLOOR_LOWER = 9;
+    # v0.35.6 — one-way floor RAISE to a target (18 raise-to-next-higher, 20/22
+    # raise-to-next-higher-and-change-flat, 7/8 each stair step). Latches at the
+    # top. A rising floor that would squeeze a thing or the player simply waits
+    # (vanilla moves these with crush off: the plane is restored, not reversed).
+    DS_FLOOR_RAISE = 10;
 }
 
-# Thinker entry: sector(8) state(8) height(8) target(8) wait(8) original(8) = 48 bytes
+# Thinker entry: sector(8) state(8) height(8) target(8) wait(8) original(8)
+# speed_q(8) height_q(8) = 64 bytes. The last two are used only by the floor
+# movers (DS_FLOOR_LOWER / DS_FLOOR_RAISE): speed in quarter units per tic and
+# the exact position in quarter units, of which the sector gets the whole part.
 var door_thinkers = 0;
 var door_count = 0;
 
@@ -85,6 +104,14 @@ fn special_is_once(special): i64 {
     if (special == 23)  { return 1; }
     if (special == 71)  { return 1; }
     if (special == 102) { return 1; }
+    # v0.35.6 — the progression specials (S1 7/18/20, W1 8/22).
+    if (special == 7)   { return 1; }
+    if (special == 18)  { return 1; }
+    if (special == 20)  { return 1; }
+    if (special == 8)   { return 1; }
+    if (special == 22)  { return 1; }
+    if (special == 5)   { return 1; }
+    if (special == 36)  { return 1; }
     return 0;
 }
 
@@ -101,6 +128,9 @@ fn special_is_switch_once(special): i64 {
     if (special == 23)  { return 1; }
     if (special == 71)  { return 1; }
     if (special == 102) { return 1; }
+    if (special == 7)   { return 1; }
+    if (special == 18)  { return 1; }
+    if (special == 20)  { return 1; }
     return 0;
 }
 
@@ -115,6 +145,9 @@ fn door_set_sector(idx, v): i64 { store64(door_thinkers + idx * DOOR_ENTRY_SIZE,
 fn door_set_state(idx, v): i64 { store64(door_thinkers + idx * DOOR_ENTRY_SIZE + 8, v); return 0; }
 fn door_set_height(idx, v): i64 { store64(door_thinkers + idx * DOOR_ENTRY_SIZE + 16, v); return 0; }
 fn door_set_wait(idx, v): i64 { store64(door_thinkers + idx * DOOR_ENTRY_SIZE + 32, v); return 0; }
+fn door_speed_q(idx): i64 { return load64(door_thinkers + idx * DOOR_ENTRY_SIZE + 48); }
+fn door_height_q(idx): i64 { return load64(door_thinkers + idx * DOOR_ENTRY_SIZE + 56); }
+fn door_set_height_q(idx, v): i64 { store64(door_thinkers + idx * DOOR_ENTRY_SIZE + 56, v); return 0; }
 
 # Release a completed thinker: mark the slot free (sector = -1) so its sector
 # can be triggered again, and so door_alloc_slot can reclaim the slot. Before
@@ -218,33 +251,167 @@ fn find_highest_neighbor_floor(sector_idx): i64 {
     return best;
 }
 
-# One-way floor lower: lower `sector_idx`'s floor to `target` and latch (never
-# raise). Shares the thinker array + door_free-on-arrival pattern. Lower-only —
-# if target is not BELOW the current floor, there's nothing to do (and no slot is
-# allocated, mirroring door_start's already-open guard). (audit G-2 motion fix)
-fn floor_lower_start(sector_idx, target): i64 {
+# Find the LOWEST neighbouring floor that is strictly ABOVE `height` (vanilla
+# P_FindNextHighestFloor). Returns `height` itself when no neighbour is higher, so
+# a caller moving to it simply does not move. Used by 18 / 20 / 22.
+fn find_next_higher_neighbor_floor(sector_idx, height): i64 {
+    var best = height;
+    var found = 0;
+    for (var i = 0; i < map_num_linedefs; i += 1) {
+        var rs = map_linedef_side_right(i);
+        var ls = map_linedef_side_left(i);
+        if (rs < 0) { continue; }
+        if (ls < 0) { continue; }
+        var rs_sec = map_sidedef_sector(rs);
+        var ls_sec = map_sidedef_sector(ls);
+        var other = 0 - 1;
+        if (rs_sec == sector_idx) { other = ls_sec; }
+        if (ls_sec == sector_idx) { other = rs_sec; }
+        if (other >= 0) {
+            var fh = map_sector_floorh(other);
+            if (fh > height) {
+                if (found == 0 || fh < best) { best = fh; found = 1; }
+            }
+        }
+    }
+    return best;
+}
+
+# Start a one-way FLOOR mover (lower or raise) toward `target` at `speed_q`
+# quarter-units per tic, and latch there. Returns 1 when a thinker started, 0 when
+# nothing moves: the sector is already busy, the target is where the floor already
+# is, or every slot is live. v0.35.6 (U-13): callers consume an S1 switch / D1 door
+# only on 1 — vanilla uses up a once-switch only when it actually started a mover.
+fn floor_move_start(sector_idx, target, speed_q, state): i64 {
     if (door_find_sector(sector_idx) >= 0) { return 0; }
     var floor_h = map_sector_floorh(sector_idx);
-    if (target >= floor_h) { return 0; }
+    if (state == DS_FLOOR_LOWER) { if (target >= floor_h) { return 0; } }
+    if (state == DS_FLOOR_RAISE) { if (target <= floor_h) { return 0; } }
     var idx = door_alloc_slot();
     if (idx < 0) { return 0; }
     var base = door_thinkers + idx * DOOR_ENTRY_SIZE;
     store64(base, sector_idx);
-    store64(base + 8, DS_FLOOR_LOWER);
+    store64(base + 8, state);
     store64(base + 16, floor_h);
     store64(base + 24, target);
     store64(base + 32, 0);
     store64(base + 40, floor_h);
-    return 0;
+    store64(base + 48, speed_q);
+    store64(base + 56, floor_h * 4);
+    return 1;
+}
+
+# One-way floor lower (audit G-2 motion fix): lower to target and latch, never
+# raise. v0.35.6 (U-14): each special now lowers at ITS vanilla speed — 23 / 38 /
+# 102 are "slow" (1 unit/tic); only the turbo 70 / 71 move 4. All of them used to
+# move 4, so a 128-unit drop took 32 tics instead of 128.
+fn floor_lower_start(sector_idx, target, speed_q): i64 {
+    return floor_move_start(sector_idx, target, speed_q, DS_FLOOR_LOWER);
 }
 fn floor_lower_to_lowest(sector_idx): i64 {
-    return floor_lower_start(sector_idx, find_lowest_neighbor_floor(sector_idx));
+    return floor_lower_start(sector_idx, find_lowest_neighbor_floor(sector_idx), FLOOR_Q_SLOW);
 }
 fn floor_lower_to_highest(sector_idx): i64 {
-    return floor_lower_start(sector_idx, find_highest_neighbor_floor(sector_idx));
+    return floor_lower_start(sector_idx, find_highest_neighbor_floor(sector_idx), FLOOR_Q_SLOW);
 }
 fn floor_lower_to_highest8(sector_idx): i64 {
-    return floor_lower_start(sector_idx, find_highest_neighbor_floor(sector_idx) + 8);
+    return floor_lower_start(sector_idx, find_highest_neighbor_floor(sector_idx) + 8, FLOOR_Q_TURBO);
+}
+
+# v0.35.6 (U-1) — 18: S1 raise floor to the next higher neighbouring floor, slow.
+# E1M4 line 592 raises the exit bridge (sector 52, 128 -> 192); line 614 the
+# secret soulsphere room's floor.
+fn floor_raise_to_next(sector_idx): i64 {
+    var fh = map_sector_floorh(sector_idx);
+    return floor_move_start(sector_idx, find_next_higher_neighbor_floor(sector_idx, fh), FLOOR_Q_SLOW, DS_FLOOR_RAISE);
+}
+
+# v0.35.6 — 5 (W1) / 91 (WR): raise the floor to the LOWEST neighbouring ceiling,
+# slow, never above its own ceiling (vanilla raiseFloor). E1M4 line 382 (5) opens
+# three sectors; E1M5 / E1M7 / E1M8 carry eighteen 91 lines.
+fn floor_raise_to_lowest_ceil(sector_idx): i64 {
+    var target = find_lowest_neighbor_ceil(sector_idx);
+    var own_ceil = map_sector_ceilh(sector_idx);
+    if (target > own_ceil) { target = own_ceil; }
+    return floor_move_start(sector_idx, target, FLOOR_Q_SLOW, DS_FLOOR_RAISE);
+}
+
+# v0.35.6 (U-2 / W-1) — 20 (S1) / 22 (W1): raise the floor to the next higher
+# neighbour at 1/2 unit/tic AND take the floor flat of the activating line's FRONT
+# sector, clearing the sector's special (vanilla raiseToNearestAndChange — this is
+# how a nukage pit becomes a walkable bridge). The flat changes at activation, not
+# arrival. `src_sec` is the activating line's front sector; the per-sector flat
+# INDEX cache is updated alongside the name, since the renderer reads the cache.
+# Returns 1 when the sector was taken (even if it has no higher neighbour to reach,
+# as in vanilla, where the thinker is still created).
+fn floor_raise_change(sector_idx, src_sec): i64 {
+    if (door_find_sector(sector_idx) >= 0) { return 0; }
+    if (src_sec >= 0) {
+        store64(map_sectors + sector_idx * MAP_SECTOR_SIZE + 16, load64(map_sectors + src_sec * MAP_SECTOR_SIZE + 16));
+        sector_flat_floor_copy(sector_idx, src_sec);
+    }
+    store64(map_sectors + sector_idx * MAP_SECTOR_SIZE + 40, 0);
+    var fh = map_sector_floorh(sector_idx);
+    floor_move_start(sector_idx, find_next_higher_neighbor_floor(sector_idx, fh), FLOOR_Q_PLAT, DS_FLOOR_RAISE);
+    return 1;
+}
+
+# v0.35.6 (U-3 / W-1) — 7 (S1) / 8 (W1): build stairs, 8-unit steps at 1/4 unit/tic
+# (vanilla EV_BuildStairs, build8). The tagged sector rises by one step; then the
+# builder walks on: among the CURRENT step's two-sided lines whose FRONT sector is
+# that step, the back sector with the same floor flat becomes the next step, one
+# step higher again. Lines are visited in linedef order — the order the level
+# setup attaches them to a sector — and the height advances even when a candidate
+# is already moving, as vanilla's does. E1M3 line 967 builds sectors 16 -> 13 (the
+# normal exit); E1M8 line 233 builds 53 -> 67 (the teleporter platform).
+# Returns 1 when the first step started.
+fn stairs_build(sector_idx): i64 {
+    if (door_find_sector(sector_idx) >= 0) { return 0; }
+    var height = map_sector_floorh(sector_idx) + STAIR_STEP;
+    if (floor_move_start(sector_idx, height, FLOOR_Q_STAIRS, DS_FLOOR_RAISE) == 0) { return 0; }
+    var flat = load64(map_sectors + sector_idx * MAP_SECTOR_SIZE + 16);
+    var cur = sector_idx;
+    var steps = 1;
+    var going = 1;
+    while (going == 1) {
+        going = 0;
+        var next = stairs_next_step(cur, flat);
+        if (next >= 0) {
+            height = height + STAIR_STEP * (next >>> 32);
+            var nsec = next & 0xFFFFFFFF;
+            floor_move_start(nsec, height, FLOOR_Q_STAIRS, DS_FLOOR_RAISE);
+            cur = nsec;
+            steps += 1;
+            # A malformed WAD could chain steps into a cycle; a staircase can never
+            # have more steps than the map has sectors.
+            if (steps <= map_num_sectors) { going = 1; }
+        }
+    }
+    return 1;
+}
+
+# One builder step, extracted so the scan's `continue`s live in their own loop
+# rather than inside stairs_build's `while` (see CLAUDE.md on continue in nests).
+# Returns -1 when the staircase ends, else (skipped_busy + 1) << 32 | next_sector:
+# the high half says how many STAIR_STEPs the height advances, because vanilla
+# advances it for every same-flat candidate — including already-moving ones it
+# then passes over.
+fn stairs_next_step(cur, flat): i64 {
+    var advance = 0;
+    for (var i = 0; i < map_num_linedefs; i += 1) {
+        if ((map_linedef_flags(i) & ML_TWOSIDED) == 0) { continue; }
+        var rs = map_linedef_side_right(i);
+        var ls = map_linedef_side_left(i);
+        if (rs < 0) { continue; }
+        if (ls < 0) { continue; }
+        if (map_sidedef_sector(rs) != cur) { continue; }
+        var tsec = map_sidedef_sector(ls);
+        if (load64(map_sectors + tsec * MAP_SECTOR_SIZE + 16) != flat) { continue; }
+        advance += 1;
+        if (door_find_sector(tsec) >= 0) { continue; }
+        return (advance << 32) | tsec;
+    }
+    return 0 - 1;
 }
 
 # Check if sector already has an active thinker (skips freed slots)
@@ -259,6 +426,7 @@ fn door_find_sector(sector_idx): i64 {
 # Open a door (raise ceiling). `open_state` selects the behaviour:
 #   DS_OPENING      -> open, wait, close  (DR/SR repeatable, DR-locked)
 #   DS_OPENING_STAY -> open and latch     (D1/W1/S1 stay-open)
+# Returns 1 when a thinker started, 0 otherwise (v0.35.6, U-13 — see floor_move_start).
 fn door_start(sector_idx, open_state): i64 {
     if (door_find_sector(sector_idx) >= 0) { return 0; }
 
@@ -290,7 +458,7 @@ fn door_start(sector_idx, open_state): i64 {
 
     sound_door_open();
     audio_play_name("DSDOROPN");
-    return 0;
+    return 1;
 }
 
 fn door_open(sector_idx): i64 { return door_start(sector_idx, DS_OPENING); }
@@ -298,6 +466,7 @@ fn door_open_stay(sector_idx): i64 { return door_start(sector_idx, DS_OPENING_ST
 
 # Activate a lift (lower floor, wait, raise). Repeatable — the thinker frees
 # itself once it returns to the top (audit F-G2), so it can be ridden again.
+# Returns 1 when a thinker started (v0.35.6, U-13).
 fn lift_activate(sector_idx): i64 {
     if (door_find_sector(sector_idx) >= 0) { return 0; }
     var idx = door_alloc_slot();
@@ -314,7 +483,7 @@ fn lift_activate(sector_idx): i64 {
     store64(base + 32, 0);
     store64(base + 40, floor_h);
 
-    return 0;
+    return 1;
 }
 
 # Tick all active door/lift thinkers.
@@ -341,12 +510,14 @@ fn lift_activate(sector_idx): i64 {
 # units while this helper form passes the same suite 380/380. That A/B is the
 # evidence; re-run it by pasting the body back inline.
 #
-# Stated as an observation, not a diagnosis: it has NOT been minimised to a
-# standalone reproducer (the obvious small shape — nested `for` + `continue` —
-# behaves correctly in isolation), so whether this is a cycc codegen bug in a
-# large function or something subtler about this specific nesting is unresolved.
-# See docs/development/state.md "Known issues". As a function it is also better
-# code, so the workaround costs nothing.
+# ROOT-CAUSED v0.35.6: this was cyrius <= 6.6.2's nested-continue patch-slot
+# steal (fixed 6.6.3). doors_tick records `if (sec < 0) { continue; }` BEFORE the
+# nest, so the inline scan's `continue` overwrote that slot: the scan's continue
+# jumped to doors_tick's OWN latch — exactly "the iteration left without entering
+# the block" — and the isolated repro passed because it had no outer continue
+# ahead of the nest, which is the steal's precondition. See
+# docs/audit/2026-09-26-toolchain-6.6.6-nested-continue.md. As a function it is
+# also better code, so the helper stays.
 #
 # `ceil_next` is the ceiling height AFTER the step being considered, so the caller
 # does the DOOR_SPEED arithmetic and this stays a pure predicate.
@@ -373,6 +544,29 @@ fn door_thing_blocks(sec, ceil_next): i64 {
             if ((tfl & TF_SOLID) != 0) {
                 if (thing_sector(ti) == sec) {
                     if (tgap < (thing_height(ti) >>> 16)) { return 1; }
+                }
+            }
+        }
+    }
+    return 0;
+}
+
+# v0.35.6 — the rising-FLOOR twin of door_thing_blocks: would a floor at
+# `floor_next` (ceiling unchanged) leave the player or a solid thing standing in
+# `sec` less room than its height? Same filters and raw-unit comparison as above.
+# A rising lift that hits this REVERSES (vanilla plat, U-6); a rising floor WAITS
+# (vanilla floors move with crush off — the plane is restored, not reversed).
+fn floor_rise_blocked(sec, floor_next): i64 {
+    var gap = load64(map_sectors + sec * MAP_SECTOR_SIZE + 8) - floor_next;
+    if (player_find_sector() == sec) {
+        if (gap < PLAYER_HEIGHT) { return 1; }
+    }
+    for (var ti = 0; ti < thing_count; ti += 1) {
+        var tfl = thing_flags(ti);
+        if ((tfl & TF_ACTIVE) != 0) {
+            if ((tfl & TF_SOLID) != 0) {
+                if (thing_sector(ti) == sec) {
+                    if (gap < (thing_height(ti) >>> 16)) { return 1; }
                 }
             }
         }
@@ -455,8 +649,13 @@ fn doors_tick(): i64 {
                 door_set_state(i, DS_OPENING);
             } else {
                 h -= DOOR_SPEED;
-                if (h <= orig) {
-                    h = orig;
+                # v0.35.6 (U-15): a door closes to its sector's FLOOR, as vanilla's
+                # does — not back to the ceiling it started at. For the usual flush
+                # door those are the same; E1M5 sector 121 starts with an 8-unit
+                # gap (floor 80, ceiling 88) and used to close back to that gap.
+                var close_to = load64(map_sectors + sec * MAP_SECTOR_SIZE);
+                if (h <= close_to) {
+                    h = close_to;
                     door_set_height(i, h);
                     store64(map_sectors + sec * MAP_SECTOR_SIZE + 8, h);
                     door_free(i);              # fully closed, release the slot
@@ -466,6 +665,11 @@ fn doors_tick(): i64 {
                 }
             }
         }
+        # v0.35.6 (P-2 / U-7): every branch that moves a FLOOR resyncs the stored
+        # z of the things standing in the sector. v0.35.4 made thing-z a stored
+        # field and nothing here updated it, so items, corpses and idle monsters
+        # on a lift or lowering floor stayed drawn — and step-checked — at their
+        # spawn height (E1M6's soulsphere hung near the ceiling as its lift fell).
         if (state == DS_LIFT_DOWN) {
             h -= LIFT_SPEED;
             if (h <= target) {
@@ -475,19 +679,40 @@ fn doors_tick(): i64 {
             }
             door_set_height(i, h);
             store64(map_sectors + sec * MAP_SECTOR_SIZE, h);
+            things_resync_z_in_sector(sec);
         }
         if (state == DS_FLOOR_LOWER) {
             # One-way (audit G-2): lower the floor to target and release the slot
             # — no wait, no raise (contrast DS_LIFT_DOWN). Floor = sector offset 0.
-            h -= LIFT_SPEED;
-            if (h <= target) {
-                h = target;
-                door_set_height(i, h);
-                store64(map_sectors + sec * MAP_SECTOR_SIZE, h);
+            # Position is kept in quarter units at the special's own speed (U-14).
+            var lq = door_height_q(i) - door_speed_q(i);
+            if (lq <= target * 4) {
+                store64(map_sectors + sec * MAP_SECTOR_SIZE, target);
+                things_resync_z_in_sector(sec);
                 door_free(i);
             } else {
-                door_set_height(i, h);
-                store64(map_sectors + sec * MAP_SECTOR_SIZE, h);
+                door_set_height_q(i, lq);
+                door_set_height(i, lq >>> 2);
+                store64(map_sectors + sec * MAP_SECTOR_SIZE, lq >>> 2);
+                things_resync_z_in_sector(sec);
+            }
+        }
+        if (state == DS_FLOOR_RAISE) {
+            # v0.35.6 — the progression movers (18 / 20 / 22 / stair steps). The
+            # sector gets the whole-unit part of the quarter-unit position, so a
+            # 1/4-unit/tic stair step visibly rises one unit every four tics.
+            var rq = door_height_q(i) + door_speed_q(i);
+            var rh = rq >>> 2;
+            if (rq >= target * 4) { rh = target; }
+            if (floor_rise_blocked(sec, rh) == 0) {
+                store64(map_sectors + sec * MAP_SECTOR_SIZE, rh);
+                things_resync_z_in_sector(sec);
+                if (rq >= target * 4) {
+                    door_free(i);
+                } else {
+                    door_set_height_q(i, rq);
+                    door_set_height(i, rh);
+                }
             }
         }
         if (state == DS_LIFT_WAIT) {
@@ -496,15 +721,20 @@ fn doors_tick(): i64 {
             if (w <= 0) { door_set_state(i, DS_LIFT_UP); }
         }
         if (state == DS_LIFT_UP) {
-            h += LIFT_SPEED;
-            if (h >= orig) {
-                h = orig;
-                door_set_height(i, h);
-                store64(map_sectors + sec * MAP_SECTOR_SIZE, h);
-                door_free(i);                  # back at top, release the slot
+            var up_next = h + LIFT_SPEED;
+            if (up_next > orig) { up_next = orig; }
+            if (floor_rise_blocked(sec, up_next) == 1) {
+                # v0.35.6 (U-6): a rising lift with something in the way goes back
+                # DOWN, as vanilla's plat does, instead of rising to its top and
+                # sealing the player or a monster inside (E1M7 sector 135 closes
+                # floor-to-ceiling at 144).
+                door_set_state(i, DS_LIFT_DOWN);
             } else {
+                h = up_next;
                 door_set_height(i, h);
                 store64(map_sectors + sec * MAP_SECTOR_SIZE, h);
+                things_resync_z_in_sector(sec);
+                if (h >= orig) { door_free(i); }   # back at top, release the slot
             }
         }
     }
@@ -600,6 +830,17 @@ fn doors_use(): i64 {
     # used — don't re-fire on a second press. Repeatable DR/SR forms fall through.
     if (special_is_once(special) == 1) { if (door_line_used(best_line) == 1) { return 0; } }
 
+    # v0.35.6 (U-11): a line is used only from its FRONT side — vanilla ignores a
+    # press from behind, and a switch pressed from the back of its own lift started
+    # it (E1M7 line 645). Same side test as doors_walk_trigger's crossing: the right
+    # (front) side of v1 -> v2 has a positive cross product.
+    var bv1 = map_linedef_v1(best_line);
+    var bv2 = map_linedef_v2(best_line);
+    var bx1 = map_vertex_x(bv1);
+    var by1 = map_vertex_y(bv1);
+    var bside = ((player_x - bx1) >>> (8)) * ((map_vertex_y(bv2) - by1) >>> (8)) - ((player_y - by1) >>> (8)) * ((map_vertex_x(bv2) - bx1) >>> (8));
+    if (bside <= 0) { return 0; }
+
     var rs = map_linedef_side_right(best_line);
     var ls = map_linedef_side_left(best_line);
 
@@ -621,13 +862,15 @@ fn doors_use(): i64 {
         if (special == 27)  { if ((player_keys & KEY_CARD_YELLOW) != 0) { door_open(door_sec); } }            # DR yellow
         if (special == 28)  { if ((player_keys & KEY_CARD_RED)    != 0) { door_open(door_sec); } }            # DR red
         # D1 (once) doors mark the line used INLINE — for the keyed ones only when
-        # the key is present, so a keyless attempt stays retriable (item 3).
-        if (special == 31)  { door_open_stay(door_sec); door_mark_used(best_line); }                          # D1 open & stay
-        if (special == 32)  { if ((player_keys & KEY_CARD_BLUE)   != 0) { door_open_stay(door_sec); door_mark_used(best_line); } }   # D1 blue
-        if (special == 33)  { if ((player_keys & KEY_CARD_RED)    != 0) { door_open_stay(door_sec); door_mark_used(best_line); } }   # D1 red
-        if (special == 34)  { if ((player_keys & KEY_CARD_YELLOW) != 0) { door_open_stay(door_sec); door_mark_used(best_line); } }   # D1 yellow
+        # the key is present, so a keyless attempt stays retriable (item 3) — and,
+        # v0.35.6 (U-13), only when the door actually STARTED: with every thinker
+        # slot live, a D1 door used to be consumed without ever opening.
+        if (special == 31)  { if (door_open_stay(door_sec) == 1) { door_mark_used(best_line); } }             # D1 open & stay
+        if (special == 32)  { if ((player_keys & KEY_CARD_BLUE)   != 0) { if (door_open_stay(door_sec) == 1) { door_mark_used(best_line); } } }   # D1 blue
+        if (special == 33)  { if ((player_keys & KEY_CARD_RED)    != 0) { if (door_open_stay(door_sec) == 1) { door_mark_used(best_line); } } }   # D1 red
+        if (special == 34)  { if ((player_keys & KEY_CARD_YELLOW) != 0) { if (door_open_stay(door_sec) == 1) { door_mark_used(best_line); } } }   # D1 yellow
         if (special == 117) { door_open(door_sec); }                                                          # DR blazing (repeatable)
-        if (special == 118) { door_open_stay(door_sec); door_mark_used(best_line); }                          # D1 blazing open-stay
+        if (special == 118) { if (door_open_stay(door_sec) == 1) { door_mark_used(best_line); } }             # D1 blazing open-stay
     }
 
     # Exit switches (if/else — see above)
@@ -639,31 +882,40 @@ fn doors_use(): i64 {
     # legitimately drive several tagged sectors, so every match fires per sector.
     var tag = load64(map_linedefs + best_line * MAP_LINEDEF_SIZE + 32);
     if (tag > 0) {
+        # 20 takes its new floor flat from the switch line's FRONT sector.
+        var src_sec = 0 - 1;
+        if (rs >= 0) { src_sec = map_sidedef_sector(rs); }
+        var started = 0;
         for (var si = 0; si < map_num_sectors; si += 1) {
             var stag = load64(map_sectors + si * MAP_SECTOR_SIZE + 48);
             if (stag == tag) {
                 # Doors + lifts
-                if (special == 29)  { door_open(si); }        # S1 door open-wait-close
-                if (special == 63)  { door_open(si); }        # SR door open-wait-close
-                if (special == 103) { door_open_stay(si); }   # S1 door open & stay
-                if (special == 21)  { lift_activate(si); }    # S1 lift
-                if (special == 62)  { lift_activate(si); }    # SR lift
-                if (special == 122) { lift_activate(si); }    # S1 lift (blazing)
+                if (special == 29)  { started |= door_open(si); }        # S1 door open-wait-close
+                if (special == 63)  { started |= door_open(si); }        # SR door open-wait-close
+                if (special == 103) { started |= door_open_stay(si); }   # S1 door open & stay
+                if (special == 21)  { started |= lift_activate(si); }    # S1 lift
+                if (special == 62)  { started |= lift_activate(si); }    # SR lift
+                if (special == 122) { started |= lift_activate(si); }    # S1 lift (blazing)
                 # One-way floor-lower switches — motion fix (were lift_activate =
                 # lower-wait-RAISE, which re-sealed the path; now lower-and-latch).
-                if (special == 23)  { floor_lower_to_lowest(si); }    # S1 lower to lowest neighbor
-                if (special == 71)  { floor_lower_to_highest8(si); }  # S1 lower to highest+8 (turbo)
-                if (special == 70)  { floor_lower_to_highest8(si); }  # SR lower to highest+8 (turbo)
-                if (special == 102) { floor_lower_to_highest(si); }   # S1 lower to highest neighbor
+                if (special == 23)  { started |= floor_lower_to_lowest(si); }    # S1 lower to lowest neighbor
+                if (special == 71)  { started |= floor_lower_to_highest8(si); }  # S1 lower to highest+8 (turbo)
+                if (special == 70)  { started |= floor_lower_to_highest8(si); }  # SR lower to highest+8 (turbo)
+                if (special == 102) { started |= floor_lower_to_highest(si); }   # S1 lower to highest neighbor
                 # (38 was here but it is W1 walk-only — moved to doors_walk_trigger.)
+                # v0.35.6 — the progression switches (U-1 / U-2 / U-3).
+                if (special == 18)  { started |= floor_raise_to_next(si); }          # S1 raise to next higher
+                if (special == 20)  { started |= floor_raise_change(si, src_sec); }  # S1 raise to next + change flat
+                if (special == 7)   { started |= stairs_build(si); }                 # S1 build stairs (8)
             }
         }
         # Latch the S1 "once" SWITCHES after the sweep (item 3). Restricted to the
         # switch subset (not special_is_once) so a malformed WAD that tags a keyed
         # D1 door can't latch it keyless here → unopenable; the manual D1 doors are
         # latched inline, key-gated (adversarial review). Repeatable SR (63/62/70)
-        # aren't once → never latched.
-        if (special_is_switch_once(special) == 1) { door_mark_used(best_line); }
+        # aren't once → never latched. v0.35.6 (U-13): and only when the sweep
+        # STARTED something — vanilla uses a once-switch up only on success.
+        if (special_is_switch_once(special) == 1) { if (started != 0) { door_mark_used(best_line); } }
     }
 
     return 0;
@@ -693,6 +945,14 @@ fn doors_walk_trigger(old_x, old_y, new_x, new_y): i64 {
         if (special == 90)  { is_walk = 1; }
         if (special == 121) { is_walk = 1; }
         if (special == 124) { is_walk = 1; }
+        if (special == 8)   { is_walk = 1; }   # v0.35.6 W1 build stairs (E1M3 exit)
+        if (special == 22)  { is_walk = 1; }   # v0.35.6 W1 raise to next + change (E1M5)
+        if (special == 5)   { is_walk = 1; }   # v0.35.6 W1 raise to lowest ceiling
+        if (special == 91)  { is_walk = 1; }   # v0.35.6 WR raise to lowest ceiling
+        if (special == 36)  { is_walk = 1; }   # v0.35.6 W1 turbo lower to highest+8 (E1M1 secrets)
+        if (special == 98)  { is_walk = 1; }   # v0.35.6 WR turbo lower to highest+8
+        if (special == 82)  { is_walk = 1; }   # v0.35.6 WR lower to lowest
+        if (special == 86)  { is_walk = 1; }   # v0.35.6 WR door open & stay
         if (is_walk == 0) { continue; }
 
         # One-shot latch (0.33.7 item 3): a W1 "once" walk line already crossed
@@ -708,9 +968,25 @@ fn doors_walk_trigger(old_x, old_y, new_x, new_y): i64 {
         var lx2 = map_vertex_x(v2);
         var ly2 = map_vertex_y(v2);
 
-        var mx = ((lx1 + lx2) >>> (1));
-        var my = ((ly1 + ly2) >>> (1));
-        if (fixed_approx_dist(mx - new_x, my - new_y) > 128 << 16) { continue; }
+        # Cheap reject — v0.35.6 (W-2): by BOUNDING BOX. It was "midpoint more than
+        # 128 units from the new position", run before the exact test below, so any
+        # crossing more than ~114-128 units from a line's middle (the approx
+        # distance overestimates up to 12%) was silently dropped: E1M9 L450 lost a
+        # third of its length, E1M3 L88 42%. A move whose endpoints both lie past
+        # the same edge of the line's box cannot cross it. ONE continue, on
+        # purpose: this loop sits at the 8-per-nest cap (cyrius 6.6.3+).
+        var bx_lo = lx1;
+        var bx_hi = lx2;
+        if (lx2 < lx1) { bx_lo = lx2; bx_hi = lx1; }
+        var by_lo = ly1;
+        var by_hi = ly2;
+        if (ly2 < ly1) { by_lo = ly2; by_hi = ly1; }
+        var off_box = 0;
+        if (old_x < bx_lo && new_x < bx_lo) { off_box = 1; }
+        if (old_x > bx_hi && new_x > bx_hi) { off_box = 1; }
+        if (old_y < by_lo && new_y < by_lo) { off_box = 1; }
+        if (old_y > by_hi && new_y > by_hi) { off_box = 1; }
+        if (off_box == 1) { continue; }
 
         var ldx = lx2 - lx1;
         var ldy = ly2 - ly1;
@@ -747,6 +1023,10 @@ fn doors_walk_trigger(old_x, old_y, new_x, new_y): i64 {
 
         var tag = load64(map_linedefs + i * MAP_LINEDEF_SIZE + 32);
         if (tag > 0) {
+            # 22 takes its new floor flat from the walk line's FRONT sector.
+            var wrs = map_linedef_side_right(i);
+            var wsrc = 0 - 1;
+            if (wrs >= 0) { wsrc = map_sidedef_sector(wrs); }
             for (var si = 0; si < map_num_sectors; si += 1) {
                 var stag = load64(map_sectors + si * MAP_SECTOR_SIZE + 48);
                 if (stag == tag) {
@@ -759,6 +1039,14 @@ fn doors_walk_trigger(old_x, old_y, new_x, new_y): i64 {
                     if (special == 88)  { lift_activate(si); }           # WR lift
                     if (special == 121) { lift_activate(si); }           # W1 lift (blazing)
                     if (special == 38)  { floor_lower_to_lowest(si); }   # W1 lower to lowest (one-way, motion fix)
+                    if (special == 8)   { stairs_build(si); }             # v0.35.6 W1 build stairs (8)
+                    if (special == 22)  { floor_raise_change(si, wsrc); } # v0.35.6 W1 raise to next + change flat
+                    if (special == 5)   { floor_raise_to_lowest_ceil(si); }   # v0.35.6 W1 raise to lowest ceiling
+                    if (special == 91)  { floor_raise_to_lowest_ceil(si); }   # v0.35.6 WR raise to lowest ceiling
+                    if (special == 36)  { floor_lower_to_highest8(si); }      # v0.35.6 W1 turbo lower to highest+8
+                    if (special == 98)  { floor_lower_to_highest8(si); }      # v0.35.6 WR turbo lower to highest+8
+                    if (special == 82)  { floor_lower_to_lowest(si); }        # v0.35.6 WR lower to lowest
+                    if (special == 86)  { door_open_stay(si); }               # v0.35.6 WR door open & stay
                 }
             }
         }

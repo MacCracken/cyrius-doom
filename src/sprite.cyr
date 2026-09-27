@@ -88,6 +88,8 @@ fn sprite_build_lookup(): i64 {
     # in the shareware WAD, so barons stay melee-only.
     sprite_add_lookup(TTYPE_IMP_FIREBALL, "BAL1");
     sprite_add_lookup(TTYPE_CACO_FIREBALL, "BAL2");
+    # v0.35.6 (P-1): a dying barrel draws the barrel-explosion sprite.
+    sprite_add_lookup(TTYPE_BARREL_EXPLOSION, "BEXP");
     # 2026-07-08 audit RC-S3: these 12 shareware types spawned and functioned
     # (things.cyr knows them) but had no lookup entry, so they were INVISIBLE —
     # including 63 attacking spectres across E1M3-M9. Spectre renders as a
@@ -487,6 +489,8 @@ fn sprite_render_all(): i64 {
         }
 
         var ttype = thing_type(thing_idx);
+        # v0.35.6 (P-1): a barrel in its death sequence is drawn as BEXP A..E.
+        if (ttype == TTYPE_BARREL) { if (thing_state(thing_idx) == STATE_DIE) { ttype = TTYPE_BARREL_EXPLOSION; } }
 
         # Get thing position from runtime thing
         var tx = thing_x(thing_idx);
@@ -497,15 +501,22 @@ fn sprite_render_all(): i64 {
         var rot = sprite_calc_rotation(tx, ty, thing_ang);
         var frame = thing_frame(thing_idx);
         var lump, flip = sprite_find_frame(ttype, rot, frame);
+        # v0.35.6 — this loop's `continue`s were MISCOMPILED through cyrius
+        # 6.6.2 (fixed 6.6.3): one flat 8-slot patch array was shared by every
+        # nesting level, so the column loop's two continues overwrote the first
+        # two recorded here. `lump < 0` and `psz < 8` compiled to NO-OPs, and the
+        # per-column `clip_t > clip_b` / `ph_c < 0` continues jumped to THIS
+        # loop's latch — the first fully-occluded column dropped the rest of the
+        # sprite. 6.6.3+ binds them correctly and caps a whole nest at 8
+        # continues, so the paired guards are merged; `psz == 0` is gone because
+        # the now-live `psz < 8` already rejects it.
         if (lump < 0) { continue; }
 
         var psz = wad_lump_size(lump);
-        if (psz < 8) { continue; }
-        if (psz > 16384) { continue; }
+        if (psz < 8 || psz > 16384) { continue; }
         wad_read_lump_into(lump, spr_patch_buf, psz);
         var pdata = spr_patch_buf;
         var pend = pdata + psz;
-        if (psz == 0) { continue; }
 
         var pw = read_le16(pdata);
         var ph = read_le16(pdata + 2);
@@ -525,8 +536,7 @@ fn sprite_render_all(): i64 {
         var scale = fixed_div(PROJ_DIST, vy);
         var sprite_w = fixed_to_int(fixed_mul(pw << 16, scale));
         var sprite_h = fixed_to_int(fixed_mul(ph << 16, scale));
-        if (sprite_w <= 0) { continue; }
-        if (sprite_h <= 0) { continue; }
+        if (sprite_w <= 0 || sprite_h <= 0) { continue; }
 
         # Screen bounds
         var sx1 = screen_x - fixed_to_int(fixed_mul(left_off << 16, scale));
@@ -553,6 +563,7 @@ fn sprite_render_all(): i64 {
         # carry a real launch z (MISSILE_LAUNCH_Z) from their spawn site.
         var is_missile = 0;
         if (thing_category(thing_idx) == CAT_PROJECTILE) { is_missile = 1; }
+        if (ttype == TTYPE_BARREL_EXPLOSION) { is_missile = 1; }   # BEXP is full-bright
 
         # Project sprite bottom at the thing's floor height vs the frame
         # eye (view_z, 0.28.5): things on higher/lower floors now project
@@ -578,9 +589,11 @@ fn sprite_render_all(): i64 {
         # [0, SCREEN_WIDTH) BY CONSTRUCTION — this replaces the old per-column
         # `if (scr_x < 0 / >= SCREEN_WIDTH) continue;` guards, which were DEAD under
         # the former cyrius 6.1.37 pin (it miscompiled `continue` inside this large
-        # function to a jmp-to-loop-body no-op; fixed in 6.2.x — this repo now pins
-        # 6.2.44). A point-blank sprite (tiny vy -> huge scale) produced an unclamped
-        # sprite_w in the tens of thousands, so scr_x ran off clip_top's 320-entry
+        # function to a jmp-to-loop-body no-op). *Corrected v0.35.6:* that was not
+        # fixed in 6.2.x — the nested-loop continue miscompile persisted through
+        # 6.6.2 (see the lump-guard note above). A point-blank sprite (tiny vy ->
+        # huge scale) produced an unclamped sprite_w in the tens of thousands, so
+        # scr_x ran off clip_top's 320-entry
         # array -> ring-3 #PF on agnos (CR2 ~0x12xxxxxx, the clip_top heap chunk).
         # Clamping the RANGE (not relying on continue) fixes the OOB on any cyrius
         # version AND skips iterating the off-screen columns (per-frame perf cliff).

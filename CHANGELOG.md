@@ -7,6 +7,137 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.35.6] - 2026-09-26 — cyrius 6.6.6, eight of nine maps finishable, and a sprite miscompile found by the compiler
+
+Two things in one cut. The **toolchain bump** did its own finding: cyrius 6.6.6 refused
+`sprite_render_all` — *"too many continue statements in loop (max 8)"* — and chasing why the limit had
+moved turned up a miscompile in every doom binary since at least v0.31.5, one loop shape 6.6.6 still
+gets wrong, and an AGNOS build that had not compiled since v0.35.5. The requested **interactables
+review** found the bigger news: with v0.35.5, **only E1M1, E1M2, E1M6 and E1M7 had a reachable exit** —
+a new game stopped at E1M3. Evidence:
+[`docs/audit/2026-09-26-toolchain-6.6.6-nested-continue.md`](docs/audit/2026-09-26-toolchain-6.6.6-nested-continue.md),
+[`docs/audit/2026-09-26-interactables-review.md`](docs/audit/2026-09-26-interactables-review.md).
+
+### Changed
+
+- **Toolchain `6.6.2` → `6.6.6`.** Lock regenerated from a clean `rm -rf lib`: **39 verified, 0
+  failed** (+`alloc_cx.cyr`); 6.6.6 writes the lock sorted and records the toolchain. `CYRIUS_DCE=1`
+  now *removes* dead code instead of NOP-sledding it: release `build/doom` **387,856 B** (plain build
+  518,928 B). A clean strict-pin rebuild reproduces it byte for byte.
+- **`[deps.bsp]` `1.2.1` → `1.2.5`.** doom's bsp surface (`point_on_side`, `is_subsector`,
+  `subsector_idx`, `node_child_l/r`) is byte-identical apart from comments; `asr` is now a thin alias
+  for native `>>>` (bit-identical). 1.2.4's `fx_div` fix cannot reach doom, which calls no `fx_*`.
+- **vani (vendored) `1.1.2` → `1.2.5`** — the release the 6.6.6 stdlib bundles. On the `audio_*`
+  functions doom calls it is hardening only (null-handle guards, idempotent `audio_close`,
+  `avail_min == 0` rejected — doom passes 1024); every return is still `i64`, so vani 1.2.3's Result
+  value-form break cannot reach doom. The AGNOS `sys_snd_config` branch moved intact.
+- **Stdlib: exactly what 6.6.6 bundles** (e.g. sakshi 2.5.1 → 2.5.2). The local sakshi (2.5.5), patra
+  (1.15.0) and yukti (2.3.12) repos are ahead of that bundle and were deliberately **not** taken. setu
+  stays at 0.7.0 — not a stdlib member, and its vendored copy is frozen by design.
+- **Floor movers carry their own speed** (thinker entry 48 → 64 bytes: speed and position in quarter
+  units), so floors move at vanilla's 1, ½ and ¼ unit/tic while sectors keep whole-unit heights.
+  Doors and lifts are unchanged. **Door wait 105 → 150 tics** (vanilla; 105 was the lift wait).
+
+### Fixed — the episode could not be finished
+
+- **Five progression specials were never implemented.** 8 (W1 stairs — E1M3's only route to its exit),
+  18 (S1 raise to next floor — E1M4's exit bridge), 20 (S1 raise-and-change — E1M9's exit bridge,
+  E1M3's secret-exit bridge and the only escape from its courtyard pit), 22 (W1 raise-and-change —
+  E1M5's walkway out of the nukage, 99 of 130 sectors), 7 (S1 stairs — E1M8's teleporter platform).
+  All five, plus W1 **36** / WR **98** (E1M1's route to secrets 2 and 3), W1 **5** / WR **91**, WR **82**
+  and WR **86**, now work. Reachability vs vanilla, sectors lost: **E1M1 5 → 0, E1M3 24 → 0, E1M4 12 →
+  0, E1M5 99 → 0, E1M6 1 → 0, E1M7 1 → 0, E1M9 9 → 0** — every map but E1M8 (its finale is the next
+  slot) and E1M2's optional gun-triggered area now has a reachable exit and every sector.
+- **Raise-and-change updates the renderer's flat cache**, not just the name — the frozen per-sector
+  index (v0.34.7) would otherwise never show the new floor.
+
+### Fixed — interactables
+
+- **An exploded barrel stayed standing forever.** Its death frames H–L do not exist in BAR1, so it fell
+  back to BAR1A0: an intact-looking barrel that bullets and the player passed through. It now plays
+  vanilla's **BEXP** A–E (5/5/5/10/10 tics, full-bright) and is removed; the blast lands at frame D, 15
+  tics after death, so chains ripple instead of detonating on one tick, and the zombie death scream it
+  used to play is gone.
+- **Regression from v0.35.4: thing-z did not follow moving floors.** Items, corpses and idle monsters on
+  a lift stayed drawn — and step-checked — at their spawn height (E1M6's soulsphere hung near the
+  ceiling as its lift dropped). Every floor move now resyncs the things standing on it.
+- **Pickups follow vanilla**: contact is a box (|dx|, |dy| < 36), not a 20-unit circle (~⅕ of the
+  reach); within 8 below to 56 above the feet; items that would give nothing — full ammo, an owned
+  weapon, a second chainsaw — **stay on the floor**; a new weapon is **selected** (E1M1's shotgun left
+  you on the pistol), and ammo for an empty type switches off fist / pistol; double ammo on skills 1 and
+  5; a dead player picks nothing up (a stimpack could undo a death). Weapons play DSWPNUP, the
+  soulsphere DSGETPOW.
+- **Items % counts vanilla's set** (bonuses and the soulsphere; E1M5 was 88 against vanilla's 29). The
+  DOOM1 powerups join when they can be picked up — counting an uncollectable item would make 100%
+  impossible (E1M3 94, E1M5 26, E1M6 95, E1M7 82, E1M8 1; the other four maps match vanilla).
+- **Explosions follow vanilla**: splash distance is max(|dx|,|dy|) minus the target's radius (a player
+  touching a barrel took 102, vanilla 118; E1M1's barrel pair now chains), and a rocket's direct hit
+  adds its (1..8)×20 impact damage to the splash.
+- **Walk lines fired only near their middle** — a 128-unit midpoint prefilter ran before the exact
+  test (E1M9 L450 lost a third of its length). Now a bounding-box reject.
+- **Monster-blocking lines** (`ML_BLOCKMONSTERS`, 108 in DOOM1) were never read — monsters walked off
+  E1M1's bridge into the nukage. They now stop monsters; the player and missiles pass, as in vanilla.
+- **Movers**: a rising lift reverses instead of sealing what stands on it (E1M7 sector 135); lines are
+  usable only from their front side; S1 switches and D1 doors are used up only when a mover actually
+  started; special 23 lowers at vanilla's 1 unit/tic (was 4); doors close to their floor (E1M5 sector
+  121 kept an 8-unit gap).
+
+### Fixed — found by the toolchain bump
+
+- **A partly-occluded monster or item could be drawn as nothing at all.** Through cyrius 6.6.2, a
+  nested loop's `continue`s overwrote the patch slots of its enclosing loop's earlier ones: the outer
+  continues compiled to **no-ops** and the inner ones jumped to the **outer** latch (fixed in 6.6.3).
+  `sprite_render_all` had that shape — `lump < 0` / `psz < 8` were dead, and a hidden column threw away
+  the *whole rest of the sprite*. At the E1M1 spawn view an **explosive barrel beside the right-hand
+  pillar** was never drawn. Live since at least v0.31.5 (2026-07-08). The same defect is the root cause
+  of v0.35.1's unexplained `doors_tick` "door stops descending" (see the `door_thing_blocks` comment).
+- **One shape is still miscompiled on 6.6.6: `for > while > for`** (root cause read from the compiler:
+  `0x18F898` is both the patch index and the while-mode flag). `render_blit_psprite` and
+  `st_draw_patch_shaded` had it; both now clamp their ranges — pixel-exact by a differential fuzzer,
+  and **`status_render` 132.7 → 118.2 µs (−10.9%)**, same-compiler A/B.
+- **The AGNOS build had not compiled since v0.35.5.** `vendor/setu.cyr` — compiled only under
+  `--agnos` — still used the pre-6.6.0 boxed `Result` binds; v0.35.5 migrated `src/`, CI built Linux
+  only, and a stale Aug-1 `doom_agnos` hid it. Reproduced on v0.35.5's own pin; three binds migrated.
+- **The banner said `v0.35.4` all through v0.35.5**; it now matches `VERSION`.
+- `sprite_render_all` holds 6 continues (6.6.3+ caps a nest at 8; it had 9).
+
+### Added
+
+- **CI `Build (AGNOS target)`** — a compile gate for the primary deployment target, inherited by the
+  release workflow.
+- `tests/regression_continue.tcyr` (18; **14 fail on 6.6.2**), `fuzz/fuzz_patchdraw.cyr` (differential;
+  all 8 range-shrinking mutants caught), and **94 assertions** in `tests/doom.tcyr` for the interactables
+  work — every special on its real line through the real use ray or crossing, and the WAD-gated
+  occluded-barrel render group (fails on v0.35.5).
+- CLAUDE.md rule: no `continue` in the innermost `for` of a `for > while > for`; at most 8 per nest.
+- **`scripts/reachability.py`** — the review's per-map reachability model (an optimistic sector flood:
+  "unreachable" is conservative), committed so the finishability claims above can be re-run, and the
+  Episode-end slot's exit gate.
+
+### Verification
+
+- **Baseline**: v0.35.5 rebuilt from `git archive HEAD` on 6.6.2 — sha256-identical to the local
+  `build/doom`.
+- **41 captures vs v0.35.5**: 28 byte-identical; the 13 that differ are all attributed — E1M1 / E1M2
+  game views (the occluded barrel and two slivers: the sprite fix), the eight intermissions (the harness
+  draws fixed stats over the new item totals), and E1M7's tick-35 status bar (a clip 32 units diagonal
+  from the start is inside the vanilla contact box). A **control build** (v0.35.5 on 6.6.2 made
+  continue-free) matched the post-bump build on 53 / 53 artifacts, so the toolchain and every dependency
+  are render- and behaviour-neutral. **12 / 12 `--ai-probe` fingerprints identical.**
+- **Mutation**: 33 of 34 interactables mutants killed (the survivor — vanilla's stair-height advance
+  past a moving step — is equivalent on DOOM1).
+- Tests: WAD-free **339 + 33 + 18 + 12**; full **538 / 538**. fuzz **×8** clean. PPMs 192,015 B; E1M1
+  `V=467 L=475 SD=648 S=85 SG=732 SS=237 N=236 T=138`.
+- **Bench** (best-of-mins, 3 interleaved pairs vs v0.35.5 on 6.6.2): true spawn frame 568.8 → 574.9 µs
+  (+1.1%), `render_frame` +1–2% across two sessions (its source is unchanged — codegen / noise, no
+  claim); `things_tick` −6.0%; `status_render` −11.1%. The script row (397 µs) is not comparable with
+  the August 0.35.4 row: the same-session v0.35.5 baseline itself measured 380–390 µs.
+- **AGNOS QEMU** (`doom-directmap-smoke.sh`) on the final `doom_agnos` (501,520 B): boots v0.35.6, WAD
+  loads, and a 6×-block diff against the Linux frame is **64,000 / 64,000 exact**. The script's own
+  floor-band gate reports FAIL: it samples from the origin, but on the 2048×2048 framebuffer the frame
+  is centred at (64, 424) — an agnos-side harness bug, reported, not changed here.
+- `cyrius audit`: fmt clean; 39 lint warnings, all pre-existing (line length / blank lines).
+
 ## [0.35.5] - 2026-09-11
 
 ### Changed

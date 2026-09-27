@@ -215,6 +215,14 @@ Dep pins (bsp / vani versions) and module/lib counts live in [`state.md`](docs/d
 - **320×200 palette-indexed** — 256 colors from WAD PLAYPAL lump.
 - **Multi-return tuples** — `var tx, ty = render_transform_vertex(wx, wy);` — supported since Cyrius 3.7.2.
 - **Switch / case** — case labels require literal integers, not enum identifiers.
+- **`continue` in loop nests** — through cyrius 6.6.2 a nested loop's `continue`s *stole* the patch
+  slots of an enclosing loop's earlier ones (outer continue → silent no-op; inner → the OUTER latch).
+  6.6.3 fixed it except for one shape: **never put a `continue` in the innermost `for` of a
+  `for > while > for` nest whose outer `for` has a `continue` before the `while`** — still
+  miscompiled on 6.6.6. Clamp the range instead (`render_blit_psprite` / `st_draw_patch_shaded` are
+  the pattern). A whole nest may hold at most **8** `continue`s (6.6.3+ refuses more).
+  `tests/regression_continue.tcyr` pins the safe shapes; evidence in
+  `docs/audit/2026-09-26-toolchain-6.6.6-nested-continue.md`.
 - All struct-field access via `load64` / `store64` with offsets (8-byte field convention).
 - `cycc` accepts `: i64` return-type annotations as parse-only metadata (v5.11.x). Every public fn in `src/*.cyr` carries one as of v0.27.2.
 

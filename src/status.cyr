@@ -170,10 +170,16 @@ fn st_draw_patch_shaded(buf, px, py, shade, sz): i64 {
     # bounded-work class as R-1/R-10, which this decoder never got).
     var pw = read_le16(buf);
     if (pw > TEX_COMP_W_MAX) { pw = TEX_COMP_W_MAX; }
-    for (var col = 0; col < pw; col += 1) {
+    # v0.35.6 — on-screen tests are RANGE CLAMPS, not `continue`s: this for >
+    # while > for nest is the shape cyrius (still, as of 6.6.6) mis-binds — an
+    # innermost-`for` continue jumps to the OUTER loop's latch and the outer
+    # continues it displaced compile to no-ops. See render_blit_psprite.
+    var col_lo = 0;
+    if (px < 0) { col_lo = 0 - px; }
+    var col_hi = pw;
+    if (px + pw > SCREEN_WIDTH) { col_hi = SCREEN_WIDTH - px; }
+    for (var col = col_lo; col < col_hi; col += 1) {
         var scr_x = px + col;
-        if (scr_x < 0) { continue; }
-        if (scr_x >= SCREEN_WIDTH) { continue; }
         if (8 + col * 4 + 4 > sz) { continue; }
         var col_off = read_le32(buf + 8 + col * 4);
         if (col_off >= sz) { continue; }
@@ -186,13 +192,15 @@ fn st_draw_patch_shaded(buf, px, py, shade, sz): i64 {
             var length = load8(post + 1);
             if (post + 4 + length > pend) { break; }
             var pixels = post + 3;
-            for (var row = 0; row < length; row += 1) {
-                var scr_y = py + td + row;
-                if (scr_y < 0) { continue; }
-                if (scr_y >= SCREEN_HEIGHT) { continue; }
+            var post_top = py + td;
+            var row_lo = 0;
+            if (post_top < 0) { row_lo = 0 - post_top; }
+            var row_hi = length;
+            if (post_top + length > SCREEN_HEIGHT) { row_hi = SCREEN_HEIGHT - post_top; }
+            for (var row = row_lo; row < row_hi; row += 1) {
                 var pal = load8(pixels + row);
                 if (shade > 0) { pal = render_shade(pal, shade); }
-                framebuf_pixel(scr_x, scr_y, pal);
+                framebuf_pixel(scr_x, post_top + row, pal);
             }
             post += 4 + length;
             safety += 1;
