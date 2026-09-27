@@ -20,7 +20,16 @@
 > E1M1 field reports (EF-1 corpse-decor frame clobber on tick 1 — invisible to tick-0 `--ppm`;
 > EF-2 deaf/ambush THINGS bit parsed but never honored).
 >
-> **Last refresh**: 2026-09-26 (**v0.35.7 — sprites anchored by their top offset.** The bottom-anchor that planted
+> **Last refresh**: 2026-09-26 (**v0.35.8 — Episode end.** E1M8 can be finished and the episode ends: teleporters
+> (97/39, monster-only 125/126: front side, lowest-tagged-sector landing, telefrag, 18-tic freeze, fog), E1M8's
+> boss death (tag 666 lowers when the last baron dies), damaging floors (7/5/16/4 and E1M8's exit room 11) + the
+> radiation suit, and the finale (our own text over FLOOR4_8 with D_VICTOR, then HELP2) — vanilla skips the
+> intermission after map 8, so the engine does too. D_INTER under the tally; G-10 (one walk sweep per move);
+> skill 1 halves damage. Reachability: every map's exit reachable. 677/677 + 376/33/18/12, mutation 47/48
+> (1 equivalent), 40/41 captures identical (E1M8's tally lost its "Entering Hangar"), 12/12 AI, fuzz ×8,
+> AGNOS QEMU 64,000/64,000. Audit: [`2026-09-26-episode-end.md`](../audit/2026-09-26-episode-end.md).)
+>
+> **Prior refresh**: 2026-09-26 (**v0.35.7 — sprites anchored by their top offset.** The bottom-anchor that planted
 > every sprite's last row on the floor line is gone: monster feet sink 1–5 units, the soulsphere / blur sphere hover
 > 14, keys 3, rad suit 4, weapon pickups 2–5. Adjudicated per sprite from engine dumps vs WAD headers: 694 of 1,880
 > drawn sprites moved, each by exactly its predicted rows; all 7,054 changed px inside a moved sprite; 31/41 captures
@@ -58,7 +67,7 @@
 
 ## Current version
 
-**[`VERSION`](../../VERSION)** = `0.35.7` (single source of truth — `cyrius.cyml` reads it via `${file:VERSION}`).
+**[`VERSION`](../../VERSION)** = `0.35.8` (single source of truth — `cyrius.cyml` reads it via `${file:VERSION}`).
 
 | Surface | Pin |
 |---|---|
@@ -72,6 +81,7 @@
 
 | Metric | Value |
 |---|---|
+| `build/doom` (v0.35.8, cycc **6.6.6**) | **532,016 B** plain / **400,944 B** release (dead code removed unchanged, 131,936 B) / **518,696 B** agnos — +13,088 / +13,088 / +17,176 for the finale, teleports and specials. A clean strict-pin build from scratch reproduces release + agnos byte for byte. Bench: interleaved best-of-3 vs v0.35.7, every metric within ±0.6% (noise). |
 | `build/doom` (v0.35.7, cycc **6.6.6**) | **518,928 B** plain / **387,856 B** release / **501,520 B** agnos — unchanged from v0.35.6 (the anchor swaps one product for another). True spawn frame 566.7 µs best-of-mins, same-compiler A/B vs v0.35.6 570.2 (−0.6%, noise). |
 | `build/doom` (v0.35.6, cycc **6.6.6**) | **518,928 B** plain; **387,856 B** release (`CYRIUS_DCE=1` — real elimination, 131,936 B; a clean strict-pin rebuild reproduces it byte for byte). `build/doom_agnos` = **501,520 B**. True spawn frame `render_frame+sprites_spawned` 574.9 µs best-of-mins (+1.1% vs v0.35.5 same session — codegen/noise); `status_render` 132.7 → 118.2 µs (−10.9%, the range-clamp rewrite, same-compiler A/B); `things_tick` −6%. |
 | `build/doom` (v0.35.4, cycc **6.5.4**) | **485,368 B**. `build/doom_agnos` = **471,928 B**. Prior v0.35.3: 485,360 / 471,920 — thing-z is +8 B, because it deletes a BSP descent while adding a field read. Prior v0.35.2: 481,264 / 467,824. The +4,192 is the chase code (direction tables, the search, two parallel arrays). Prior v0.35.1: 477,072 / 463,632. NOP-sled under `CYRIUS_DCE=1`: **543 fns / 103,280 B** (agnos 585 / 101,220). The **+4,152 B** over the 0.35.0 / 6.4.78 build is *entirely* the new `lib/vec.cyr` introsort (`vec_sort_by` / `vec_select_nth`), which cycc auto-prepends into every build and which doom never calls — cyrius's own 6.5.4 entry records the identical +4,152 B on `cycc`. It is all NOP-sled: unreachable fns 532 → 543. Output byte-identical: 14/14 `--ppm` captures **and** the full `--ai-probe` fingerprint. *(Baseline measured here, not copied: a 6.4.78 rebuild proven byte-identical to the committed `build/doom` reports **532 fns / 100,054 B**, where the 0.35.0 row below records 535 / 100,688. The row below is left as shipped; 532 / 100,054 is the number this bump was actually diffed against.)* |
@@ -86,7 +96,23 @@
 
 Frame-time budget: 22 ms per tick @ 35 Hz. Current: ~12× headroom.
 
-## Gates (last green, 2026-09-26 — **v0.35.7**, cycc **6.6.6** true pin)
+## Gates (last green, 2026-09-26 — **v0.35.8**, cycc **6.6.6** true pin)
+
+| Gate | Result |
+|---|---|
+| `cyrius build` (all targets) + clean-from-scratch | OK — 532,016 / 400,944 (`CYRIUS_DCE=1`) / 518,696 (agnos), banner v0.35.8. Strict-pin rebuild from a fresh `cyrius deps` is sha256-identical (release `a078f801…`, agnos `8c7b3bb5…`); lock **39 / 0**. |
+| `cyrius test` — every `tests/*.tcyr` | **376 / 33 / 18 / 12**, 0 failed. |
+| `./build/test_doom wad/DOOM1.WAD` | **677 / 677** (+131): G-10, teleports (player, monsters, landing rules, W1 latch, fog, freeze), boss death, damaging floors + suit, the level-flow rule, the dismiss gate, finale typing, and an in-engine E1M8 endgame. |
+| Mutation | **48 mutants: 47 killed, 1 equivalent** (first pass found two test gaps, closed). |
+| Reachability (`scripts/reachability.py`, ENGINE + 39/97) | **Every map's exit reachable**; E1M8's end sector needs both the boss death and the teleport (46 → 69 → 70 sectors). Lost vs vanilla: only E1M2's optional special-46 area. |
+| 41-capture A/B vs v0.35.7 (sha256-matched baseline) | **40 identical**; E1M8 intermission differs only in x 109–210 / y 156–182 (the removed Entering block). New `--ppm-finale` captures. |
+| `--ai-probe` | **12 / 12 identical.** E1M9 ambush probe (scratch): 6/10 closet monsters teleport in within 60 s; the rest hit the give-up rule (AI-1). |
+| fuzz **×8** | clean (fuzzer stub parity restored: no new unresolved symbols). |
+| Bench | Neutral (±0.6%); row appended. |
+| **AGNOS QEMU** (`doom-directmap-smoke.sh`, final `doom_agnos` `8c7b3bb5…`) | Boots v0.35.8, WAD loads; **64,000 / 64,000** blocks exact vs Linux. Floor-band gate still false-FAILs (agnos-side origin assumption). |
+| Version consistency | `VERSION` **0.35.8** = banner = CHANGELOG header; pin `6.6.6`. |
+
+## Gates (prior, 2026-09-26 — **v0.35.7**, cycc **6.6.6** true pin)
 
 | Gate | Result |
 |---|---|
@@ -212,18 +238,19 @@ The 6.4.78 baselines were captured **first**, from a rebuild proven byte-identic
 
 ## Architecture surface
 
-- **26 modules** (21 in `src/*.cyr` + 4 Wayland-backend files under `src/platform/`: `wayland/{wire,client,shm}.cyr` + `window.cyr`, all `#ifndef CYRIUS_TARGET_AGNOS` + `src/setu_present.cyr`, the agnos `PM_SETU` backend, `#ifdef CYRIUS_TARGET_AGNOS`):
-  `main`, `fixed`, `tables`, `wad`, `framebuf`, `map`, `texture`, `render`, `sprite`, `input`, `player`, `tick`, `things`, `status`, `sound`, `audio`, `music`, `doors`, `automap`, `level`, `menu`.
+- **27 modules** (22 in `src/*.cyr` + 4 Wayland-backend files under `src/platform/`: `wayland/{wire,client,shm}.cyr` + `window.cyr`, all `#ifndef CYRIUS_TARGET_AGNOS` + `src/setu_present.cyr`, the agnos `PM_SETU` backend, `#ifdef CYRIUS_TARGET_AGNOS`):
+  `main`, `fixed`, `tables`, `wad`, `framebuf`, `map`, `texture`, `render`, `sprite`, `input`, `player`, `tick`, `things`, `status`, `sound`, `audio`, `music`, `doors`, `automap`, `level`, `menu`, `finale` (v0.35.8).
 - **3 vendored libs**: `lib/bsp.cyr` (resolved from the git-pinned `[deps.bsp]` 1.2.5, spatial geometry primitives — provides the shared `asr`) + `vendor/vani-core.cyr` (**1.2.5**, committed audio shim, not a git dep) + `vendor/setu.cyr` (**0.7.0** + the v0.35.6 hand-migration of three `Result` binds, committed setu display-protocol client, agnos-only, not a git dep). At v0.35.6: bsp and vani are the newest tags and byte-identical to those tags' `dist/` bundles; setu is deliberately frozen (not a stdlib member). (This line said 1.1.1 / 0.5.1 until 2026-08-01 — the versions table above had been kept current and this one had not.)
 - **270 fn signatures** all `: i64`-annotated (v0.27.2 sweep — parse-only, ABI-identical).
 - **`Result<T, E>` adoption** at the WAD IO/parse boundary (v0.27.3): `WadError` typed-error enum, `wad_open` returns Result, `wad_read_lump_r` / `wad_read_lump_into_r` parallel forms, `?` + exhaustive `match` at the boot boundary in `doom_main`.
 
 ## In-flight slot map
 
-Current arc: **v0.35.x gameplay** (v0.35.0 sight+wake → v0.35.1 movement repairs → v0.35.2 the 8-direction chase → v0.35.3 thing physics → v0.35.4 real thing-z → v0.35.5 toolchain 6.6.2 → **v0.35.6 toolchain 6.6.6 + the interactables review** → **v0.35.7 the `top_off` sprite anchor**). **Renumbered again at v0.35.6**: v0.35.5 / v0.35.6 went to unplanned cuts, so every planned slot moved up two in the same order, and the review's follow-ups became **v0.35.9 Interactables II** and **v0.35.10 Items II**; the critical path is now **v0.35.8** (Episode end: teleports, boss floor, sector 11 + damaging floors, finale) and v0.37.0 (X11). The history below is kept as written at the time. **Roadmap slot labels were flattened at the v0.35.2 cut** — the letter-suffixed slots (`v0.35.1a/1b/1c`, `v0.35.4b`) are gone; every item now lives in a numbered release, and the 0.35.x tail shifted by +2 (episode-end, the critical path, is now **v0.35.4**). [`roadmap.md`](roadmap.md) was reorganized at the v0.34.6 cut into **16 pinned releases** (v0.34.7 → v1.0.0) plus four labelled holding groups; the old "v0.28.x graphics arc" framing is retired (0.28.5/.6/.11 all shipped long ago under other version numbers). **Critical path to v1.0.0 is two releases**: **v0.35.4** (episode-end — `level_advance` still wraps E1M8→E1M1, so the game cannot be finished; renumbered from v0.35.2 when the slot labels were flattened) and v0.37.0 (native X11 — the only unmet display-backend item). **The deep perf pass stays gated on cyrius v6.5.x Performance-Quality — re-measured 2026-08-01 on the 6.5.4 pin and the gate did NOT open**: `CYRIUS_IR=3` miscompiles doom (see Known issue #4), so HOLD-C stands on evidence rather than on the upstream 6.5.2 announcement. The pin itself moved to **6.5.4** at the v0.35.1 cut, byte-identical.
+Current arc: **v0.35.x gameplay** (v0.35.0 sight+wake → v0.35.1 movement repairs → v0.35.2 the 8-direction chase → v0.35.3 thing physics → v0.35.4 real thing-z → v0.35.5 toolchain 6.6.2 → **v0.35.6 toolchain 6.6.6 + the interactables review** → **v0.35.7 the `top_off` sprite anchor** → **v0.35.8 Episode end**). **Renumbered at v0.35.8**: the scripted E1M1 → E1M8 playthrough (v1.0.0-1) became its own slot, **v0.35.9** — now the critical path with v0.37.0 — and every later slot moved up one (Interactables II v0.35.10, Items II v0.35.11, …). **Renumbered again at v0.35.6**: v0.35.5 / v0.35.6 went to unplanned cuts, so every planned slot moved up two in the same order, and the review's follow-ups became **v0.35.9 Interactables II** and **v0.35.10 Items II**; the critical path is now **v0.35.8** (Episode end: teleports, boss floor, sector 11 + damaging floors, finale) and v0.37.0 (X11). The history below is kept as written at the time. **Roadmap slot labels were flattened at the v0.35.2 cut** — the letter-suffixed slots (`v0.35.1a/1b/1c`, `v0.35.4b`) are gone; every item now lives in a numbered release, and the 0.35.x tail shifted by +2 (episode-end, the critical path, is now **v0.35.4**). [`roadmap.md`](roadmap.md) was reorganized at the v0.34.6 cut into **16 pinned releases** (v0.34.7 → v1.0.0) plus four labelled holding groups; the old "v0.28.x graphics arc" framing is retired (0.28.5/.6/.11 all shipped long ago under other version numbers). **Critical path to v1.0.0 is two releases**: **v0.35.4** (episode-end — `level_advance` still wraps E1M8→E1M1, so the game cannot be finished; renumbered from v0.35.2 when the slot labels were flattened) and v0.37.0 (native X11 — the only unmet display-backend item). **The deep perf pass stays gated on cyrius v6.5.x Performance-Quality — re-measured 2026-08-01 on the 6.5.4 pin and the gate did NOT open**: `CYRIUS_IR=3` miscompiles doom (see Known issue #4), so HOLD-C stands on evidence rather than on the upstream 6.5.2 announcement. The pin itself moved to **6.5.4** at the v0.35.1 cut, byte-identical.
 
 | Slot | Status | What |
 |---|---|---|
+| **v0.35.8** | **RELEASE-READY 2026-09-26** (all targets + clean-from-scratch / 376 + 33 + 18 + 12 WAD-free, **677** full / fuzz ×8 / 40/41 captures identical, the one delta attributed / 12/12 AI / mutation 47/48, 1 equivalent / reachability: every exit / **AGNOS QEMU 64,000/64,000**) | **Episode end.** Teleporters (97/39 + monster-only 125/126), E1M8's boss death (tag 666), damaging floors + the radiation suit, skill-1 halving, the finale (own text, FLOOR4_8 + D_VICTOR, HELP2 → title menu; no intermission after map 8, as vanilla), D_INTER, G-10. Found: AI-1 (chasers give up after 100 tics without sight) → v0.35.10. |
 | **v0.35.7** | **RELEASE-READY 2026-09-26** (all targets / 345 + 33 + 18 + 12 WAD-free, **546** full / fuzz ×8 / 31/41 captures identical, every moved sprite adjudicated / 12/12 AI / mutation 4/4 / **AGNOS QEMU 64,000/64,000**) | **The `top_off` sprite-anchor revival.** Sprites anchored by their patch top offset (feet sink, spheres / keys / pickups float); byte-identical for top == height, so the diff is purely metadata-driven. |
 | **v0.35.6** | **RELEASE-READY 2026-09-26** (both targets + clean-from-scratch / 339 + 33 + 18 + 12 WAD-free, **538** full / fuzz ×8 / deps 39-0 / 28/41 renders identical, every delta attributed / 12/12 AI / 33/34 mutants / **AGNOS QEMU 64,000/64,000 px**) | **cyrius 6.6.6 + deps + the interactables review.** Progression specials 7/8/18/20/22 (+5/36/82/86/91/98): E1M3/M4/M5/M9 regain their exits, seven maps lose 0 sectors vs vanilla. Barrel ghosts, the v0.35.4 thing-z regression, vanilla pickups / items % / splash / rocket impact, walk-line ends, monster-blocking lines, mover fidelity. Toolchain: the nested-`continue` miscompile (sprites since v0.31.5; Known issue #6), the `for > while > for` residual, the AGNOS build restored + CI gate. |
 | **v0.35.5** | shipped 2026-09-11 (Linux only — *found at v0.35.6*: the AGNOS build did not compile on this pin and the banner read v0.35.4) | Toolchain 6.5.4 → 6.6.2, `Result` value form in `src/`. |

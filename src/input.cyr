@@ -64,6 +64,37 @@ fn input_run(): i64 { return (input_flags & INP_RUN) != 0; }
 fn input_fire(): i64 { return (input_flags & INP_FIRE) != 0; }
 fn input_use(): i64 { return (input_flags & INP_USE) != 0; }
 
+# v0.35.8 — "hold this screen until a FRESH key press", shared by the
+# intermission, the death screen and the finale. It was written out inline twice
+# (level_intermission, main's death wait); the finale would have been the third.
+# Ignore input for `min_tics` (readability, and it lets a key held over from play
+# get past the OS key-repeat's initial delay), then arm once the keyboard has been
+# quiet for 8 consecutive tics, then fire on the next press. Why each step exists
+# is recorded at level_intermission (audits F-U3 / G-3). One gate at a time —
+# these screens never nest.
+var dgate_min = 0;
+var dgate_rel = 0;
+var dgate_armed = 0;
+
+fn dismiss_gate_reset(min_tics): i64 {
+    dgate_min = min_tics;
+    dgate_rel = 0;
+    dgate_armed = 0;
+    return 0;
+}
+
+# Once per tic, after input_poll. 1 = dismiss now.
+fn dismiss_gate_tick(): i64 {
+    if (dgate_min > 0) {
+        dgate_min -= 1;
+        return 0;
+    }
+    if (input_flags == 0) { dgate_rel += 1; } else { dgate_rel = 0; }
+    if (dgate_rel >= 8) { dgate_armed = 1; }
+    if (dgate_armed == 1 && input_flags != 0) { return 1; }
+    return 0;
+}
+
 enum KeyCode {
     KEY_ESC = 27;
     KEY_UP = 128;

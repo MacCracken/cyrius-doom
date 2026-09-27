@@ -41,6 +41,13 @@ var map_reject = 0;
 var map_reject_ok = 0;
 var map_bm_originx = 0;
 var map_bm_originy = 0;
+# v0.35.8 — WHICH map is loaded, from its "ExMy" marker name (0 / 0 for any other
+# name). Keyed on the map rather than on level.cyr's progression counters because
+# the geometry is what carries the behaviour: E1M8's boss death lowers ITS tag-666
+# sectors (BOSS-1), and the WAD-gated tests load maps through map_load without the
+# level module at all.
+var map_episode = 0;
+var map_number = 0;
 var map_bm_cols = 0;
 var map_bm_rows = 0;
 var map_bm_size = 0;
@@ -150,10 +157,19 @@ fn sign_extend_16(val): i64 {
 fn map_load(map_name): i64 {
     map_alloc();
 
+    map_episode = 0;
+    map_number = 0;
     var marker = wad_find_lump(map_name);
     if (marker < 0) {
         sakshi_error("map not found", 13);
         return -1;
+    }
+    if (strlen(map_name) == 4) {
+        if (load8(map_name) == 69 && load8(map_name + 2) == 77) {        # 'E' . 'M' .
+            var me = load8(map_name + 1) - 48;
+            var mm = load8(map_name + 3) - 48;
+            if (me >= 1 && me <= 9 && mm >= 1 && mm <= 9) { map_episode = me; map_number = mm; }
+        }
     }
 
     # VERTEXES (marker + 4)

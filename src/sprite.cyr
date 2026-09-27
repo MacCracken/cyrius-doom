@@ -90,6 +90,8 @@ fn sprite_build_lookup(): i64 {
     sprite_add_lookup(TTYPE_CACO_FIREBALL, "BAL2");
     # v0.35.6 (P-1): a dying barrel draws the barrel-explosion sprite.
     sprite_add_lookup(TTYPE_BARREL_EXPLOSION, "BEXP");
+    # v0.35.8 (TELE-1): teleport fog.
+    sprite_add_lookup(TTYPE_TFOG, "TFOG");
     # 2026-07-08 audit RC-S3: these 12 shareware types spawned and functioned
     # (things.cyr knows them) but had no lookup entry, so they were INVISIBLE —
     # including 63 attacking spectres across E1M3-M9. Spectre renders as a
@@ -575,6 +577,7 @@ fn sprite_render_all(): i64 {
         var is_missile = 0;
         if (thing_category(thing_idx) == CAT_PROJECTILE) { is_missile = 1; }
         if (ttype == TTYPE_BARREL_EXPLOSION) { is_missile = 1; }   # BEXP is full-bright
+        if (ttype == TTYPE_TFOG) { is_missile = 1; }               # so is TFOG (v0.35.8)
 
         # Project sprite bottom at the thing's floor height vs the frame
         # eye (view_z, 0.28.5): things on higher/lower floors now project

@@ -349,7 +349,8 @@ fn audio_preload(): i64 {
     audio_load("DSRLAUNC");   # rocket launch
     audio_load("DSBAREXP");   # barrel / rocket explosion
     audio_load("DSWPNUP");    # weapon pickup (v0.35.6)
-    audio_load("DSGETPOW");   # powerup pickup — soulsphere (v0.35.6)
+    audio_load("DSGETPOW");   # powerup pickup — soulsphere (v0.35.6), rad suit (v0.35.8)
+    audio_load("DSTELEPT");   # teleport (v0.35.8)
     audio_load("DSPLASMA");   # plasma (registered only)
     audio_load("DSPOPAIN");   # monster pain (generic)
     audio_load("DSPODTH1");   # monster death (generic)

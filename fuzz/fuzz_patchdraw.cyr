@@ -67,6 +67,12 @@ fn level_add_kill(): i64 { return 0; }
 fn level_add_item(): i64 { return 0; }
 fn tick_get_count(): i64 { return 0; }
 fn doors_walk_trigger(ox, oy, nx, ny): i64 { return 0; }
+# v0.35.8: things.cyr's cross-module calls into doors.cyr (boss death, monster
+# teleports) — never reached by this fuzzer, stubbed so nothing is unresolved.
+fn boss_death_check(idx): i64 { return 0; }
+fn monster_cross_teleports(idx, ox, oy, nx, ny): i64 { return 0; }
+# ... and player.cyr's damaging-floor exit (type 11) into level.cyr.
+fn level_exit_normal(): i64 { return 0; }
 
 var _fz_state = 0x9E3779B97F4A7C15;
 

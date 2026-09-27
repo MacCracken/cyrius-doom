@@ -67,14 +67,30 @@ var door_count = 0;
 # DR/SR/WR specials are never marked. Sized to MAP_MAX_LINEDEFS, cleared per map.
 var linedef_used = 0;
 
+# v0.35.8 (TELE-1) — this map's teleport lines (39 / 97 / 125 / 126), by linedef
+# index. Monsters test only these after each step (monster_cross_teleports), so a
+# monster's walk costs nothing extra on a map without teleporters and ten line
+# tests on the busiest shareware one (E1M5), instead of a sweep of every linedef.
+var tele_lines = 0;
+var tele_line_count = 0;
+
 fn doors_init(): i64 {
     # Lazy-init guard (RC-G7): re-alloc'd on every map load, leaking the
     # previous thinker array on the never-free bump allocator.
     if (door_thinkers == 0) { door_thinkers = alloc(DOOR_MAX * DOOR_ENTRY_SIZE); }
     if (linedef_used == 0) { linedef_used = alloc(MAP_MAX_LINEDEFS); }
+    if (tele_lines == 0) { tele_lines = alloc(MAP_MAX_LINEDEFS * 8); }
     var i = 0;
     while (i < MAP_MAX_LINEDEFS) { store8(linedef_used + i, 0); i += 1; }
     door_count = 0;
+    tele_line_count = 0;
+    for (var li = 0; li < map_num_linedefs; li += 1) {
+        var lsp = load64(map_linedefs + li * MAP_LINEDEF_SIZE + 24);
+        if (lsp == 39 || lsp == 97 || lsp == 125 || lsp == 126) {
+            store64(tele_lines + tele_line_count * 8, li);
+            tele_line_count += 1;
+        }
+    }
     return 0;
 }
 
@@ -112,6 +128,11 @@ fn special_is_once(special): i64 {
     if (special == 22)  { return 1; }
     if (special == 5)   { return 1; }
     if (special == 36)  { return 1; }
+    # v0.35.8 (TELE-1) — the W1 teleports. Consumed by ANY crossing, front or back
+    # (vanilla clears a 39 whether or not the teleport happened; a 125 when a
+    # monster crosses it). Neither appears in DOOM1.WAD — its 20 are all WR 97.
+    if (special == 39)  { return 1; }
+    if (special == 125) { return 1; }
     return 0;
 }
 
@@ -921,8 +942,75 @@ fn doors_use(): i64 {
     return 0;
 }
 
+# v0.35.8 — did the move (ox,oy)->(nx,ny) cross linedef i's SEGMENT? 0 = no;
+# 1 = it started on the FRONT (right-hand, first-sidedef) side; 2 = on the back.
+# The exact walk-crossing test, lifted out of doors_walk_trigger so the monsters'
+# teleport sweep shares it rather than restating it. Teleports fire only on 1:
+# vanilla lets you walk back OUT of a teleporter pad. (A start point exactly on
+# the line counts as front — the grouping this test has always used.)
+fn walk_line_cross_side(i, ox, oy, nx, ny): i64 {
+    var v1 = map_linedef_v1(i);
+    var v2 = map_linedef_v2(i);
+    var lx1 = map_vertex_x(v1);
+    var ly1 = map_vertex_y(v1);
+    var lx2 = map_vertex_x(v2);
+    var ly2 = map_vertex_y(v2);
+
+    # Cheap reject — v0.35.6 (W-2): by BOUNDING BOX. It was "midpoint more than
+    # 128 units from the new position", run before the exact test below, so any
+    # crossing more than ~114-128 units from a line's middle (the approx
+    # distance overestimates up to 12%) was silently dropped: E1M9 L450 lost a
+    # third of its length, E1M3 L88 42%. A move whose endpoints both lie past
+    # the same edge of the line's box cannot cross it.
+    var bx_lo = lx1;
+    var bx_hi = lx2;
+    if (lx2 < lx1) { bx_lo = lx2; bx_hi = lx1; }
+    var by_lo = ly1;
+    var by_hi = ly2;
+    if (ly2 < ly1) { by_lo = ly2; by_hi = ly1; }
+    if (ox < bx_lo && nx < bx_lo) { return 0; }
+    if (ox > bx_hi && nx > bx_hi) { return 0; }
+    if (oy < by_lo && ny < by_lo) { return 0; }
+    if (oy > by_hi && ny > by_hi) { return 0; }
+
+    var ldx = lx2 - lx1;
+    var ldy = ly2 - ly1;
+    var os = ((ox - lx1) >>> (8)) * ((ldy) >>> (8)) - ((oy - ly1) >>> (8)) * ((ldx) >>> (8));
+    var ns = ((nx - lx1) >>> (8)) * ((ldy) >>> (8)) - ((ny - ly1) >>> (8)) * ((ldx) >>> (8));
+
+    var side = 0;
+    if (os >= 0 && ns < 0) { side = 1; }
+    if (os < 0 && ns >= 0) { side = 2; }
+    if (side == 0) { return 0; }
+
+    # Segment-span check (RC-G2): the sign flip above is on the INFINITE
+    # line — walking past a short trigger line's endpoint used to fire it
+    # (up to ~(128 − len/2) units beyond the end; specials 52/124 made
+    # that a spurious instant level exit). Project the crossing point
+    # onto the line and require it inside [v1, v2].
+    var t_den = os - ns;
+    if (t_den == 0) { return 0; }
+    var wt = fixed_div(os, t_den);
+    var cxp = ox + fixed_mul(wt, nx - ox);
+    var cyp = oy + fixed_mul(wt, ny - oy);
+    var pdx = ((cxp - lx1) >>> (8));
+    var pdy = ((cyp - ly1) >>> (8));
+    var ldx8 = ((ldx) >>> (8));
+    var ldy8 = ((ldy) >>> (8));
+    var wdot = pdx * ldx8 + pdy * ldy8;
+    if (wdot < 0) { return 0; }
+    var wlen2 = ldx8 * ldx8 + ldy8 * ldy8;
+    if (wdot > wlen2) { return 0; }
+    return side;
+}
+
 # Walk-over triggers: check if player crossed a special linedef
+# Diagnostic: how many times the walk-trigger sweep has run (v0.35.8, G-10's
+# exit test — a diagonal step must cost exactly one).
+var walk_trigger_calls = 0;
+
 fn doors_walk_trigger(old_x, old_y, new_x, new_y): i64 {
+    walk_trigger_calls += 1;
     for (var i = 0; i < map_num_linedefs; i += 1) {
         var special = load64(map_linedefs + i * MAP_LINEDEF_SIZE + 24);
         if (special == 0) { continue; }
@@ -953,6 +1041,8 @@ fn doors_walk_trigger(old_x, old_y, new_x, new_y): i64 {
         if (special == 98)  { is_walk = 1; }   # v0.35.6 WR turbo lower to highest+8
         if (special == 82)  { is_walk = 1; }   # v0.35.6 WR lower to lowest
         if (special == 86)  { is_walk = 1; }   # v0.35.6 WR door open & stay
+        if (special == 39)  { is_walk = 1; }   # v0.35.8 W1 teleport
+        if (special == 97)  { is_walk = 1; }   # v0.35.8 WR teleport (E1M5, E1M8's ending, E1M9)
         if (is_walk == 0) { continue; }
 
         # One-shot latch (0.33.7 item 3): a W1 "once" walk line already crossed
@@ -961,67 +1051,31 @@ fn doors_walk_trigger(old_x, old_y, new_x, new_y): i64 {
         # a spent once-line costs nothing.
         if (special_is_once(special) == 1) { if (door_line_used(i) == 1) { continue; } }
 
-        var v1 = map_linedef_v1(i);
-        var v2 = map_linedef_v2(i);
-        var lx1 = map_vertex_x(v1);
-        var ly1 = map_vertex_y(v1);
-        var lx2 = map_vertex_x(v2);
-        var ly2 = map_vertex_y(v2);
-
-        # Cheap reject — v0.35.6 (W-2): by BOUNDING BOX. It was "midpoint more than
-        # 128 units from the new position", run before the exact test below, so any
-        # crossing more than ~114-128 units from a line's middle (the approx
-        # distance overestimates up to 12%) was silently dropped: E1M9 L450 lost a
-        # third of its length, E1M3 L88 42%. A move whose endpoints both lie past
-        # the same edge of the line's box cannot cross it. ONE continue, on
-        # purpose: this loop sits at the 8-per-nest cap (cyrius 6.6.3+).
-        var bx_lo = lx1;
-        var bx_hi = lx2;
-        if (lx2 < lx1) { bx_lo = lx2; bx_hi = lx1; }
-        var by_lo = ly1;
-        var by_hi = ly2;
-        if (ly2 < ly1) { by_lo = ly2; by_hi = ly1; }
-        var off_box = 0;
-        if (old_x < bx_lo && new_x < bx_lo) { off_box = 1; }
-        if (old_x > bx_hi && new_x > bx_hi) { off_box = 1; }
-        if (old_y < by_lo && new_y < by_lo) { off_box = 1; }
-        if (old_y > by_hi && new_y > by_hi) { off_box = 1; }
-        if (off_box == 1) { continue; }
-
-        var ldx = lx2 - lx1;
-        var ldy = ly2 - ly1;
-        var os = ((old_x - lx1) >>> (8)) * ((ldy) >>> (8)) - ((old_y - ly1) >>> (8)) * ((ldx) >>> (8));
-        var ns = ((new_x - lx1) >>> (8)) * ((ldy) >>> (8)) - ((new_y - ly1) >>> (8)) * ((ldx) >>> (8));
-
-        var crossed = 0;
-        if (os >= 0 && ns < 0) { crossed = 1; }
-        if (os < 0 && ns >= 0) { crossed = 1; }
-        if (crossed == 0) { continue; }
-
-        # Segment-span check (RC-G2): the sign flip above is on the INFINITE
-        # line — walking past a short trigger line's endpoint used to fire it
-        # (up to ~(128 − len/2) units beyond the end; specials 52/124 made
-        # that a spurious instant level exit). Project the crossing point
-        # onto the line and require it inside [v1, v2].
-        var t_den = os - ns;
-        if (t_den == 0) { continue; }
-        var wt = fixed_div(os, t_den);
-        var cxp = old_x + fixed_mul(wt, new_x - old_x);
-        var cyp = old_y + fixed_mul(wt, new_y - old_y);
-        var pdx = ((cxp - lx1) >>> (8));
-        var pdy = ((cyp - ly1) >>> (8));
-        var ldx8 = ((ldx) >>> (8));
-        var ldy8 = ((ldy) >>> (8));
-        var wdot = pdx * ldx8 + pdy * ldy8;
-        if (wdot < 0) { continue; }
-        var wlen2 = ldx8 * ldx8 + ldy8 * ldy8;
-        if (wdot > wlen2) { continue; }
+        # The crossing test — box reject, side flip, segment span — is
+        # walk_line_cross_side (v0.35.8). Folding its five `continue`s into one
+        # also takes this loop off the 8-per-nest cap it sat at (cyrius 6.6.3+).
+        var side = walk_line_cross_side(i, old_x, old_y, new_x, new_y);
+        if (side == 0) { continue; }
 
         # Exit lines (if/else — return-smash-safe, see above)
         if (special == 52)  { level_exit_normal(); return 0; }
         if (special == 124) { level_exit_secret(); return 0; }
 
         var tag = load64(map_linedefs + i * MAP_LINEDEF_SIZE + 32);
+
+        # v0.35.8 (TELE-1) — teleports, from the front side only. The sweep ENDS on
+        # a teleport: every remaining line was being tested against a move that no
+        # longer describes where the player is (this is also why G-10 had to land
+        # first — a second sweep would have run from the destination).
+        if (special == 39 || special == 97) {
+            if (side == 1) {
+                if (teleport_player(tag) == 1) {
+                    if (special == 39) { door_mark_used(i); }
+                    return 0;
+                }
+            }
+        }
+
         if (tag > 0) {
             # 22 takes its new floor flat from the walk line's FRONT sector.
             var wrs = map_linedef_side_right(i);
@@ -1055,4 +1109,161 @@ fn doors_walk_trigger(old_x, old_y, new_x, new_y): i64 {
         if (special_is_once(special) == 1) { door_mark_used(i); }
     }
     return 0;
+}
+
+# ================================================================
+# Teleporters (v0.35.8, TELE-1)
+# ================================================================
+# Walk teleports 39 (W1) / 97 (WR), plus the monster-only 125 (W1) / 126 (WR).
+# DOOM1 uses only 97: E1M5 L787-796, E1M8 L299-306 (the way into the ending) and
+# E1M9 L514/515 (its monster ambush). Behaviour, from the documented rules:
+#   * fires only when the crossing starts on the line's FRONT side;
+#   * the landing is the first teleport-destination thing (DoomEd 14) standing in
+#     the LOWEST-numbered sector carrying the line's tag — no landing, no teleport;
+#   * the traveller takes the landing's x, y and angle and stands on its floor;
+#   * a PLAYER telefrags every shootable body whose box overlaps theirs there, and
+#     is frozen (no movement, no turning — firing still works) for 18 tics;
+#   * a MONSTER never telefrags: any shootable body in the way, the player
+#     included, cancels its teleport;
+#   * a teleport fog + DSTELEPT at both ends — the arrival fog 20 units in front
+#     of the landing, along its angle.
+# The player's momentum is already nil (this engine moves the player directly),
+# so vanilla's "zero momentum" has nothing to act on.
+
+# The landing for a line tagged `tag`, or -1. Sectors are the OUTER loop, so a
+# landing in sector 3 beats one in sector 9 whatever the thing order. A tag of 0
+# never teleports here: vanilla would match the untagged sectors and land on
+# whichever of their landings came first, which only a malformed line can reach.
+fn teleport_find_dest(tag): i64 {
+    if (tag <= 0) { return 0 - 1; }
+    for (var s = 0; s < map_num_sectors; s += 1) {
+        if (load64(map_sectors + s * MAP_SECTOR_SIZE + 48) == tag) {
+            for (var t = 0; t < thing_count; t += 1) {
+                if (thing_type(t) == TTYPE_TELEPORT_DEST) {
+                    if ((thing_flags(t) & TF_ACTIVE) != 0) {
+                        if (thing_sector(t) == s) { return t; }
+                    }
+                }
+            }
+        }
+    }
+    return 0 - 1;
+}
+
+# Fog + sound at the departure point and just in front of landing `d`.
+fn teleport_fog(ox, oy, oz, d, nz): i64 {
+    thing_spawn_tfog(ox, oy, oz);
+    audio_play_at("DSTELEPT", ox, oy);
+    var a = thing_angle(d);
+    var fx = thing_x(d) + fixed_mul(fixed_cos(a), 20 << 16);
+    var fy = thing_y(d) + fixed_mul(fixed_sin(a), 20 << 16);
+    thing_spawn_tfog(fx, fy, nz);
+    audio_play_at("DSTELEPT", fx, fy);
+    return 0;
+}
+
+# Teleport the player through a line tagged `tag`. 1 = moved.
+fn teleport_player(tag): i64 {
+    var d = teleport_find_dest(tag);
+    if (d < 0) { return 0; }
+    var dx = thing_x(d);
+    var dy = thing_y(d);
+    for (var i = 0; i < thing_count; i += 1) {
+        var f = thing_flags(i);
+        if ((f & TF_ACTIVE) != 0 && (f & TF_SHOOTABLE) != 0) {
+            var rr = thing_radius(i) + PLAYER_RADIUS;
+            if (fixed_abs(thing_x(i) - dx) < rr && fixed_abs(thing_y(i) - dy) < rr) { thing_damage(i, 10000); }
+        }
+    }
+    var ox = player_x;
+    var oy = player_y;
+    var oz = player_z;
+    player_x = dx;
+    player_y = dy;
+    var s = map_point_sector(dx, dy);
+    if (s >= 0) { player_z = map_sector_floorh(s) << 16; }
+    player_angle = thing_angle(d);
+    player_freeze_tics = TELEPORT_FREEZE_TICS;
+    teleport_fog(ox, oy, oz, d, player_z);
+    return 1;
+}
+
+# Teleport monster `idx` through a line tagged `tag`. 1 = moved.
+fn teleport_monster(idx, tag): i64 {
+    var d = teleport_find_dest(tag);
+    if (d < 0) { return 0; }
+    var dx = thing_x(d);
+    var dy = thing_y(d);
+    var r = thing_radius(idx);
+    for (var i = 0; i < thing_count; i += 1) {
+        if (i != idx) {
+            var f = thing_flags(i);
+            if ((f & TF_ACTIVE) != 0 && (f & TF_SHOOTABLE) != 0) {
+                var rr = thing_radius(i) + r;
+                if (fixed_abs(thing_x(i) - dx) < rr && fixed_abs(thing_y(i) - dy) < rr) { return 0; }
+            }
+        }
+    }
+    if (player_health > 0) {
+        var pr = PLAYER_RADIUS + r;
+        if (fixed_abs(player_x - dx) < pr && fixed_abs(player_y - dy) < pr) { return 0; }
+    }
+    var ox = thing_x(idx);
+    var oy = thing_y(idx);
+    var oz = thing_z(idx);
+    thing_set_x(idx, dx);
+    thing_set_y(idx, dy);
+    thing_update_z(idx);
+    thing_set_angle(idx, thing_angle(d));
+    teleport_fog(ox, oy, oz, d, thing_z(idx));
+    return 1;
+}
+
+# Monster `idx` just stepped (ox,oy)->(nx,ny): take any teleport line it crossed
+# (39 / 97 / 125 / 126). Called at the end of chase_try_walk. 1 = teleported.
+# The door and lift lines monsters may also walk (4 / 10 / 88) are v0.35.9.
+fn monster_cross_teleports(idx, ox, oy, nx, ny): i64 {
+    for (var k = 0; k < tele_line_count; k += 1) {
+        var li = load64(tele_lines + k * 8);
+        var special = load64(map_linedefs + li * MAP_LINEDEF_SIZE + 24);
+        if (special_is_once(special) == 1) { if (door_line_used(li) == 1) { continue; } }
+        var side = walk_line_cross_side(li, ox, oy, nx, ny);
+        if (side == 0) { continue; }
+        var moved = 0;
+        if (side == 1) { moved = teleport_monster(idx, load64(map_linedefs + li * MAP_LINEDEF_SIZE + 32)); }
+        if (special_is_once(special) == 1) { door_mark_used(li); }
+        if (moved == 1) { return 1; }
+    }
+    return 0;
+}
+
+# ================================================================
+# Boss death (v0.35.8, BOSS-1)
+# ================================================================
+# E1M8's ending: when a baron FINISHES dying on E1M8 and no other baron is still
+# alive, every tag-666 sector lowers its floor to its lowest neighbour — on the
+# shareware map that is sector 30, the wall sealing the exit teleporter. Called
+# from thing_ai_tick at the moment a monster's death completes. A baron that is
+# itself mid-death (health <= 0) already counts as dead, so the order the two die
+# in does not matter. Nothing opens if the player is dead. 1 = the floor went.
+# The other episodes' boss rules (E2M8 / E3M8 exit, E4M6 door, E4M8 floor) need
+# registered maps to exercise — HOLD-A.
+fn boss_death_check(idx): i64 {
+    if (map_episode != 1) { return 0; }
+    if (map_number != 8) { return 0; }
+    if (thing_type(idx) != TTYPE_BARON) { return 0; }
+    if (player_health <= 0) { return 0; }
+    for (var i = 0; i < thing_count; i += 1) {
+        if (i != idx) {
+            if (thing_type(i) == TTYPE_BARON) {
+                if ((thing_flags(i) & TF_ACTIVE) != 0) {
+                    if (thing_health(i) > 0) { return 0; }
+                }
+            }
+        }
+    }
+    for (var s = 0; s < map_num_sectors; s += 1) {
+        if (load64(map_sectors + s * MAP_SECTOR_SIZE + 48) == 666) { floor_lower_to_lowest(s); }
+    }
+    return 1;
 }

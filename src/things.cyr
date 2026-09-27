@@ -33,6 +33,7 @@ enum ThingType {
     TTYPE_SPIDER = 7;
     TTYPE_SHOTGUY = 9;
     TTYPE_KEY_RED = 13;
+    TTYPE_TELEPORT_DEST = 14;    # v0.35.8 teleport landing (invisible, inert)
     TTYPE_CYBERDEMON = 16;
     TTYPE_CELLPACK = 17;
     TTYPE_SPECTRE = 58;
@@ -52,6 +53,7 @@ enum ThingType {
     TTYPE_ARMOR_BONUS = 2015;
     TTYPE_ARMOR_GREEN = 2018;
     TTYPE_ARMOR_BLUE = 2019;
+    TTYPE_RADSUIT = 2025;        # v0.35.8 radiation shielding suit (DMG-1)
     TTYPE_BARREL = 2035;
     TTYPE_ROCKETBOX = 2046;
     TTYPE_CELL = 2047;
@@ -128,6 +130,10 @@ var thing_count = 0;
 # Default 3 (Hurt Me Plenty) — used when the menu is skipped (direct-map CLI).
 var game_skill = 3;
 
+# v0.35.8 — the skill, for code included BEFORE this file: player_take_damage
+# halves damage on skill 1, and a global declared here cannot be read there.
+fn skill_get(): i64 { return game_skill; }
+
 enum ThingFlags {
     TF_ACTIVE = 1;
     TF_SOLID = 2;
@@ -161,6 +167,16 @@ enum RangedConst {
     MISSILE_RANGE = 134217728;    # 2048 units, << 16 — max ranged-arm distance
     RANGED_RETRY_TICS = 8;        # failed distance-roll: re-roll ~4x/s
     RANGED_COOLDOWN_TICS = 35;    # base refractory after a release (~1 s)
+}
+
+# v0.35.8 (TELE-1) — teleport fog: a synthetic, sprite-only effect thing (TFOG
+# A..J, full-bright) left at both ends of a teleport and removed when it ends.
+# Vanilla's sequence opens A B A B before running C..J; this one runs A..J once
+# at the same 6 tics a frame — a cosmetic simplification, noted in the CHANGELOG.
+enum FogConst {
+    TTYPE_TFOG = 9995;
+    TFOG_FRAME_TICS = 6;
+    TFOG_TICS = 60;               # 10 frames x 6 tics
 }
 
 # Field accessors
@@ -312,6 +328,8 @@ fn thing_classify(ttype): i64 {
     # Items — health/armor/ammo cluster (2007-2019, 2046-2049)
     # TTYPE_CELLPACK=17 handled separately (outside main item range)
     if (ttype == TTYPE_CELLPACK) { return CAT_ITEM; }
+    # v0.35.8 (DMG-1): the radiation suit — decor, i.e. untouchable, until now.
+    if (ttype == TTYPE_RADSUIT) { return CAT_ITEM; }
     switch (ttype) {
         case 2007: { return CAT_ITEM; }  # CLIP
         case 2008: { return CAT_ITEM; }  # SHELLS
@@ -739,6 +757,9 @@ fn chase_try_walk(idx, d): i64 {
     # Face the direction actually being walked, which is what the sprite and
     # other monsters' ai_in_front FOV gate both read.
     thing_set_angle(idx, (d * 128) & ANG_MASK);
+    # v0.35.8 (TELE-1): the step may have crossed a teleport line. Last, so the
+    # landing's angle is the one that sticks.
+    monster_cross_teleports(idx, cx, cy, nx, ny);
     return 1;
 }
 
@@ -828,6 +849,8 @@ fn thing_animate(idx): i64 {
     # v0.35.6 (P-1): a dying barrel's frame is its BEXP letter, set by barrel_tick
     # from the tics left — the generic H..K death frames below would overwrite it.
     if (state == STATE_DIE) { if (thing_type(idx) == TTYPE_BARREL) { return 0; } }
+    # v0.35.8: likewise a teleport fog's frame is tfog_tick's.
+    if (state == STATE_DIE) { if (thing_type(idx) == TTYPE_TFOG) { return 0; } }
 
     # Each state defines a frame range
     # SPAWN/ITEM: frame A (0) only
@@ -1112,6 +1135,7 @@ fn thing_ai_tick(idx): i64 {
     if (cat != CAT_MONSTER) {
         if (state == STATE_DIE) {
             if (thing_type(idx) == TTYPE_BARREL) { barrel_tick(idx); return 0; }
+            if (thing_type(idx) == TTYPE_TFOG) { tfog_tick(idx); return 0; }
             var dt = thing_tics(idx);
             if (dt > 0) {
                 thing_set_tics(idx, dt - 1);
@@ -1327,6 +1351,8 @@ fn thing_ai_tick(idx): i64 {
             # /SOLID) keeps it un-shootable and non-blocking but visible.
             thing_set_flags(idx, TF_ACTIVE | TF_CORPSE);
             level_add_kill();
+            # v0.35.8 (BOSS-1): E1M8 opens its exit when the last baron is down.
+            boss_death_check(idx);
         }
     }
 
@@ -1502,6 +1528,9 @@ fn things_check_pickups(): i64 {
         if (ttype == TTYPE_ARMOR_BONUS) { player_armor += 1; if (player_armor_class == 0) { player_armor_class = 1; } picked = 1; }
         if (ttype == TTYPE_ARMOR_GREEN) { if (player_armor < 100) { player_armor = 100; player_armor_class = 1; picked = 1; } }
         if (ttype == TTYPE_ARMOR_BLUE)  { if (player_armor < 200) { player_armor = 200; player_armor_class = 2; picked = 1; } }
+        # v0.35.8 (DMG-1): the radiation suit — always taken, (re)starts its
+        # 60-second timer, and (unlike the other powerups) never counts as an item.
+        if (ttype == TTYPE_RADSUIT) { player_radsuit_tics = RADSUIT_TICS; picked = 1; snd = 2; }
 
         if (player_health > 200) { player_health = 200; }
         if (player_armor > 200) { player_armor = 200; }
@@ -1607,6 +1636,56 @@ fn barrel_tick(idx): i64 {
         return 0;
     }
     thing_set_frame(idx, barrel_bexp_frame(t));
+    return 0;
+}
+
+# v0.35.8 (TELE-1) — spawn a teleport fog at (x, y, z). Reuses a finished fog's
+# slot when there is one — the rule the rocket uses for spent projectiles — else
+# appends; with THING_MAX reached the fog is skipped, it is only cosmetic.
+fn thing_spawn_tfog(x, y, z): i64 {
+    var idx = -1;
+    for (var i = 0; i < thing_count; i += 1) {
+        if (thing_type(i) == TTYPE_TFOG) {
+            if ((thing_flags(i) & TF_ACTIVE) == 0) { idx = i; break; }
+        }
+    }
+    if (idx < 0) {
+        if (thing_count >= THING_MAX) { return -1; }
+        idx = thing_count;
+        thing_count += 1;
+    }
+    var base = things + idx * THING_SIZE;
+    store64(base,       x);
+    store64(base + 8,   y);
+    store64(base + 16,  z);
+    store64(base + 24,  0);
+    store64(base + 32,  TTYPE_TFOG);
+    store64(base + 40,  STATE_DIE);
+    store64(base + 48,  0);
+    store64(base + 56,  CAT_DECOR);
+    store64(base + 64,  0);
+    store64(base + 72,  0);
+    store64(base + 80,  20 << 16);
+    store64(base + 88,  56 << 16);
+    store64(base + 96,  TFOG_TICS);
+    store64(base + 104, TF_ACTIVE);
+    store64(base + 112, 0);
+    store64(base + 120, 0);
+    # PRE-1: raw position stores, possibly into a recycled slot.
+    thing_invalidate_sector(idx);
+    return idx;
+}
+
+# One tic of a teleport fog: A..J, TFOG_FRAME_TICS each, then gone.
+fn tfog_tick(idx): i64 {
+    var t = thing_tics(idx) - 1;
+    thing_set_tics(idx, t);
+    if (t <= 0) {
+        thing_set_flags(idx, 0);
+        thing_set_state(idx, STATE_NONE);
+        return 0;
+    }
+    thing_set_frame(idx, (TFOG_TICS - t) / TFOG_FRAME_TICS);
     return 0;
 }
 

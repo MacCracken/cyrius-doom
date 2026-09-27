@@ -7,6 +7,103 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.35.8] - 2026-09-26 — the episode can end: teleporters, E1M8's barons, the exit room, a finale
+
+Until now E1M8 could not be finished and, had it been, the game wrapped straight back to E1M1. Every piece
+of the vanilla ending was missing: the barons' deaths opened nothing, teleporters did not exist (all 20
+DOOM1 teleport lines were inert — including the only way into E1M8's exit room and E1M9's closet ambush),
+floors never hurt, the radiation suit was scenery, and there was no finale. All of it ships here, driven by
+the documented vanilla rules; the one open question the wikis left — what follows the boss level — was
+settled from the id source for understanding: **vanilla skips the intermission after map 8** and goes
+straight to the text screen. Evidence and every deliberate deviation:
+[`docs/audit/2026-09-26-episode-end.md`](docs/audit/2026-09-26-episode-end.md).
+
+### Added
+
+- **Teleporters** — WR 97 and W1 39 for everything that walks, plus the monster-only 125 / 126. Front side
+  only (you can walk back off a pad); the landing is the teleport-destination thing in the lowest-numbered
+  tagged sector; the traveller takes its position, angle and floor. The player **telefrags** anything
+  standing there and is frozen for **18 tics** (no moving or turning; the weapon still fires); a monster
+  never telefrags — a body on the landing, the player's included, cancels its teleport. Teleport fog
+  (TFOG, full-bright) and DSTELEPT at both ends. Monsters take teleports on every chase step through a
+  per-map list of teleport lines, so a map without them pays one compare.
+- **E1M8's boss death** — when the last baron's death completes, the tag-666 floor lowers (sector 30,
+  208 → −136), opening the way to the pad. Keyed on the loaded map (`map_load` now records its episode
+  and map), not on the level counters.
+- **Damaging floors** on the vanilla 32-tic beat: nukage (7) 5 — **81** DOOM1 sectors; super hellslime
+  (16) 20 — 6 more, on E1M3 and E1M9; hellslime (5) 10 and strobe-hurt (4) 20, which DOOM1 never uses; and
+  **E1M8's exit room (11)**: 20 a bite, suit or not, never the last point of health, and at 10 or less the
+  level ends. *(The roadmap's "81 sectors" for types 5 / 7 / 16 was the nukage count alone.)*
+- **The radiation suit** (2025, E1M4/M5/M6/M7) is a pickup: 60 seconds, blocks 7 and 5, lets 16 and 4
+  through 6 times in 256 (vanilla's odds — its fixed random table has six entries below 5; this engine's
+  `p_random` is uniform, so the threshold is 6), and never counts toward items %, as in vanilla. Powers
+  clear on every map load.
+- **The finale.** E1M8's exit goes to a text screen typed over tiled FLOOR4_8 with **D_VICTOR**, then the
+  end picture — **HELP2** in shareware, CREDIT in a retail IWAD — then back to the title menu for a new
+  game or quit. The typing follows vanilla (10,10 origin, 11-row lines, 4-px unknown glyphs, a character
+  per 3 tics after 10, 250 tics of hold); the **text is this project's own**, clean-room. A fresh key
+  press finishes the typing and the next moves on — vanilla ignores keys there and relies on its in-game
+  menu, which this engine does not have over the finale. `--ppm-finale` captures both screens.
+- **D_INTER** plays under the intermission tally.
+- **Skill 1 halves damage to the player**, and a dead player takes no more damage — the second is
+  vanilla's rule and load-bearing here: without it the exit room's cap could turn a hit into healing.
+
+### Fixed
+
+- **G-10: a diagonal step ran the walk-trigger sweep twice**, the second time from wherever the first had
+  left the player. Harmless while every special ignored a same-tic repeat; with teleports the second
+  sweep would have run from the landing. One sweep per move now, asserted.
+- **The E1M8 intermission capture announced "Entering Hangar"** — the old wrap. The boss level has no next
+  map, so there is no Entering block (the game itself never shows that screen now).
+
+### Changed
+
+- **The walk-crossing test is one function**, `walk_line_cross_side` (box reject, side, segment span),
+  shared by the player's trigger sweep and the monsters' teleport sweep. It also takes
+  `doors_walk_trigger` off the 8-`continue` nest cap it sat at (8 → 4).
+- **The hold-until-a-fresh-press gate is one helper**, `dismiss_gate_*` in `input.cyr`: it was written out
+  inline for the intermission and the death screen; the finale would have been the third copy. Same rules.
+- **The test build includes the real `level.cyr`** (replacing four stubs) and `finale.cyr`, so the E1M8
+  endgame test watches the real exit flag.
+- New module `src/finale.cyr` (27 modules).
+
+### Verification
+
+- **Reachability** (`scripts/reachability.py`, now with 39 / 97): **every map's exit is reachable**; E1M8's
+  end sector needs both halves — 46 sectors without the boss death, 69 with it, 70 (the exit room) with
+  the teleport. Only E1M2's optional gun-triggered area remains (special 46, v0.35.10).
+- **An in-engine E1M8 endgame test** drives the whole ending through the real code in the main loop's
+  order: both barons die, the wall lowers, the player walks onto the pad (9 tics) and lands in the exit
+  room, and with its monsters firing and the floor biting the level ends 32 tics later at **1** health —
+  as the episode end.
+- **E1M9's closet ambush arrives**: a 60-second staged probe (player in the launcher room) saw 6 of the 10
+  HMP closet monsters teleport in, the first 2.1 s after the door opened. The other four hit a
+  pre-existing AI rule — a chaser gives up after 100 tics without sight, which vanilla never does — now
+  roadmap item **AI-1** (v0.35.10).
+- Tests: WAD-free **376 + 33 + 18 + 12**; full **677 / 677** (+131). **Mutation 48: 47 killed, 1
+  equivalent** — every rule above has a mutant a named assert kills; the first pass exposed two real test
+  gaps (a finale newline that did not move the pen; a landing search that ignored the tag), both closed.
+- **41 captures vs v0.35.7** (sha256-matched baseline): **40 byte-identical**; E1M8's intermission differs
+  only inside x 109–210, y 156–182 — the removed Entering block. **12 / 12 `--ai-probe` fingerprints
+  identical.** fuzz **×8** clean.
+- Bench: interleaved best-of-3 A/B, every metric within ±0.6% — noise, no claim. Binary **532,016 B**
+  plain / **400,944 B** release (dead code removed unchanged at 131,936 B) / **518,696 B** agnos
+  (+13,088 / +13,088 / +17,176: the finale, teleports and specials).
+- A clean strict-pin build from scratch reproduces the release and AGNOS binaries byte for byte; lock
+  39 / 0.
+- **AGNOS QEMU** on the final `doom_agnos`: boots v0.35.8, WAD loads, **64,000 / 64,000** blocks exact
+  against Linux. The smoke script's floor-band gate still false-FAILs (its 2048×2048 origin assumption —
+  agnos-side, unchanged).
+
+### Docs
+
+- Roadmap: v0.35.8 shipped; the scripted E1M1 → E1M8 playthrough is now its own critical-path slot,
+  **v0.35.9** (later slots +1). The Episode-end slot's "then the bunny scroll" was wrong for episode 1
+  (that is E3; E1 ends on HELP2 / CREDIT). New: AI-1 (v0.35.10), the fog frame order (v0.35.12), the
+  suit's palette with the other flashes (v0.35.11), the other episodes' boss rules and finales (HOLD-A).
+  Two slot pointers left stale by earlier renumberings are corrected (v0.36.0's dependency on the desktop
+  slot, v0.38.0's on MUSIC-2).
+
 ## [0.35.7] - 2026-09-26 — sprites anchored by their top offset, as vanilla draws them
 
 Every world sprite's last row used to sit exactly on the floor line. That is not how DOOM draws them:

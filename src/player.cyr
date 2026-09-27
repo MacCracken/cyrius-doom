@@ -51,6 +51,19 @@ var player_ammo_rockets = 0;
 var player_ammo_cells = 0;
 var player_keys = 0;
 
+# v0.35.8 — per-level player timers, cleared on every map load
+# (player_spawn_at_start): vanilla takes powers away when a level ends.
+#   player_freeze_tics  — tics left of the post-teleport freeze (TELE-1): no
+#                         movement and no turning; firing and use still work.
+#   player_radsuit_tics — tics left on the radiation suit (DMG-1).
+var player_freeze_tics = 0;
+var player_radsuit_tics = 0;
+
+enum PowerConst {
+    TELEPORT_FREEZE_TICS = 18;
+    RADSUIT_TICS = 2100;          # 60 s
+}
+
 # Edge latch so the out-of-ammo dry-fire click plays once per trigger pull,
 # not every tick the (held) fire key is down. Reset on release. (0.30.0)
 var weapon_dry_latch = 0;
@@ -74,6 +87,8 @@ fn player_spawn_at_start(): i64 {
     player_y = player_start_y();
     player_z = 0;
     player_angle = player_start_angle();
+    player_freeze_tics = 0;
+    player_radsuit_tics = 0;
 
     # Find the floor height at player start
     var sector = player_find_sector();
@@ -393,6 +408,23 @@ fn player_move_ok(nx, ny): i64 {
 
 fn player_take_damage(dmg): i64 {
     if (dmg <= 0) { return 0; }
+    # v0.35.8 — a dead player takes no more damage (vanilla ignores hits on a
+    # target at 0 health). Load-bearing now: the type-11 cap below would turn a
+    # hit on a player already at <= 0 into a negative hit, i.e. healing.
+    if (player_health <= 0) { return 0; }
+    # v0.35.8 — vanilla's order: skill 1 (I'm Too Young To Die) halves every hit
+    # first; then, standing in a type-11 sector (E1M8's exit room), no hit may
+    # take the last point of health — the level ends at 10 instead
+    # (player_specials_tick). Then armor.
+    if (skill_get() == 1) { dmg = dmg / 2; }
+    if (map_num_sectors > 0) {
+        var ds = player_find_sector();
+        if (ds >= 0) {
+            if (load64(map_sectors + ds * MAP_SECTOR_SIZE + 40) == 11) {
+                if (dmg >= player_health) { dmg = player_health - 1; }
+            }
+        }
+    }
     if (player_armor > 0) {
         # Absorption is fixed by the armor CLASS at pickup, not the live count:
         # blue (class 2) absorbs 1/2 down to 0, green (class 1) 1/3. The old
@@ -569,41 +601,52 @@ fn player_tick(): i64 {
         turn_speed = PLAYER_TURN_SPEED_RUN;
     }
 
-    # Turning
-    if (input_turn_left() == 1) {
-        player_angle = angle_add(player_angle, turn_speed);
-    }
-    if (input_turn_right() == 1) {
-        player_angle = angle_sub(player_angle, turn_speed);
+    # v0.35.8 (TELE-1): just teleported — no turning and no movement for
+    # TELEPORT_FREEZE_TICS tics (vanilla's reactiontime). Weapons and use are
+    # untouched: vanilla freezes the move, not the trigger finger.
+    var frozen = 0;
+    if (player_freeze_tics > 0) {
+        player_freeze_tics -= 1;
+        frozen = 1;
     }
 
     # Calculate movement vector
     var move_x = 0;
     var move_y = 0;
 
-    var fwd_cos = fixed_cos(player_angle);
-    var fwd_sin = fixed_sin(player_angle);
+    if (frozen == 0) {
+        # Turning
+        if (input_turn_left() == 1) {
+            player_angle = angle_add(player_angle, turn_speed);
+        }
+        if (input_turn_right() == 1) {
+            player_angle = angle_sub(player_angle, turn_speed);
+        }
 
-    # Forward/backward
-    if (input_forward() == 1) {
-        move_x += fixed_mul(fwd_cos, speed);
-        move_y += fixed_mul(fwd_sin, speed);
-    }
-    if (input_backward() == 1) {
-        move_x -= fixed_mul(fwd_cos, speed);
-        move_y -= fixed_mul(fwd_sin, speed);
-    }
+        var fwd_cos = fixed_cos(player_angle);
+        var fwd_sin = fixed_sin(player_angle);
 
-    # Strafing (perpendicular to facing). Left is facing rotated +90°
-    # = (-sin, +cos); right is -90° = (+sin, -cos). These were inverted
-    # before 0.27.5, so A/D strafed the wrong way.
-    if (input_strafe_left() == 1) {
-        move_x -= fixed_mul(fwd_sin, PLAYER_STRAFE_SPEED);
-        move_y += fixed_mul(fwd_cos, PLAYER_STRAFE_SPEED);
-    }
-    if (input_strafe_right() == 1) {
-        move_x += fixed_mul(fwd_sin, PLAYER_STRAFE_SPEED);
-        move_y -= fixed_mul(fwd_cos, PLAYER_STRAFE_SPEED);
+        # Forward/backward
+        if (input_forward() == 1) {
+            move_x += fixed_mul(fwd_cos, speed);
+            move_y += fixed_mul(fwd_sin, speed);
+        }
+        if (input_backward() == 1) {
+            move_x -= fixed_mul(fwd_cos, speed);
+            move_y -= fixed_mul(fwd_sin, speed);
+        }
+
+        # Strafing (perpendicular to facing). Left is facing rotated +90°
+        # = (-sin, +cos); right is -90° = (+sin, -cos). These were inverted
+        # before 0.27.5, so A/D strafed the wrong way.
+        if (input_strafe_left() == 1) {
+            move_x -= fixed_mul(fwd_sin, PLAYER_STRAFE_SPEED);
+            move_y += fixed_mul(fwd_cos, PLAYER_STRAFE_SPEED);
+        }
+        if (input_strafe_right() == 1) {
+            move_x += fixed_mul(fwd_sin, PLAYER_STRAFE_SPEED);
+            move_y -= fixed_mul(fwd_cos, PLAYER_STRAFE_SPEED);
+        }
     }
 
     # Save old position for walk-over trigger check
@@ -641,9 +684,13 @@ fn player_tick(): i64 {
         player_z = floor;
     }
 
-    # Check walk-over triggers
-    if (player_x != old_px) { doors_walk_trigger(old_px, old_py, player_x, player_y); }
-    if (player_y != old_py) { doors_walk_trigger(old_px, old_py, player_x, player_y); }
+    # Check walk-over triggers — ONCE per move. v0.35.8 (G-10): these were two
+    # independent ifs, so a diagonal step ran the whole trigger sweep twice with
+    # identical arguments. Harmless while every effect ignored a same-tic repeat;
+    # fatal once teleports exist, because the second call's `player_x/y` would
+    # already be the teleport DESTINATION, sweeping every line between it and the
+    # start of the move.
+    if (player_x != old_px || player_y != old_py) { doors_walk_trigger(old_px, old_py, player_x, player_y); }
 
     # Weapon switching (number keys 1-7). Deferred while a fire animation is in
     # flight (weapon_fire_frame != 0): render_set_weapon resets weapon_fire_frame
@@ -699,6 +746,7 @@ fn player_tick(): i64 {
     if (input_backward() == 1) { is_moving = 1; }
     if (input_strafe_left() == 1) { is_moving = 1; }
     if (input_strafe_right() == 1) { is_moving = 1; }
+    if (frozen == 1) { is_moving = 0; }
     weapon_bob_tick(is_moving);
 
     # Sync view state with player
@@ -706,5 +754,53 @@ fn player_tick(): i64 {
     view_y = player_y;
     view_angle = player_angle;
 
+    return 0;
+}
+
+# ================================================================
+# Damaging floors + power countdown (v0.35.8, DMG-1)
+# ================================================================
+# Once per tic, after the move — vanilla's in-special-sector check followed by the
+# powers ticking down. `ltime` is the level clock BEFORE this tic's increment
+# (vanilla's leveltime while things think), so a floor bites on tics 0, 32, 64...
+# while you stand on it:
+#   7 nukage 5 · 5 hellslime 10 — the radiation suit blocks both;
+#   16 super hellslime / 4 strobe-hurt 20 — the suit LEAKS: each bite still lands
+#     with probability 6/256. Vanilla rolls P_Random() < 5 against its fixed
+#     256-entry table, six of whose entries are below 5; this engine's p_random is
+#     a uniform LCG, so the threshold is 6 to keep the vanilla odds;
+#   11 E1M8's exit room — 20, suit or not; the hit can never kill (see
+#     player_take_damage), and at 10 health or less the level ends.
+# Secrets (type 9) stay with level_check_secret. The player's z is always its
+# sector's floor here (no falling), so vanilla's "only once you have landed" test
+# always holds and is not restated.
+fn player_specials_tick(ltime): i64 {
+    if (map_num_sectors > 0 && player_health > 0) {
+        var sec = player_find_sector();
+        if (sec >= 0) {
+            var sp = load64(map_sectors + sec * MAP_SECTOR_SIZE + 40);
+            var bite = 0;
+            if ((ltime & 31) == 0) { bite = 1; }
+            var suit = 0;
+            if (player_radsuit_tics > 0) { suit = 1; }
+            if (bite == 1) {
+                if (sp == 7) { if (suit == 0) { player_take_damage(5); } }
+                if (sp == 5) { if (suit == 0) { player_take_damage(10); } }
+                if (sp == 16 || sp == 4) {
+                    var hurt = 1;
+                    if (suit == 1) {
+                        hurt = 0;
+                        if (p_random() < 6) { hurt = 1; }
+                    }
+                    if (hurt == 1) { player_take_damage(20); }
+                }
+                if (sp == 11) { player_take_damage(20); }
+            }
+            if (sp == 11) {
+                if (player_health <= 10) { level_exit_normal(); }
+            }
+        }
+    }
+    if (player_radsuit_tics > 0) { player_radsuit_tics -= 1; }
     return 0;
 }

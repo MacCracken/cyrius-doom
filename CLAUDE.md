@@ -91,6 +91,7 @@ src/
   automap.cyr     — 2D overhead map (TAB toggle, Bresenham lines)
   level.cyr       — episode/map tracking, exit lines, level stats
   menu.cyr        — WAD-native title screen (TITLEPIC), main menu, skill select
+  finale.cyr      — episode-end screens: text typed over a flat (D_VICTOR), then the end picture
 
   platform/                    — desktop-display backends (v0.33.0), all #ifndef CYRIUS_TARGET_AGNOS
     wayland/wire.cyr    — Wayland wire-protocol codec (pure, no syscalls)

@@ -1,0 +1,210 @@
+# finale.cyr -- the episode-end screens (v0.35.8, P4)
+# Usage: include "src/finale.cyr" (after menu.cyr — it draws through
+# menu_draw_lump and the status patch decoder, and plays through music.cyr)
+#
+# Vanilla ends a Doom 1 episode on its eighth map with NO intermission: the boss
+# level's exit goes straight to a text screen typed out over a tiled flat, with
+# the victory music playing, then a full-screen picture. For episode 1 that is
+# FLOOR4_8 + D_VICTOR, then HELP2 — or CREDIT in the retail Ultimate Doom IWAD,
+# recognised here by its fourth episode (an E4M1 marker).
+#
+# Typing rules, from the documented behaviour: the text starts at (10, 10); a
+# newline returns to x = 10 and drops 11 rows; a character with no STCFN glyph
+# advances 4 pixels; a glyph that would cross the right edge ends the draw. One
+# character appears every 3 tics after a 10-tic pause, and the screen moves on by
+# itself 250 tics after the last one.
+#
+# The TEXT is this project's own — clean-room, id's episode texts are not
+# reproduced. Upper case only: STCFN has no lower-case glyphs.
+#
+# One deliberate departure: vanilla ignores keys here (its in-game menu is the
+# way out, and this engine has no menu over the finale). A fresh key press
+# finishes the typing; the next one moves on to the picture; a press on the
+# picture returns to the title menu. ESC / Q quits, as everywhere else.
+
+enum FinaleConst {
+    FIN_TEXT_X = 10;
+    FIN_TEXT_Y = 10;
+    FIN_LINE_H = 11;
+    FIN_SPACE_W = 4;
+    FIN_TEXT_SPEED = 3;       # tics per character
+    FIN_TEXT_DELAY = 10;      # tics before the first one
+    FIN_TEXT_WAIT = 250;      # tics the full text holds before moving on
+    FIN_FONT_FIRST = 33;      # '!'
+    FIN_FONT_COUNT = 63;      # '!' .. '_'
+    FIN_GLYPH_CAP = 256;      # bytes per cached glyph (the largest STCFN is 160)
+    FIN_FLAT_SIZE = 4096;
+}
+
+var fin_font = 0;     # FIN_FONT_COUNT slots x 16 bytes: [buf, sz] (st_cache_slot)
+var fin_flat = 0;     # the background flat, FIN_FLAT_SIZE bytes
+
+fn finale_e1_text(): i64 {
+    return "THE LAST BARON FALLS, AND THE GATE\nIT GUARDED OPENS WITHOUT A SOUND.\n\nYOU STEP THROUGH, EXPECTING A WAY\nHOME. INSTEAD THE LIGHT TURNS RED,\nTHE FLOOR BURNS UNDER YOUR BOOTS,\nAND SOMETHING IN THE DARK WATCHES\nYOUR STRENGTH RUN OUT.\n\nWHEN YOUR EYES OPEN AGAIN, THE SKY\nIS THE WRONG COLOR. THE STARS ARE\nWRONG TOO. PHOBOS WAS ONLY THE\nDOORSTEP.\n\nTHE FIGHT GOES ON.";
+}
+
+# Cache the 63 STCFN glyphs once (a few KB), so typing never reads the WAD.
+fn finale_load_font(): i64 {
+    if (fin_font != 0) { return 0; }
+    fin_font = alloc(FIN_FONT_COUNT * 16);
+    var nm = alloc(16);
+    memcpy(nm, "STCFN", 5);
+    for (var g = 0; g < FIN_FONT_COUNT; g += 1) {
+        var code = FIN_FONT_FIRST + g;
+        store8(nm + 5, 48 + code / 100);
+        store8(nm + 6, 48 + (code / 10) % 10);
+        store8(nm + 7, 48 + code % 10);
+        store8(nm + 8, 0);
+        st_cache_slot(fin_font + g * 16, wad_find_lump(nm), FIN_GLYPH_CAP);
+    }
+    return 0;
+}
+
+# Characters typed after `tics` tics of the text stage.
+fn finale_text_count(tics): i64 {
+    if (tics <= FIN_TEXT_DELAY) { return 0; }
+    return (tics - FIN_TEXT_DELAY) / FIN_TEXT_SPEED;
+}
+
+# The text stage ends once more than this many tics have passed.
+fn finale_text_end(len): i64 {
+    return len * FIN_TEXT_SPEED + FIN_TEXT_WAIT;
+}
+
+# Tile the 64x64 flat `name` over the whole screen (black if it is missing).
+fn finale_draw_flat(name): i64 {
+    if (fin_flat == 0) { fin_flat = alloc(FIN_FLAT_SIZE); }
+    var idx = wad_find_lump(name);
+    if (idx < 0 || wad_lump_size(idx) < FIN_FLAT_SIZE) {
+        framebuf_clear(0);
+        return 0;
+    }
+    wad_read_lump_into(idx, fin_flat, FIN_FLAT_SIZE);
+    for (var y = 0; y < SCREEN_HEIGHT; y += 1) {
+        var row = fin_flat + (y & 63) * 64;
+        for (var x = 0; x < SCREEN_WIDTH; x += 1) {
+            framebuf_pixel(x, y, load8(row + (x & 63)));
+        }
+    }
+    return 0;
+}
+
+# One glyph, placed by its patch offsets the way every WAD patch is: STCFN's
+# punctuation sits BELOW the pen (',' has a top offset of -3, '.' -4).
+fn finale_draw_glyph(g, x, y): i64 {
+    var slot = fin_font + g * 16;
+    var buf = load64(slot);
+    if (buf == 0) { return 0; }
+    var lo = sign_extend_16(read_le16(buf + 4));
+    var to = sign_extend_16(read_le16(buf + 6));
+    st_cache_draw(slot, x - lo, y - to, 0);
+    return 0;
+}
+
+# Draw the first `count` characters of `text`. Returns how many it drew, which
+# is `count` unless the text ran out or a glyph hit the right edge first.
+fn finale_draw_text(text, count): i64 {
+    var cx = FIN_TEXT_X;
+    var cy = FIN_TEXT_Y;
+    var n = 0;
+    var going = 1;
+    while (going == 1 && n < count) {
+        var ch = load8(text + n);
+        if (ch == 0) { going = 0; }
+        else {
+            if (ch == 10) {
+                cx = FIN_TEXT_X;
+                cy += FIN_LINE_H;
+                n += 1;
+            } else {
+                if (ch >= 97 && ch <= 122) { ch -= 32; }
+                var g = ch - FIN_FONT_FIRST;
+                var buf = 0;
+                if (g >= 0 && g < FIN_FONT_COUNT) { buf = load64(fin_font + g * 16); }
+                if (buf == 0) {
+                    cx += FIN_SPACE_W;
+                    n += 1;
+                } else {
+                    var w = read_le16(buf);
+                    if (cx + w > SCREEN_WIDTH) { going = 0; }
+                    else {
+                        finale_draw_glyph(g, cx, cy);
+                        cx += w;
+                        n += 1;
+                    }
+                }
+            }
+        }
+    }
+    return n;
+}
+
+# The text stage's frame: background + the first `count` characters.
+fn finale_draw_text_screen(count): i64 {
+    finale_draw_flat("FLOOR4_8");
+    finale_draw_text(finale_e1_text(), count);
+    return 0;
+}
+
+fn finale_picture_name(): i64 {
+    if (wad_find_lump("E4M1") >= 0) { return "CREDIT"; }
+    return "HELP2";
+}
+
+fn finale_draw_picture(): i64 {
+    framebuf_clear(0);
+    menu_draw_lump(finale_picture_name(), 0, 0);
+    return 0;
+}
+
+# Play the episode-1 finale. 0 = the player left the picture (back to the title
+# menu), -1 = quit.
+fn finale_run(): i64 {
+    menu_init();
+    finale_load_font();
+    if (music_load("VICTOR") == 0) { music_start(); } else { music_stop(); }
+
+    var text = finale_e1_text();
+    var len = strlen(text);
+    var t = 0;
+    var shown = 0 - 1;
+    var stage = 0;
+    dismiss_gate_reset(35);
+    while (stage == 0) {
+        tick_begin();
+        input_poll();
+        audio_tick();
+        sound_tick();
+        if (input_quit == 1) { return 0 - 1; }
+        if (dismiss_gate_tick() == 1) {
+            # First press: finish the typing. Second: move on.
+            if (finale_text_count(t) < len) { t = len * FIN_TEXT_SPEED + FIN_TEXT_DELAY; }
+            else { stage = 1; }
+            dismiss_gate_reset(0);
+        }
+        if (t > finale_text_end(len)) { stage = 1; }
+        var count = finale_text_count(t);
+        if (count > len) { count = len; }
+        if (stage == 0 && count != shown) {
+            finale_draw_text_screen(count);
+            framebuf_flip();
+            shown = count;
+        }
+        t += 1;
+        tick_wait();
+    }
+
+    finale_draw_picture();
+    framebuf_flip();
+    dismiss_gate_reset(35);
+    while (1 == 1) {
+        tick_begin();
+        input_poll();
+        audio_tick();
+        sound_tick();
+        if (input_quit == 1) { return 0 - 1; }
+        if (dismiss_gate_tick() == 1) { return 0; }
+        tick_wait();
+    }
+    return 0;
+}

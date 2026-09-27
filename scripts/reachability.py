@@ -97,8 +97,10 @@ GUN_KINDS = {46, 24, 47}
 ENGINE_V0355 = {1, 26, 27, 28, 31, 32, 33, 34, 117, 118, 11, 51, 29, 63, 103, 21, 62, 122, 23, 71, 70, 102,
           2, 4, 10, 38, 52, 88, 90, 121, 124}
 # v0.35.6 added the progression specials (7 8 18 20 22) and 5 36 82 86 91 98.
+# v0.35.8 added the player teleports 39 / 97 (the monster-only 125 / 126 are in
+# the engine too, but a player can never ride them, so they are not modelled).
 # KEEP IN SYNC with doors.cyr: this set is the claim the report makes.
-ENGINE = ENGINE_V0355 | {7, 8, 18, 20, 22, 5, 36, 82, 86, 91, 98}
+ENGINE = ENGINE_V0355 | {7, 8, 18, 20, 22, 5, 36, 82, 86, 91, 98} | {39, 97}
 
 class Map:
     def __init__(self, data, lumps, name):

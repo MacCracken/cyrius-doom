@@ -39,6 +39,13 @@ include "src/music.cyr"
 # lookup through the NUL-terminated 9-byte scratch). Self-contained: uses only
 # wad_*/framebuf_*/player_* symbols already included above.
 include "src/status.cyr"
+# v0.35.8 — the real level module (exit flags, the episode-end rule) replaces the
+# four level_* stubs this file used to carry, so the E1M8 endgame test can watch
+# next_level_flag itself; and the finale for its typing rules. Their screen loops
+# (intermission, finale) are never called here — the menu / tick / audio
+# functions those reach stay unresolved on purpose, exactly like the stubs below.
+include "src/level.cyr"
+include "src/finale.cyr"
 
 # Hermetic no-op stubs for cross-module side-effects the combat path calls.
 # sound.cyr / level.cyr / tick.cyr / doors.cyr aren't included here (they pull
@@ -56,12 +63,18 @@ fn sound_monster_die(): i64 { return 0; }
 fn sound_item_pickup(): i64 { return 0; }
 fn audio_play_name(lump_name): i64 { return 0; }
 fn audio_play_at(lump_name, sx, sy): i64 { return 0; }
-fn level_add_kill(): i64 { return 0; }
-fn level_add_item(): i64 { return 0; }
 fn tick_get_count(): i64 { return 0; }
 fn sound_door_open(): i64 { return 0; }
-fn level_exit_normal(): i64 { return 0; }
-fn level_exit_secret(): i64 { return 0; }
+# v0.35.8 — what level.cyr / finale.cyr's screen loops reach (menu.cyr, tick.cyr,
+# the mixers). Never called by a test; stubbed so the build stays warning-free.
+fn menu_init(): i64 { return 0; }
+fn menu_draw_lump(name, px, py): i64 { return 0; }
+fn menu_draw_lump_centered(name, py): i64 { return 0; }
+fn menu_lump_wh(name): i64 { return (0, 0); }
+fn audio_tick(): i64 { return 0; }
+fn sound_tick(): i64 { return 0; }
+fn tick_begin(): i64 { return 0; }
+fn tick_wait(): i64 { return 0; }
 
 # v0.35.6 interactables helpers (WAD-gated groups at the end of main).
 fn iv_place(x, y, ang): i64 {
@@ -1424,6 +1437,71 @@ fn main() {
     map_num_nodes = bsp_save_nn;
 
     # ============================================================
+    test_group("dismiss gate: fresh press after a quiet spell (v0.35.8)");
+    # ============================================================
+    # The intermission / death-screen / finale hold, now one helper. A held key
+    # never dismisses; presses inside the minimum display are swallowed; the gate
+    # arms after 8 quiet tics (longer than any autorepeat gap) and fires on the
+    # next press.
+    dismiss_gate_reset(3);
+    input_flags = INP_USE;
+    var dg_fired = 0;
+    for (var dga = 0; dga < 100; dga += 1) { dg_fired += dismiss_gate_tick(); }
+    assert_eq(dg_fired, 0, "a key held from the start never dismisses");
+    input_flags = 0;
+    for (var dgb = 0; dgb < 7; dgb += 1) { dg_fired += dismiss_gate_tick(); }
+    input_flags = INP_USE;
+    dg_fired += dismiss_gate_tick();
+    assert_eq(dg_fired, 0, "7 quiet tics do not arm (an autorepeat gap is shorter)");
+    input_flags = 0;
+    for (var dgc = 0; dgc < 8; dgc += 1) { dg_fired += dismiss_gate_tick(); }
+    assert_eq(dg_fired, 0, "quiet tics never dismiss by themselves");
+    input_flags = INP_USE;
+    assert_eq(dismiss_gate_tick(), 1, "a press after 8 quiet tics dismisses");
+    dismiss_gate_reset(10);
+    input_flags = 0;
+    for (var dgd = 0; dgd < 10; dgd += 1) { dg_fired += dismiss_gate_tick(); }
+    for (var dge = 0; dge < 7; dge += 1) { dg_fired += dismiss_gate_tick(); }
+    input_flags = INP_FIRE;
+    dg_fired += dismiss_gate_tick();
+    assert_eq(dg_fired, 0, "quiet tics inside the minimum display do not count toward arming");
+    input_flags = 0;
+
+    # ============================================================
+    test_group("finale: typing schedule (v0.35.8 P4)");
+    # ============================================================
+    assert_eq(finale_text_count(0), 0, "nothing typed at tic 0");
+    assert_eq(finale_text_count(10), 0, "nothing during the 10-tic pause");
+    assert_eq(finale_text_count(12), 0, "the first character takes 3 tics");
+    assert_eq(finale_text_count(13), 1, "one character at 10 + 3");
+    assert_eq(finale_text_count(10 + 3 * 360), 360, "a character every 3 tics");
+    assert_eq(finale_text_end(360), 1330, "the screen holds 250 tics past the last character");
+
+    # ============================================================
+    test_group("level: the episode ends on map 8 (v0.35.8 P4)");
+    # ============================================================
+    for (var lm = 1; lm <= 7; lm += 1) {
+        level_set(1, lm);
+        secret_exit_flag = 0;
+        assert_eq(level_next_map(), lm + 1, "E1M1..E1M7 lead to the next map");
+        assert_eq(level_episode_ends(), 0, "E1M1..E1M7 do not end the episode");
+    }
+    level_set(1, 8);
+    assert_eq(level_next_map(), 0, "E1M8 has no next map (was: wrap to E1M1)");
+    assert_eq(level_episode_ends(), 1, "E1M8's exit ends the episode");
+    level_exit_secret();
+    assert_eq(level_episode_ends(), 1, "by any exit — map 8 is checked before the secret flag");
+    level_set(1, 3);
+    level_exit_secret();
+    assert_eq(level_next_map(), 9, "E1M3's secret exit still leads to E1M9");
+    level_advance();
+    assert_eq(cur_map, 9, "level_advance takes it");
+    level_exit_normal();
+    assert_eq(level_next_map(), 4, "E1M9 returns to E1M4");
+    level_set(1, 1);
+    secret_exit_flag = 0;
+
+    # ============================================================
     # WAD tests require DOOM1.WAD — skip if not available
     # ============================================================
 
@@ -2612,6 +2690,422 @@ fn main() {
             for (var ti2 = 0; ti2 < thing_count; ti2 += 1) { icount += thing_counts_item(thing_type(ti2)); }
             assert_eq(icount, load64(iv_want + mi * 8), "P-6: items-% total for the map matches the COUNTITEM set");
         }
+
+        # ============================================================
+        test_group("walk triggers: one sweep per diagonal step (v0.35.8 G-10)");
+        # ============================================================
+        # The trigger check was two independent ifs — a diagonal step ran the whole
+        # sweep twice, the second time from wherever the first had put the player.
+        iv_load("E1M1");
+        game_skill = 3;
+        things_spawn_from_map();
+        iv_place(1056, 0 - 3616, 128);
+        player_freeze_tics = 0;
+        input_flags = INP_FORWARD;
+        var g10_x = player_x;
+        var g10_y = player_y;
+        var g10_n = walk_trigger_calls;
+        player_tick();
+        input_flags = 0;
+        assert(player_x != g10_x, "G-10: the step moved in x");
+        assert(player_y != g10_y, "G-10: and in y (a diagonal step)");
+        assert_eq(walk_trigger_calls - g10_n, 1, "G-10: a diagonal step runs the walk-trigger sweep exactly once");
+
+        # ============================================================
+        test_group("teleport: E1M8's ending pad (v0.35.8 TELE-1)");
+        # ============================================================
+        # L299 (WR 97, tag 3): front sector 68 (the ring around the pad), back 69
+        # (the pad). The landing is thing 105 at (608, 6464), angle 0, in sector 66.
+        iv_load("E1M8");
+        things_spawn_from_map();
+        player_health = 100;
+        assert_eq(tele_line_count, 8, "TELE-1: E1M8 has eight teleport lines (L299-L306)");
+        assert_eq(walk_line_cross_side(299, 416 << 16, 5048 << 16, 416 << 16, 5064 << 16), 1, "walk_line_cross_side: front -> back is 1");
+        assert_eq(walk_line_cross_side(299, 416 << 16, 5064 << 16, 416 << 16, 5048 << 16), 2, "walk_line_cross_side: back -> front is 2");
+        assert_eq(walk_line_cross_side(299, 376 << 16, 5048 << 16, 376 << 16, 5064 << 16), 0, "walk_line_cross_side: past the segment's end is 0");
+        assert_eq(walk_line_cross_side(299, 400 << 16, 5048 << 16, 440 << 16, 5048 << 16), 0, "walk_line_cross_side: a parallel move is 0");
+        iv_place(416, 5064, 256);
+        iv_cross(416, 5064, 416, 5048);
+        assert_eq(player_x, 416 << 16, "TELE-1: stepping OFF the pad (back -> front) does not teleport");
+        iv_place(416, 5048, 256);
+        assert_eq(player_find_sector(), 68, "TELE-1: standing in front of L299");
+        iv_cross(416, 5048, 416, 5064);
+        assert_eq(player_x, 608 << 16, "TELE-1: onto the pad -> the landing's x");
+        assert_eq(player_y, 6464 << 16, "TELE-1: ... and y");
+        assert_eq(player_angle, 0, "TELE-1: ... and angle");
+        assert_eq(player_find_sector(), 66, "TELE-1: in the exit room (sector 66)");
+        assert_eq(player_z, iv_floor(66) << 16, "TELE-1: standing on its floor");
+        assert_eq(player_freeze_tics, 18, "TELE-1: frozen for 18 tics");
+        var tf_n = 0;
+        var tf_arr = 0 - 1;
+        for (var tfi = 0; tfi < thing_count; tfi += 1) {
+            if (thing_type(tfi) == TTYPE_TFOG) {
+                if ((thing_flags(tfi) & TF_ACTIVE) != 0) {
+                    tf_n += 1;
+                    if (thing_x(tfi) == 628 << 16) { tf_arr = tfi; }
+                }
+            }
+        }
+        assert_eq(tf_n, 2, "TELE-1: a fog at each end");
+        assert(tf_arr >= 0, "TELE-1: the arrival fog stands 20 units in front of the landing");
+        for (var tfk = 0; tfk < 59; tfk += 1) { tfog_tick(tf_arr); }
+        assert_eq(thing_frame(tf_arr), 9, "TELE-1: the fog runs A..J");
+        tfog_tick(tf_arr);
+        assert_eq(thing_flags(tf_arr) & TF_ACTIVE, 0, "TELE-1: and is gone after 60 tics");
+        input_flags = INP_FORWARD | INP_TURN_LEFT;
+        for (var fzi = 0; fzi < 18; fzi += 1) { player_tick(); }
+        assert_eq(player_x, 608 << 16, "TELE-1: no movement while frozen");
+        assert_eq(player_angle, 0, "TELE-1: no turning while frozen");
+        assert_eq(player_freeze_tics, 0, "TELE-1: the freeze runs out");
+        player_tick();
+        input_flags = 0;
+        assert(player_angle != 0, "TELE-1: the 19th tic turns again");
+        assert(player_x != 608 << 16, "TELE-1: ... and moves again");
+        # Telefrag: a demon moved onto the landing dies when the player arrives.
+        iv_load("E1M8");
+        things_spawn_from_map();
+        player_health = 100;
+        var tv = 0 - 1;
+        for (var tvi = 0; tvi < thing_count; tvi += 1) {
+            if (thing_type(tvi) == 3002 && thing_x(tvi) == 608 << 16 && thing_y(tvi) == 6544 << 16) { tv = tvi; }
+        }
+        assert(tv >= 0, "TELE-1: E1M8's demon at (608, 6544) found");
+        thing_set_x(tv, 608 << 16);
+        thing_set_y(tv, 6464 << 16);
+        iv_place(416, 5048, 256);
+        iv_cross(416, 5048, 416, 5064);
+        assert_eq(player_x, 608 << 16, "TELE-1: the player still arrives");
+        assert_eq(thing_state(tv), STATE_DIE, "TELE-1: ... telefragging the monster on the landing");
+        # The landing rule. (a) A line whose tagged sectors hold no landing does
+        # nothing: retag L299 to 8 (sectors 68 / 73 — no type 14 in either).
+        iv_load("E1M8");
+        things_spawn_from_map();
+        store64(map_linedefs + 299 * MAP_LINEDEF_SIZE + 32, 8);
+        iv_place(416, 5048, 256);
+        iv_cross(416, 5048, 416, 5064);
+        assert_eq(player_x, 416 << 16, "TELE-1: no landing in the tagged sectors -> no teleport");
+        # (b) Sectors first, then things: give sector 68 tag 3 as well and plant a
+        # second landing there under a LOWER thing index than the real one (105,
+        # sector 66). Sector 66 is the lower-numbered tagged sector, so it wins.
+        iv_load("E1M8");
+        things_spawn_from_map();
+        store64(map_sectors + 68 * MAP_SECTOR_SIZE + 48, 3);
+        store64(things + 32, TTYPE_TELEPORT_DEST);
+        store64(things + 104, TF_ACTIVE);
+        thing_set_x(0, 480 << 16);
+        thing_set_y(0, 5048 << 16);
+        assert_eq(thing_sector(0), 68, "TELE-1: decoy landing planted in sector 68 as thing 0");
+        iv_place(416, 5048, 256);
+        iv_cross(416, 5048, 416, 5064);
+        assert_eq(player_y, 6464 << 16, "TELE-1: the landing in the LOWEST tagged sector wins, whatever the thing order");
+        # W1 (39) — not in DOOM1.WAD, so rewrite L299 in memory: one teleport, then
+        # spent; and a crossing from the BACK uses it up too (vanilla).
+        iv_load("E1M8");
+        things_spawn_from_map();
+        store64(map_linedefs + 299 * MAP_LINEDEF_SIZE + 24, 39);
+        iv_place(416, 5048, 256);
+        iv_cross(416, 5048, 416, 5064);
+        assert_eq(player_x, 608 << 16, "TELE-1: W1 39 teleports once");
+        assert_eq(door_line_used(299), 1, "TELE-1: ... and is used up");
+        iv_place(416, 5048, 256);
+        iv_cross(416, 5048, 416, 5064);
+        assert_eq(player_x, 416 << 16, "TELE-1: a spent 39 does nothing");
+        doors_init();
+        iv_place(416, 5064, 256);
+        iv_cross(416, 5064, 416, 5048);
+        assert_eq(door_line_used(299), 1, "TELE-1: a BACK-side crossing uses up a 39 as well");
+
+        # ============================================================
+        test_group("teleport: monsters (v0.35.8 TELE-1)");
+        # ============================================================
+        # A monster's step goes through chase_try_walk, which now ends with the
+        # teleport sweep. A baron half a unit in front of L299, stepping north:
+        iv_load("E1M8");
+        things_spawn_from_map();
+        player_health = 100;
+        iv_place(0 - 128, 0 - 224, 0);
+        var mb1 = 0 - 1;
+        var mb2 = 0 - 1;
+        for (var mbi = 0; mbi < thing_count; mbi += 1) {
+            if (thing_type(mbi) == TTYPE_BARON) { if (mb1 < 0) { mb1 = mbi; } else { mb2 = mbi; } }
+        }
+        assert(mb2 >= 0, "TELE-1: both E1M8 barons found");
+        thing_set_x(mb1, 416 << 16);
+        thing_set_y(mb1, (5056 << 16) - 32768);
+        thing_update_z(mb1);
+        assert_eq(chase_try_walk(mb1, DI_NORTH), 1, "TELE-1: the step onto the pad is legal");
+        assert_eq(thing_x(mb1), 608 << 16, "TELE-1: a monster crossing from the front lands at x=608");
+        assert_eq(thing_y(mb1), 6464 << 16, "TELE-1: ... y=6464");
+        assert_eq(thing_angle(mb1), 0, "TELE-1: ... facing the landing's angle");
+        assert_eq(thing_sector(mb1), 66, "TELE-1: ... in sector 66");
+        assert_eq(thing_z(mb1), iv_floor(66) << 16, "TELE-1: ... on its floor");
+        # Blocked: the first baron now stands on the landing, so the second's
+        # teleport is cancelled (monsters never telefrag) — it just finishes its step.
+        thing_set_x(mb2, 480 << 16);
+        thing_set_y(mb2, (5056 << 16) - 32768);
+        thing_update_z(mb2);
+        assert_eq(chase_try_walk(mb2, DI_NORTH), 1, "TELE-1: the second step is legal too");
+        assert_eq(thing_y(mb2), (5056 << 16) + 32768, "TELE-1: a body on the landing cancels a monster's teleport");
+        # Back side: walking off the pad never teleports.
+        iv_load("E1M8");
+        things_spawn_from_map();
+        player_health = 100;
+        iv_place(0 - 128, 0 - 224, 0);
+        thing_set_x(mb1, 416 << 16);
+        thing_set_y(mb1, (5056 << 16) + 32768);
+        thing_update_z(mb1);
+        assert_eq(chase_try_walk(mb1, DI_SOUTH), 1, "TELE-1: the step off the pad is legal");
+        assert_eq(thing_y(mb1), (5056 << 16) - 32768, "TELE-1: a monster stepping OFF the pad stays put");
+        # The player on the landing blocks a monster too.
+        iv_place(608, 6464, 0);
+        thing_set_x(mb1, 416 << 16);
+        thing_set_y(mb1, (5056 << 16) - 32768);
+        thing_update_z(mb1);
+        chase_try_walk(mb1, DI_NORTH);
+        assert_eq(thing_y(mb1), (5056 << 16) + 32768, "TELE-1: the player standing on the landing blocks a monster's teleport");
+        # Monster-only 126 (rewritten onto L300): the player walks through it, a
+        # monster teleports.
+        iv_load("E1M8");
+        things_spawn_from_map();
+        player_health = 100;
+        store64(map_linedefs + 300 * MAP_LINEDEF_SIZE + 24, 126);
+        doors_init();
+        iv_place(480, 5048, 256);
+        iv_cross(480, 5048, 480, 5064);
+        assert_eq(player_x, 480 << 16, "TELE-1: the player ignores a monster-only 126");
+        iv_place(0 - 128, 0 - 224, 0);
+        thing_set_x(mb1, 480 << 16);
+        thing_set_y(mb1, (5056 << 16) - 32768);
+        thing_update_z(mb1);
+        chase_try_walk(mb1, DI_NORTH);
+        assert_eq(thing_x(mb1), 608 << 16, "TELE-1: a monster takes a 126");
+
+        # ============================================================
+        test_group("boss death: E1M8's barons open the way out (v0.35.8 BOSS-1)");
+        # ============================================================
+        # Sector 30 (tag 666) is a 208-unit wall around the exit; it lowers to its
+        # lowest neighbour (-136) only when the LAST baron's death completes.
+        iv_load("E1M8");
+        things_spawn_from_map();
+        player_health = 100;
+        iv_place(0 - 128, 0 - 224, 0);
+        assert_eq(map_episode, 1, "BOSS-1: map_load records the episode");
+        assert_eq(map_number, 8, "BOSS-1: ... and the map");
+        var bb1 = 0 - 1;
+        var bb2 = 0 - 1;
+        for (var bbi = 0; bbi < thing_count; bbi += 1) {
+            if (thing_type(bbi) == TTYPE_BARON) { if (bb1 < 0) { bb1 = bbi; } else { bb2 = bbi; } }
+        }
+        thing_damage(bb1, 10000);
+        for (var bk1 = 0; bk1 < 40; bk1 += 1) { thing_ai_tick(bb1); }
+        assert_eq(thing_state(bb1), STATE_DEAD, "BOSS-1: the first baron finishes dying");
+        assert_eq(door_find_sector(30), 0 - 1, "BOSS-1: one baron still standing — nothing opens");
+        thing_damage(bb2, 10000);
+        for (var bk2 = 0; bk2 < 40; bk2 += 1) { thing_ai_tick(bb2); }
+        assert(door_find_sector(30) >= 0, "BOSS-1: the last baron's death starts the tag-666 floor");
+        iv_ticks(400);
+        assert_eq(iv_floor(30), 0 - 136, "BOSS-1: sector 30 lowers 208 -> -136 (its lowest neighbour)");
+        # Both dying together: the first completion already finds no live baron.
+        iv_load("E1M8");
+        things_spawn_from_map();
+        player_health = 100;
+        thing_damage(bb1, 10000);
+        thing_damage(bb2, 10000);
+        for (var bk3 = 0; bk3 < 40; bk3 += 1) { thing_ai_tick(bb1); thing_ai_tick(bb2); }
+        assert(door_find_sector(30) >= 0, "BOSS-1: simultaneous deaths open it too");
+        # A dead player wins nothing.
+        iv_load("E1M8");
+        things_spawn_from_map();
+        player_health = 0;
+        thing_damage(bb1, 10000);
+        thing_damage(bb2, 10000);
+        for (var bk4 = 0; bk4 < 40; bk4 += 1) { thing_ai_tick(bb1); thing_ai_tick(bb2); }
+        assert_eq(door_find_sector(30), 0 - 1, "BOSS-1: not while the player is dead");
+        player_health = 100;
+        # Not E1M8: a baron dying elsewhere does nothing (E1M1, a zombieman
+        # dressed as a baron).
+        iv_load("E1M1");
+        things_spawn_from_map();
+        var nb = 0 - 1;
+        for (var nbi = 0; nbi < thing_count; nbi += 1) { if (thing_type(nbi) == TTYPE_ZOMBIEMAN) { nb = nbi; } }
+        store64(things + nb * THING_SIZE + 32, TTYPE_BARON);
+        assert_eq(boss_death_check(nb), 0, "BOSS-1: only on E1M8");
+
+        # ============================================================
+        test_group("damaging floors + radiation suit (v0.35.8 DMG-1)");
+        # ============================================================
+        game_skill = 3;
+        player_armor = 0;
+        player_armor_class = 0;
+        iv_load("E1M1");
+        iv_place(1528, 0 - 3232, 0);
+        assert_eq(load64(map_sectors + player_find_sector() * MAP_SECTOR_SIZE + 40), 7, "DMG-1: standing in E1M1's nukage (type 7)");
+        player_health = 100;
+        player_radsuit_tics = 0;
+        player_specials_tick(0);
+        assert_eq(player_health, 95, "DMG-1: nukage bites 5 on tic 0");
+        for (var dmt = 1; dmt < 32; dmt += 1) { player_specials_tick(dmt); }
+        assert_eq(player_health, 95, "DMG-1: ... and not on tics 1..31");
+        player_specials_tick(32);
+        assert_eq(player_health, 90, "DMG-1: ... then again on tic 32");
+        player_radsuit_tics = 3;
+        player_specials_tick(64);
+        assert_eq(player_health, 90, "DMG-1: the radiation suit blocks nukage");
+        assert_eq(player_radsuit_tics, 2, "DMG-1: the suit runs down a tic per tic");
+        iv_load("E1M3");
+        iv_place(0 - 1528, 0 - 1112, 0);
+        assert_eq(load64(map_sectors + player_find_sector() * MAP_SECTOR_SIZE + 40), 16, "DMG-1: standing in E1M3's super hellslime (type 16)");
+        player_health = 100;
+        player_radsuit_tics = 0;
+        player_specials_tick(0);
+        assert_eq(player_health, 80, "DMG-1: type 16 bites 20");
+        p_random_seed(12345);
+        var dm_leaks = 0;
+        for (var dml = 0; dml < 2560; dml += 1) {
+            player_health = 100;
+            player_radsuit_tics = 100;
+            player_specials_tick(dml * 32);
+            if (player_health < 100) { dm_leaks += 1; }
+        }
+        assert(dm_leaks > 30, "DMG-1: the suit leaks on type 16 (about 6 bites in 256)");
+        assert(dm_leaks < 100, "DMG-1: ... but only about 6 in 256 (60 expected of 2560)");
+        iv_load("E1M8");
+        iv_place(456, 6280, 0);
+        assert_eq(player_find_sector(), 66, "DMG-1: standing in E1M8's exit room (type 11)");
+        next_level_flag = 0;
+        player_health = 100;
+        player_radsuit_tics = 100;
+        player_specials_tick(0);
+        assert_eq(player_health, 80, "DMG-1: type 11 bites 20, suit or not");
+        assert_eq(next_level_flag, 0, "DMG-1: no exit above 10 health");
+        player_health = 20;
+        player_specials_tick(32);
+        assert_eq(player_health, 1, "DMG-1: a type-11 hit never takes the last point");
+        assert_eq(next_level_flag, 1, "DMG-1: at 10 health or less the level ends");
+        next_level_flag = 0;
+        player_health = 11;
+        player_specials_tick(33);
+        assert_eq(next_level_flag, 0, "DMG-1: 11 health is not yet the end");
+        player_health = 10;
+        player_specials_tick(34);
+        assert_eq(next_level_flag, 1, "DMG-1: 10 is — checked every tic, not just on a bite");
+        assert_eq(player_health, 10, "DMG-1: (no bite off the 32-tic beat)");
+        next_level_flag = 0;
+        player_health = 50;
+        player_take_damage(100);
+        assert_eq(player_health, 1, "DMG-1: ANY hit in a type-11 sector leaves at least 1");
+        player_health = 0;
+        player_take_damage(20);
+        assert_eq(player_health, 0, "a dead player takes no damage (and the type-11 cap cannot heal one)");
+        iv_place(0 - 128, 0 - 224, 0);
+        game_skill = 1;
+        player_health = 100;
+        player_take_damage(20);
+        assert_eq(player_health, 90, "skill 1 halves damage to the player");
+        game_skill = 3;
+        player_take_damage(20);
+        assert_eq(player_health, 70, "skill 3 does not");
+        player_radsuit_tics = 0;
+        # The suit itself: E1M4's at (128, 176) spawns on skills 1-3.
+        iv_load("E1M4");
+        things_spawn_from_map();
+        var rsi = 0 - 1;
+        for (var rsk = 0; rsk < thing_count; rsk += 1) { if (thing_type(rsk) == TTYPE_RADSUIT) { rsi = rsk; } }
+        assert(rsi >= 0, "DMG-1: E1M4's radiation suit spawns on skill 3");
+        assert_eq(thing_category(rsi), CAT_ITEM, "DMG-1: it is a pickup (it was decor)");
+        player_health = 100;
+        level_items = 0;
+        iv_place(128, 176, 0);
+        things_check_pickups();
+        assert_eq(player_radsuit_tics, RADSUIT_TICS, "DMG-1: taking it starts 60 seconds (2100 tics)");
+        assert_eq(thing_flags(rsi) & TF_ACTIVE, 0, "DMG-1: ... and removes it");
+        assert_eq(level_items, 0, "DMG-1: ... and it is not an ITEMS-% item");
+        player_radsuit_tics = 0;
+
+        # ============================================================
+        test_group("E1M8 endgame, in engine (v0.35.8 P4 / BOSS-1 / TELE-1 / DMG-1)");
+        # ============================================================
+        # The whole ending, driven through the real game code in the main loop's
+        # order: kill both barons, watch the tag-666 wall go down, walk onto the
+        # pad, survive the exit room until the level ends — as the episode's end.
+        iv_load("E1M8");
+        level_set(1, 8);
+        game_skill = 3;
+        things_spawn_from_map();
+        player_health = 100;
+        player_armor = 0;
+        player_armor_class = 0;
+        player_freeze_tics = 0;
+        iv_place(0 - 128, 0 - 224, 0);
+        var eb1 = 0 - 1;
+        var eb2 = 0 - 1;
+        for (var ebi = 0; ebi < thing_count; ebi += 1) {
+            if (thing_type(ebi) == TTYPE_BARON) { if (eb1 < 0) { eb1 = ebi; } else { eb2 = ebi; } }
+        }
+        thing_damage(eb1, 10000);
+        thing_damage(eb2, 10000);
+        for (var ebt = 0; ebt < 400; ebt += 1) { doors_tick(); things_tick(); }
+        assert_eq(thing_state(eb2), STATE_DEAD, "endgame: both barons dead");
+        assert_eq(iv_floor(30), 0 - 136, "endgame: the tag-666 wall is down");
+        iv_place(416, 5030, 256);
+        input_flags = INP_FORWARD;
+        var egw = 0;
+        while (player_find_sector() != 66 && egw < 60) { player_tick(); egw += 1; }
+        input_flags = 0;
+        assert_eq(player_find_sector(), 66, "endgame: walking north onto the pad teleports into the exit room");
+        var eg_t = 0;
+        var eg_min = 100;
+        while (next_level_flag == 0 && eg_t < 3000) {
+            player_tick();
+            doors_tick();
+            things_tick();
+            player_specials_tick(eg_t);
+            if (player_health < eg_min) { eg_min = player_health; }
+            eg_t += 1;
+        }
+        assert_eq(next_level_flag, 1, "endgame: the exit room ends the level");
+        assert(eg_min >= 1, "endgame: the player never dies in it");
+        assert(player_health <= 10, "endgame: ... and leaves at 10 health or less");
+        assert_eq(level_episode_ends(), 1, "endgame: E1M8's exit is the episode end (finale, not intermission)");
+        next_level_flag = 0;
+        secret_exit_flag = 0;
+
+        # ============================================================
+        test_group("finale: the text fits, the picture is HELP2 (v0.35.8 P4)");
+        # ============================================================
+        finale_load_font();
+        var fg_n = 0;
+        for (var fgi = 0; fgi < FIN_FONT_COUNT; fgi += 1) { if (load64(fin_font + fgi * 16) != 0) { fg_n += 1; } }
+        assert_eq(fg_n, 63, "finale: all 63 STCFN glyphs cached");
+        var fin_txt = finale_e1_text();
+        assert_eq(finale_draw_text(fin_txt, strlen(fin_txt)), strlen(fin_txt), "finale: every character fits — no line runs off the right edge");
+        var fin_m = alloc(64);
+        for (var fmi = 0; fmi < 60; fmi += 1) { store8(fin_m + fmi, 77); }
+        store8(fin_m + 60, 0);
+        assert_eq(finale_draw_text(fin_m, 60), 34, "finale: a glyph that would cross x=320 ends the draw (34 'M's fit)");
+        for (var fii = 30; fii < 40; fii += 1) { store8(fin_m + fii, 73); }
+        store8(fin_m + 40, 0);
+        assert_eq(finale_draw_text(fin_m, 40), 40, "finale: a glyph ending exactly at x=320 still draws (30 'M' + 10 'I' = 310 px)");
+        assert_eq(streq(finale_picture_name(), "HELP2"), 1, "finale: shareware ends on HELP2 (CREDIT needs an E4M1)");
+        # A newline starts the next line 11 rows down at x=10: "I\nI" inks rows
+        # 10.. and 21.., and nothing in the rows between.
+        framebuf_clear(0);
+        finale_draw_text("I\nI", 3);
+        var fl1 = 0;
+        var fl2 = 0;
+        var flg = 0;
+        for (var fly = 0; fly < 40; fly += 1) {
+            for (var flx = 0; flx < 20; flx += 1) {
+                if (framebuf_get_pixel(flx, fly) != 0) {
+                    if (fly >= 10 && fly < 18) { fl1 += 1; }
+                    if (fly >= 18 && fly < 21) { flg += 1; }
+                    if (fly >= 21 && fly < 29) { fl2 += 1; }
+                }
+            }
+        }
+        assert(fl1 > 0, "finale: the first line inks from row 10");
+        assert(fl2 > 0, "finale: a newline drops the pen 11 rows");
+        assert_eq(flg, 0, "finale: ... with clear rows between the lines");
 
         wad_close();
     } else {

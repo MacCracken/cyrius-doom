@@ -22,13 +22,13 @@ A playable DOOM engine implemented from documented specs in Cyrius — the sover
 | **Rendering** | BSP traversal, textured walls, floor/ceiling flats, COLORMAP lighting (DOOM-accurate scalelight/zlight tables), fake contrast, sky texture, masked midtextures, animated walls (SLADRIP) and flats (NUKAGE) |
 | **Sprites** | Distance-sorted, rotation-aware (8 angles), frame animation (walk/attack/pain/die/dead), wall clipping, sector lighting |
 | **Gameplay** | Weapon switching (1-7), firing with ammo consumption, hitscan damage, monster AI (see/chase/attack/pain/die), death + respawn, armor absorption (green 1/3, blue 1/2) |
-| **Items** | Health/armor/ammo pickups, weapon pickups (shotgun through BFG), key cards (blue/yellow/red) |
-| **Doors** | Open/wait/close, lifts, key-locked doors (specials 26/27/28), walk-over triggers, tagged sector activation |
+| **Items** | Health/armor/ammo pickups, weapon pickups (shotgun through BFG), key cards (blue/yellow/red), radiation suit |
+| **Doors & specials** | Open/wait/close, lifts, key-locked doors (specials 26/27/28), walk-over triggers, tagged sector activation, stairs and floor movers, teleporters (player + monster, telefrag), damaging floors, E1M8's boss death |
 | **HUD** | WAD-native status bar (STBAR, STTNUM, STYSNUM), Doomguy face (health-based), ARMS display, key indicators, current weapon ammo |
 | **Menus** | TITLEPIC title screen, M_DOOM logo, M_SKULL animated cursor, skill select, all from WAD patches |
-| **Intermission** | Kill%, item%, secret%, time after level exit (WIMAP0 background, WINUM digits) |
+| **Intermission** | Kill%, item%, secret%, time after level exit (WIMAP0 background, WINUM digits, D_INTER); the episode finale (text over FLOOR4_8 with D_VICTOR, then the end picture) |
 | **Audio** | ALSA PCM playback via stdlib, 12 WAD sound effects cached |
-| **Other** | Automap (TAB), level transitions (E1M1→E1M9 + secret exits), weapon bob, PC speaker sounds |
+| **Other** | Automap (TAB), level transitions (E1M1→E1M8 + the E1M9 secret level, ending in the finale), weapon bob, PC speaker sounds |
 
 ## Build & Run
 
