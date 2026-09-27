@@ -394,6 +394,18 @@ fn sprite_bottom_row(z, eye, vy): i64 {
     return HALF_HEIGHT - fixed_to_int(fixed_div(fixed_mul(z - eye, PROJ_DIST), vy));
 }
 
+# v0.35.7 — the sprite's TOP screen row. A sprite patch's top offset is how far its
+# top row sits ABOVE the thing's origin, the point on the floor it stands on (UDS
+# picture format), so vanilla puts the top at world height z + topoffset. Taken
+# here as a scaled offset UP from the floor row, not as a second projection of
+# z + top_off: for a patch whose top_off equals its height the result is exactly
+# the old bottom-anchor's row (sprite_h is the same truncated product), so the
+# only sprites that move are the ones whose metadata puts them off the floor, and
+# a render A/B isolates them. Pure — testable without a WAD or a frame.
+fn sprite_top_row(floor_row, top_off, scale): i64 {
+    return floor_row - fixed_to_int(fixed_mul(top_off << 16, scale));
+}
+
 
 fn sprite_render_all(): i64 {
     sprite_visible = 0;
@@ -540,7 +552,6 @@ fn sprite_render_all(): i64 {
 
         # Screen bounds
         var sx1 = screen_x - fixed_to_int(fixed_mul(left_off << 16, scale));
-        var sy1 = HALF_HEIGHT - fixed_to_int(fixed_mul(top_off << 16, scale));
 
         # v0.35.4 (RC-S6) — z is STORED now, not re-derived. This used to
         # open-code a BSP point-descent PER VISIBLE THING PER FRAME: the third
@@ -573,8 +584,15 @@ fn sprite_render_all(): i64 {
         # sector height is deleted, not moved.
         var floor_proj = sprite_bottom_row(thing_floor_z, view_z, vy);
 
-        # Anchor sprite bottom to floor
-        sy1 = floor_proj - sprite_h;
+        # v0.35.7 — anchor by the patch's TOP OFFSET (sprite_top_row). The old
+        # bottom-anchor planted every sprite's last row exactly on the floor line:
+        # vanilla sinks most monster frames 1-5 units into it (their feet) and
+        # floats the soulsphere and blur sphere 14 units above it, the keys 3, the
+        # rad suit 4. This file used to compute a top-offset row too (as
+        # `HALF_HEIGHT - top_off*scale`, which ignored z entirely) and then
+        # overwrite it here unconditionally — a dead store since the file's first
+        # version, now deleted.
+        var sy1 = sprite_top_row(floor_proj, top_off, scale);
 
         # Light level
         var spr_light = 31 - (thing_light >> 3);

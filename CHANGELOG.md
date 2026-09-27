@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.35.7] - 2026-09-26 — sprites anchored by their top offset, as vanilla draws them
+
+Every world sprite's last row used to sit exactly on the floor line. That is not how DOOM draws them:
+a sprite patch's **top offset** says how far its top row sits above the thing's origin — the point
+on the floor it stands on — so vanilla puts the top at world height `z + topoffset`, and the bottom
+lands wherever the patch's height leaves it. `sprite.cyr` read `top_off`, computed a row from it,
+and then **unconditionally overwrote** that row with a bottom-anchor — a dead store since the file's
+first version.
+
+### Fixed
+
+- **Sprites stand where their patches put them.** Most monster frames are drawn 1–5 units into the
+  floor (their feet); the soulsphere and blur sphere hover 14 units up, the keys 3, the radiation suit
+  4, the weapon pickups 2–5 (E1M7's shotgun at the start now visibly floats). Across DOOM1's 483
+  sprite lumps, 15 families have a floating frame and most have a sinking one — the survey matches
+  the v0.35.4 design pass's "15 thing types".
+- The new pure `sprite_top_row(floor_row, top_off, scale)` measures the top as a scaled offset **up
+  from the floor row**, not as a second projection of `z + top_off`. For a patch whose top offset
+  equals its height the result is exactly the old bottom-anchor's row (`sprite_h` is the same
+  truncated product), so **only sprites whose metadata puts them off the floor can move** — which is
+  what made the render diff adjudicable rather than something to accept wholesale.
+
+### Verification — every moved sprite justified against its patch metadata
+
+- **Per-sprite engine dumps**, old (v0.35.6 `sprite.cyr` from `HEAD`) and new, one line per *drawn*
+  sprite — instrumented builds proven to render byte-identically to the real ones. The prediction is
+  independent of the engine: each sprite's patch header is read **straight from the WAD** by lump
+  index, and its row shift computed from that.
+- **All 18 map views** (9 maps × tick 0 / tick 35): **1,880** sprites drawn, **694 moved**, each by
+  **exactly** its predicted rows (+1 … +9 down, −1 … −6 up); **no sprite whose top offset equals its
+  height moved**; draw set, order and every horizontal field unchanged; and **all 7,054 changed pixels
+  lie inside a moved sprite — 0 uncovered.** E1M4 / M5 / M8 / M9 have moved sprites but no changed
+  pixels: every one of those is fully behind a wall.
+- **41 captures vs v0.35.6** (true baseline, sha256-matched): **31 byte-identical** — menus, automaps,
+  intermissions, E1M4/M5/M8/M9 — and the 10 that differ are E1M1/M2/M3/M6/M7 at tick 0 and 35.
+  **12 / 12 `--ai-probe` fingerprints identical** (a render-only change).
+- Tests: WAD-free **345 + 33 + 18 + 12**; full **546 / 546** — `sprite_top_row` properties (the
+  identity case, sink, float with SOULA0's real 39/25, negative offsets, monotone) and a WAD-gated
+  group: E1M7's shotgun no longer paints its old floor-line rows and *is* drawn in the rows above.
+  **Mutation 4 / 4** (renderer reverted to the bottom anchor; helper unscaled, sign-flipped, off by
+  one).
+- *A test-construction trap, recorded:* `map_load` does not set the player start. The first version
+  of the E1M7 group rendered E1M1's start coordinates on E1M7, drew nothing, and passed its band check
+  **vacuously** — its second assertion exposed it. It now uses `main.cyr`'s load order
+  (`texture_build_map_caches`, then `map_find_player_start`).
+- fuzz **×8** clean, plus 60,000 extra `fuzz_sprite` iterations (it fuzzes `top_off`). Bench: same
+  compiler, 3 interleaved pairs, true spawn frame **570.2 → 566.7 µs (−0.6%, noise — no claim)**.
+  Binary sizes unchanged: **518,928** plain / **387,856** release / **501,520** agnos.
+- **AGNOS QEMU** on the final `doom_agnos`: v0.35.7 boots, WAD loads, and the frame is **64,000 /
+  64,000 exact** against the new Linux frame — and 333 pixels off the old one, exactly E1M1's anchor
+  delta, so AGNOS is demonstrably running the new anchor.
+
 ## [0.35.6] - 2026-09-26 — cyrius 6.6.6, eight of nine maps finishable, and a sprite miscompile found by the compiler
 
 Two things in one cut. The **toolchain bump** did its own finding: cyrius 6.6.6 refused

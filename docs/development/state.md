@@ -20,7 +20,13 @@
 > E1M1 field reports (EF-1 corpse-decor frame clobber on tick 1 — invisible to tick-0 `--ppm`;
 > EF-2 deaf/ambush THINGS bit parsed but never honored).
 >
-> **Last refresh**: 2026-09-26 (**v0.35.6 — cyrius 6.6.6 + deps, the interactables review, eight of nine maps
+> **Last refresh**: 2026-09-26 (**v0.35.7 — sprites anchored by their top offset.** The bottom-anchor that planted
+> every sprite's last row on the floor line is gone: monster feet sink 1–5 units, the soulsphere / blur sphere hover
+> 14, keys 3, rad suit 4, weapon pickups 2–5. Adjudicated per sprite from engine dumps vs WAD headers: 694 of 1,880
+> drawn sprites moved, each by exactly its predicted rows; all 7,054 changed px inside a moved sprite; 31/41 captures
+> identical; 12/12 AI; 546/546; mutation 4/4; AGNOS QEMU 64,000/64,000. Binary sizes unchanged.)
+>
+> **Prior refresh**: 2026-09-26 (**v0.35.6 — cyrius 6.6.6 + deps, the interactables review, eight of nine maps
 > finishable.** The requested interactables review found that only E1M1/M2/M6/M7 had a reachable exit: specials
 > **7, 8, 18, 20, 22** were never implemented. They shipped, with 5/36/82/86/91/98, and the reachability model now
 > loses **0 sectors on E1M1, M3, M4, M5, M6, M7, M9** (E1M8's finale = v0.35.8). Also: exploded barrels no longer
@@ -52,7 +58,7 @@
 
 ## Current version
 
-**[`VERSION`](../../VERSION)** = `0.35.6` (single source of truth — `cyrius.cyml` reads it via `${file:VERSION}`).
+**[`VERSION`](../../VERSION)** = `0.35.7` (single source of truth — `cyrius.cyml` reads it via `${file:VERSION}`).
 
 | Surface | Pin |
 |---|---|
@@ -66,6 +72,7 @@
 
 | Metric | Value |
 |---|---|
+| `build/doom` (v0.35.7, cycc **6.6.6**) | **518,928 B** plain / **387,856 B** release / **501,520 B** agnos — unchanged from v0.35.6 (the anchor swaps one product for another). True spawn frame 566.7 µs best-of-mins, same-compiler A/B vs v0.35.6 570.2 (−0.6%, noise). |
 | `build/doom` (v0.35.6, cycc **6.6.6**) | **518,928 B** plain; **387,856 B** release (`CYRIUS_DCE=1` — real elimination, 131,936 B; a clean strict-pin rebuild reproduces it byte for byte). `build/doom_agnos` = **501,520 B**. True spawn frame `render_frame+sprites_spawned` 574.9 µs best-of-mins (+1.1% vs v0.35.5 same session — codegen/noise); `status_render` 132.7 → 118.2 µs (−10.9%, the range-clamp rewrite, same-compiler A/B); `things_tick` −6%. |
 | `build/doom` (v0.35.4, cycc **6.5.4**) | **485,368 B**. `build/doom_agnos` = **471,928 B**. Prior v0.35.3: 485,360 / 471,920 — thing-z is +8 B, because it deletes a BSP descent while adding a field read. Prior v0.35.2: 481,264 / 467,824. The +4,192 is the chase code (direction tables, the search, two parallel arrays). Prior v0.35.1: 477,072 / 463,632. NOP-sled under `CYRIUS_DCE=1`: **543 fns / 103,280 B** (agnos 585 / 101,220). The **+4,152 B** over the 0.35.0 / 6.4.78 build is *entirely* the new `lib/vec.cyr` introsort (`vec_sort_by` / `vec_select_nth`), which cycc auto-prepends into every build and which doom never calls — cyrius's own 6.5.4 entry records the identical +4,152 B on `cycc`. It is all NOP-sled: unreachable fns 532 → 543. Output byte-identical: 14/14 `--ppm` captures **and** the full `--ai-probe` fingerprint. *(Baseline measured here, not copied: a 6.4.78 rebuild proven byte-identical to the committed `build/doom` reports **532 fns / 100,054 B**, where the 0.35.0 row below records 535 / 100,688. The row below is left as shipped; 532 / 100,054 is the number this bump was actually diffed against.)* |
 | `build/doom` (0.35.0, prior) | **472,920 B** (cycc **6.4.78**, true pin). `build/doom_agnos` = **450,864 B**. NOP-sled under `CYRIUS_DCE=1`: 535 fns / 100,688 B. The +16 / +144 vs 0.34.4 is the pin bump (9 changed stdlib files; the agnos syscall peer alone is +212 lines for the GPU band) plus setu 0.7.0 — TX-MASKED itself is net-neutral (it retires more per-seg compute than it adds). **AGNOS QEMU direct-map render PASS on the final 0.34.5 binary**, and a 4x-block pixel-diff of the AGNOS screendump vs the Linux `--ppm` is **100.00% exact (0 of 64,000 px differ)** — both render changes are target-agnostic. |
@@ -79,7 +86,22 @@
 
 Frame-time budget: 22 ms per tick @ 35 Hz. Current: ~12× headroom.
 
-## Gates (last green, 2026-09-26 — **v0.35.6**, cycc **6.6.6** true pin; plain wrapper re-execs the pin, verified byte-identical)
+## Gates (last green, 2026-09-26 — **v0.35.7**, cycc **6.6.6** true pin)
+
+| Gate | Result |
+|---|---|
+| `cyrius build` (all targets) | OK — 518,928 / 387,856 (`CYRIUS_DCE=1`) / 501,520 (agnos), banner v0.35.7. |
+| `cyrius test` — every `tests/*.tcyr` | **345 / 33 / 18 / 12**, 0 failed. |
+| `./build/test_doom wad/DOOM1.WAD` | **546 / 546**; mutation **4 / 4** on the anchor + helper. |
+| Per-sprite adjudication (18 views) | **1,880** drawn, **694** moved — each by exactly the rows predicted from its WAD header (read independently of the engine); none with top == height moved; **7,054** changed px, **0** outside a moved sprite. Instrumented builds render byte-identically to the real ones. |
+| 41-capture A/B vs v0.35.6 (sha256-matched baseline) | **31 identical**; 10 differ (E1M1/2/3/6/7 × tick 0/35), all inside moved sprites. |
+| `--ai-probe` | **12 / 12 identical.** |
+| fuzz **×8** | clean, + 60,000 extra `fuzz_sprite` iterations (3 seeds). |
+| Bench | Same-compiler interleaved A/B: neutral (−0.6% frame, noise). Row appended. |
+| **AGNOS QEMU** (`doom-directmap-smoke.sh`, final `doom_agnos`) | Boots v0.35.7, WAD loads; **64,000 / 64,000 px** vs the new Linux frame, 333 px off the old one (the control). The script's floor-band gate still false-FAILs (origin assumption at 2048×2048 — agnos-side). |
+| Version consistency | `VERSION` **0.35.7** = banner = CHANGELOG header; pin `6.6.6`. |
+
+## Gates (prior, 2026-09-26 — **v0.35.6**, cycc **6.6.6** true pin; plain wrapper re-execs the pin, verified byte-identical)
 
 | Gate | Result |
 |---|---|
@@ -198,10 +220,11 @@ The 6.4.78 baselines were captured **first**, from a rebuild proven byte-identic
 
 ## In-flight slot map
 
-Current arc: **v0.35.x gameplay** (v0.35.0 sight+wake → v0.35.1 movement repairs → v0.35.2 the 8-direction chase → v0.35.3 thing physics → v0.35.4 real thing-z → v0.35.5 toolchain 6.6.2 → **v0.35.6 toolchain 6.6.6 + the interactables review**). **Renumbered again at v0.35.6**: v0.35.5 / v0.35.6 went to unplanned cuts, so every planned slot moved up two in the same order, and the review's follow-ups became **v0.35.9 Interactables II** and **v0.35.10 Items II**; the critical path is now **v0.35.8** (Episode end: teleports, boss floor, sector 11 + damaging floors, finale) and v0.37.0 (X11). The history below is kept as written at the time. **Roadmap slot labels were flattened at the v0.35.2 cut** — the letter-suffixed slots (`v0.35.1a/1b/1c`, `v0.35.4b`) are gone; every item now lives in a numbered release, and the 0.35.x tail shifted by +2 (episode-end, the critical path, is now **v0.35.4**). [`roadmap.md`](roadmap.md) was reorganized at the v0.34.6 cut into **16 pinned releases** (v0.34.7 → v1.0.0) plus four labelled holding groups; the old "v0.28.x graphics arc" framing is retired (0.28.5/.6/.11 all shipped long ago under other version numbers). **Critical path to v1.0.0 is two releases**: **v0.35.4** (episode-end — `level_advance` still wraps E1M8→E1M1, so the game cannot be finished; renumbered from v0.35.2 when the slot labels were flattened) and v0.37.0 (native X11 — the only unmet display-backend item). **The deep perf pass stays gated on cyrius v6.5.x Performance-Quality — re-measured 2026-08-01 on the 6.5.4 pin and the gate did NOT open**: `CYRIUS_IR=3` miscompiles doom (see Known issue #4), so HOLD-C stands on evidence rather than on the upstream 6.5.2 announcement. The pin itself moved to **6.5.4** at the v0.35.1 cut, byte-identical.
+Current arc: **v0.35.x gameplay** (v0.35.0 sight+wake → v0.35.1 movement repairs → v0.35.2 the 8-direction chase → v0.35.3 thing physics → v0.35.4 real thing-z → v0.35.5 toolchain 6.6.2 → **v0.35.6 toolchain 6.6.6 + the interactables review** → **v0.35.7 the `top_off` sprite anchor**). **Renumbered again at v0.35.6**: v0.35.5 / v0.35.6 went to unplanned cuts, so every planned slot moved up two in the same order, and the review's follow-ups became **v0.35.9 Interactables II** and **v0.35.10 Items II**; the critical path is now **v0.35.8** (Episode end: teleports, boss floor, sector 11 + damaging floors, finale) and v0.37.0 (X11). The history below is kept as written at the time. **Roadmap slot labels were flattened at the v0.35.2 cut** — the letter-suffixed slots (`v0.35.1a/1b/1c`, `v0.35.4b`) are gone; every item now lives in a numbered release, and the 0.35.x tail shifted by +2 (episode-end, the critical path, is now **v0.35.4**). [`roadmap.md`](roadmap.md) was reorganized at the v0.34.6 cut into **16 pinned releases** (v0.34.7 → v1.0.0) plus four labelled holding groups; the old "v0.28.x graphics arc" framing is retired (0.28.5/.6/.11 all shipped long ago under other version numbers). **Critical path to v1.0.0 is two releases**: **v0.35.4** (episode-end — `level_advance` still wraps E1M8→E1M1, so the game cannot be finished; renumbered from v0.35.2 when the slot labels were flattened) and v0.37.0 (native X11 — the only unmet display-backend item). **The deep perf pass stays gated on cyrius v6.5.x Performance-Quality — re-measured 2026-08-01 on the 6.5.4 pin and the gate did NOT open**: `CYRIUS_IR=3` miscompiles doom (see Known issue #4), so HOLD-C stands on evidence rather than on the upstream 6.5.2 announcement. The pin itself moved to **6.5.4** at the v0.35.1 cut, byte-identical.
 
 | Slot | Status | What |
 |---|---|---|
+| **v0.35.7** | **RELEASE-READY 2026-09-26** (all targets / 345 + 33 + 18 + 12 WAD-free, **546** full / fuzz ×8 / 31/41 captures identical, every moved sprite adjudicated / 12/12 AI / mutation 4/4 / **AGNOS QEMU 64,000/64,000**) | **The `top_off` sprite-anchor revival.** Sprites anchored by their patch top offset (feet sink, spheres / keys / pickups float); byte-identical for top == height, so the diff is purely metadata-driven. |
 | **v0.35.6** | **RELEASE-READY 2026-09-26** (both targets + clean-from-scratch / 339 + 33 + 18 + 12 WAD-free, **538** full / fuzz ×8 / deps 39-0 / 28/41 renders identical, every delta attributed / 12/12 AI / 33/34 mutants / **AGNOS QEMU 64,000/64,000 px**) | **cyrius 6.6.6 + deps + the interactables review.** Progression specials 7/8/18/20/22 (+5/36/82/86/91/98): E1M3/M4/M5/M9 regain their exits, seven maps lose 0 sectors vs vanilla. Barrel ghosts, the v0.35.4 thing-z regression, vanilla pickups / items % / splash / rocket impact, walk-line ends, monster-blocking lines, mover fidelity. Toolchain: the nested-`continue` miscompile (sprites since v0.31.5; Known issue #6), the `for > while > for` residual, the AGNOS build restored + CI gate. |
 | **v0.35.5** | shipped 2026-09-11 (Linux only — *found at v0.35.6*: the AGNOS build did not compile on this pin and the banner read v0.35.4) | Toolchain 6.5.4 → 6.6.2, `Result` value form in `src/`. |
 | **v0.35.4** | **RELEASE-READY 2026-08-01** (both targets clean / 299 + **443** + 33 + 12 / fuzz ×7 / deps 36-0 / **14/14 `--ppm` byte-identical** / `--ai-probe` identical. **AGNOS QEMU PASS, pixel-diff 100.00% exact.**) | **Real thing-z (RC-S6).** Offset 16 was written literal `0` and never read since the engine's first commit; it now holds the point-sampled subsector floor in 16.16. **Scoped so the render A/B stays a CONTROL** — the roadmap assumed this cut moves pixels, but storing z = the sector floor makes the projection operand integer-identical to what sprite.cyr derived per frame. The actual pixel-mover is the `top_off` anchor revival, which is *independent of thing-z* and gets its own cut. Deletes the **third uncached copy** of `map_point_sector` (sprite.cyr's per-visible-thing descent, which had diverged — no `line_idx` bounds check, could exit holding an interior node) and a **fourth** in `thing_move_clear`'s cfloor. Retires the `+= 32` projectile hack. Perf: interleaved A/B, post wins every pair, **540.1 → 522.4 µs (−3.3%)**. Tests 423 → **443**, **mutation-proven 6/6 after a 4/5 first pass** — dropping the `<< 16` (raw height into a 16.16 field) passed the whole WAD-free suite, so a WAD-gated sweep over all 9 maps was added. **The `--ai-probe` scare was a STALE BASELINE**, four cuts old; against a `git archive HEAD` rebuild it is identical, confirmed by a divergence probe showing zero stored-vs-walked mismatches over 350 ticks. |

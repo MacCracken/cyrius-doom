@@ -622,6 +622,28 @@ fn main() {
     assert_lt(sprite_bottom_row(150 << 16, zeye, zvy), sprite_bottom_row(120 << 16, zeye, zvy),
       "sprite_bottom_row is monotone in z");
 
+    # v0.35.7 — the top-offset anchor. sprite_top_row(floor_row, top_off, scale)
+    # puts the sprite's top row top_off * scale ABOVE the floor row (a patch's top
+    # offset is how far its top sits above the thing's origin on the floor).
+    assert_eq(sprite_top_row(150, 50, FIXED_ONE), 100, "top 50 at 1:1 starts 50 rows above the floor row");
+    # The identity that makes the render A/B adjudicable: top_off == height lands
+    # EXACTLY where the old bottom-anchor did (floor_row - sprite_h, same product).
+    var ta_s = 47000;
+    var ta_sh = fixed_to_int(fixed_mul(55 << 16, ta_s));
+    assert_eq(sprite_top_row(137, 55, ta_s), 137 - ta_sh, "top_off == height reproduces floor_row - sprite_h exactly");
+    # Sinks: a monster frame drawn 5 units below its origin (top 50, height 55).
+    assert_eq(sprite_top_row(150, 50, FIXED_ONE) + 55 - 1, 154, "top 50 / height 55 sinks its last row 5 under the floor row");
+    # Floats: SOULA0's real metadata (top 39, height 25) — bottom 14 above.
+    assert_eq(sprite_top_row(150, 39, FIXED_ONE) + 25 - 1, 150 - 15, "the soulsphere's last row sits 14 rows above the floor row");
+    # A negative top offset puts the whole patch below the origin.
+    assert_gt(sprite_top_row(150, 0 - 10, FIXED_ONE), 150, "a negative top offset starts below the floor row");
+    # Monotone: a larger top offset never draws lower, at any scale.
+    var ta_ok = 1;
+    for (var ta_t = 0; ta_t < 120; ta_t += 1) {
+        if (sprite_top_row(150, ta_t + 1, ta_s) > sprite_top_row(150, ta_t, ta_s)) { ta_ok = 0; }
+    }
+    assert_eq(ta_ok, 1, "sprite_top_row is monotone in top_off");
+
     # Projectile launch z. MUTANT M6 (using raw 32, or aliasing the HORIZONTAL
     # MISSILE_SPAWN_OFFSET) dies here; MUTANT M7 (writing z only for a fresh slot)
     # dies on the recycle case.
@@ -2006,6 +2028,68 @@ fn main() {
             }
         }
         assert(occ_changed > 50, "barrel beside the E1M1 spawn pillar renders its unoccluded columns");
+
+        # ============================================================
+        test_group("sprite: top-offset anchor on a real map (v0.35.7)");
+        # ============================================================
+        # E1M7's start view has a shotgun pickup right in front of the player.
+        # SHOTA0 is 12 tall with a top offset of 17, so vanilla draws it HOVERING
+        # 5 units above the floor. The old bottom-anchor planted it on the floor
+        # line: rows 137-151 at this range, where it now spans 131-145. Nothing
+        # else draws in rows 146-151 of its columns (verified from a per-sprite
+        # dump), so after the sprite pass that band must still hold exactly what
+        # render_frame left there. On v0.35.6 the shotgun painted it.
+        # The same load order as main.cyr's load_map — map_load does NOT set the
+        # player start, and without map_find_player_start the "E1M7 view" is
+        # E1M1's start coordinates on the E1M7 map (it drew nothing, so the band
+        # check passed vacuously until the second assertion below exposed it).
+        map_load("E1M7");
+        texture_build_map_caches();
+        map_find_player_start();
+        things_spawn_from_map();
+        view_x = player_start_x();
+        view_y = player_start_y();
+        view_angle = player_start_angle();
+        render_frame();
+        var ta_before = alloc(61 * 6);
+        var tai = 0;
+        for (var tay = 146; tay <= 151; tay += 1) {
+            for (var tax = 90; tax <= 150; tax += 1) { store8(ta_before + tai, framebuf_get_pixel(tax, tay)); tai += 1; }
+        }
+        sprite_render_all();
+        var ta_changed = 0;
+        tai = 0;
+        for (var tay = 146; tay <= 151; tay += 1) {
+            for (var tax = 90; tax <= 150; tax += 1) {
+                if (framebuf_get_pixel(tax, tay) != load8(ta_before + tai)) { ta_changed += 1; }
+                tai += 1;
+            }
+        }
+        assert_eq(ta_changed, 0, "E1M7's shotgun pickup hovers: its old floor-line rows stay floor");
+        # And it IS drawn — higher: rows 131-136 are covered by its NEW position
+        # only (no sprite touched them before), so the sprite pass must change
+        # them. This is also what keeps the band check above from passing
+        # vacuously on a view that draws nothing.
+        var ta_drawn = 0;
+        render_frame();
+        tai = 0;
+        var ta_up = alloc(61 * 6);
+        for (var tay = 131; tay <= 136; tay += 1) {
+            for (var tax = 90; tax <= 150; tax += 1) { store8(ta_up + tai, framebuf_get_pixel(tax, tay)); tai += 1; }
+        }
+        sprite_render_all();
+        tai = 0;
+        for (var tay = 131; tay <= 136; tay += 1) {
+            for (var tax = 90; tax <= 150; tax += 1) {
+                if (framebuf_get_pixel(tax, tay) != load8(ta_up + tai)) { ta_drawn += 1; }
+                tai += 1;
+            }
+        }
+        assert(ta_drawn > 100, "E1M7's shotgun pickup is drawn in the rows above its old position");
+        map_load("E1M1");
+        texture_build_map_caches();
+        map_find_player_start();
+        things_spawn_from_map();
 
         # ============================================================
         test_group("gameplay: closed doors block sight/use/missiles (RC-G3/G4/G5)");

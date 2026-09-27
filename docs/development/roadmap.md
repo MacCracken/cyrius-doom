@@ -61,21 +61,8 @@ each release below names a gameplay gate instead.
 > **Renumbered at v0.35.6.** v0.35.5 and v0.35.6 went to unplanned cuts — the 6.6.2 / 6.6.6 toolchain
 > bumps and the interactables review ([`completed-phases.md`](completed-phases.md)). Every planned slot
 > below moved up two, in the same order; the review's follow-ups are two new slots after Episode end.
-
-### v0.35.7 — The `top_off` sprite-anchor revival
-
-**v0.35.4 shipped real thing-z and deliberately did NOT touch this** — see
-[`completed-phases.md`](completed-phases.md). This is the item that actually moves pixels, and it is
-**independent of thing-z**: `sprite.cyr` computes `sy1` from the patch's `top_off`, then
-unconditionally overwrites it with a bottom-anchored value, so the top_off store is dead. Reviving it
-is what re-anchors sprites — the design pass measured **72 of 940 candidates shifting 1–8 px**, with
-15 thing types whose `topoff` exceeds their patch height.
-
-Kept separate on purpose: bundled with thing-z, the render diff would have had two possible causes
-and proved neither.
-
-**Gate**: this one genuinely *is* a diff to adjudicate. Capture the 14-capture A/B, then justify each
-moved sprite against its patch metadata rather than accepting the diff wholesale.
+> **v0.35.7** (the `top_off` sprite-anchor revival) shipped 2026-09-26 — every moved sprite adjudicated
+> against its patch metadata; see [`completed-phases.md`](completed-phases.md).
 
 ### v0.35.8 — Episode end ⭐ *critical path*
 
