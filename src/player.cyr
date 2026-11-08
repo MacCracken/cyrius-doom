@@ -423,7 +423,7 @@ fn player_take_damage(dmg): i64 {
     if (map_num_sectors > 0) {
         var ds = player_find_sector();
         if (ds >= 0) {
-            if (load64(map_sectors + ds * MAP_SECTOR_SIZE + 40) == 11) {
+            if (map_sector_special(ds) == 11) {
                 if (dmg >= player_health) { dmg = player_health - 1; }
             }
         }
@@ -781,7 +781,7 @@ fn player_specials_tick(ltime): i64 {
     if (map_num_sectors > 0 && player_health > 0) {
         var sec = player_find_sector();
         if (sec >= 0) {
-            var sp = load64(map_sectors + sec * MAP_SECTOR_SIZE + 40);
+            var sp = map_sector_special(sec);
             var bite = 0;
             if ((ltime & 31) == 0) { bite = 1; }
             var suit = 0;

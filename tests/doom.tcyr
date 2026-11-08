@@ -829,6 +829,13 @@ fn main() {
     # re-aiming every tick; it must be armed on a successful walk.
     assert_gte(thing_movecount_get(0), 0, "a successful walk arms movecount");
     assert_lt(thing_movecount_get(0), 16, "... bounded by p_random_range(16)");
+    # A step along an existing commitment must not re-roll it, or it never counts down.
+    thing_movecount_set(0, 7);
+    assert_eq(chase_try_walk(0, DI_SOUTH), 1, "a committed step moves");
+    assert_eq(thing_movecount_get(0), 7, "... and leaves the commitment alone");
+    thing_movecount_set(0, 99);
+    assert_eq(chase_try_commit(0, DI_SOUTH), 1, "a newly chosen direction moves");
+    assert_lt(thing_movecount_get(0), 16, "... and rolls a new commitment");
 
     test_group("combat: melee wind-up (F-G1 regression)");
     # ============================================================
@@ -1528,6 +1535,54 @@ fn main() {
     fin_font = ff_save;
 
     # ============================================================
+    test_group("v0.36.2 audit: post walk, panel size, texture limits, tty escapes");
+    # ============================================================
+    var pp = alloc(32);
+    store8(pp, 10); store8(pp + 1, 3);                 # post: rows 10..12
+    store8(pp + 7, 13); store8(pp + 8, 2);             # post: rows 13..14
+    store8(pp + 14, 255);                              # end of column
+    assert_eq(patch_post_len(pp, pp + 32, 0), 3, "a post reads its length");
+    assert_eq(patch_post_len(pp + 7, pp + 32, 13), 2, "a post starting at the last end is fine");
+    assert_eq(patch_post_len(pp + 7, pp + 32, 14), 0 - 1, "an overlapping post ends the column");
+    assert_eq(patch_post_len(pp + 14, pp + 32, 0), 0 - 1, "255 ends the column");
+    assert_eq(patch_post_len(pp, pp + 5, 0), 0 - 1, "a post past the lump ends the column");
+    assert_eq(framebuf_panel_fits(320, 200), 1, "a 320x200 panel fits");
+    assert_eq(framebuf_panel_fits(1920, 1080), 1, "a large panel fits");
+    assert_eq(framebuf_panel_fits(319, 200), 0, "a narrower panel is refused");
+    assert_eq(framebuf_panel_fits(320, 199), 0, "a shorter panel is refused");
+    assert_eq(tex_name_key("AX") != tex_name_key("B9"), 1, "AX and B9 are different textures");
+    assert_eq(tex_name_key("ax"), tex_name_key("AX"), "names compare case-blind");
+    var tdef = alloc(32);
+    store8(tdef + 20, 0xFF); store8(tdef + 21, 0xFF);
+    assert_eq(tex_patch_refs(tdef), 256, "65535 patch refs are capped");
+    store8(tdef + 20, 64); store8(tdef + 21, 0);
+    assert_eq(tex_patch_refs(tdef), 64, "a real count is untouched");
+    assert_eq(DOOR_MAX >= MAP_MAX_SECTORS, 1, "a thinker slot for every sector");
+    if (key_state == 0) { key_state = alloc(256 * 8); }
+    var esc = alloc(16);
+    store8(esc, 27);
+    input_quit = 0;
+    assert_eq(input_tty_escape(esc, 0, 1), 1, "a lone ESC is one byte");
+    assert_eq(input_quit, 1, "and it is a real Escape press");
+    input_quit = 0;
+    store8(esc + 1, 79); store8(esc + 2, 80);          # ESC O P: F1
+    assert_eq(input_tty_escape(esc, 0, 3), 3, "SS3 is three bytes");
+    assert_eq(input_quit, 0, "F1 does not quit");
+    store8(esc + 1, 120);                              # ESC x: Alt+x
+    assert_eq(input_tty_escape(esc, 0, 2), 2, "Alt+key is two bytes");
+    assert_eq(input_quit, 0, "Alt+key does not quit");
+    store8(esc + 1, 91); store8(esc + 2, 65);          # ESC [ A
+    store64(key_state + KEY_UP * 8, 0);
+    assert_eq(input_tty_escape(esc, 0, 3), 3, "CSI is three bytes");
+    assert_eq(load64(key_state + KEY_UP * 8), 1, "ESC [ A is the up arrow");
+    store64(key_state + KEY_UP * 8, 0);
+    store8(esc + 1, 79); store8(esc + 2, 65);          # ESC O A
+    input_tty_escape(esc, 0, 3);
+    assert_eq(load64(key_state + KEY_UP * 8), 1, "ESC O A is the up arrow too");
+    store64(key_state + KEY_UP * 8, 0);
+    assert_eq(input_quit, 0, "no sequence here quit");
+
+    # ============================================================
     # WAD tests require DOOM1.WAD — skip if not available
     # ============================================================
 
@@ -1638,7 +1693,23 @@ fn main() {
         # BLOCKED, the real walk must also say blocked. (The converse is not
         # required — REJECT is allowed to say "maybe" and be wrong that way,
         # which just costs a scan.)
+        # BM-1: an empty BLOCKMAP must select the linedef scan, not keep the old grid.
+        assert_eq(map_load("E1M1"), 0, "E1M1 loads before the BLOCKMAP check");
+        assert_eq(map_validate(), 0, "E1M1 validates");
+        var ss0_count = load64(map_ssectors);
+        store64(map_ssectors, ss0_count + 1);
+        assert_eq(map_validate(), 0 - 1, "subsectors claiming the same seg are rejected");
+        store64(map_ssectors, ss0_count);
+        var bm_buf = map_blockmap;
+        assert_eq(bm_buf != 0, 1, "E1M1 has a BLOCKMAP");
+        var bm_entry = wad_dir + (wad_find_lump("E1M2") + 10) * WAD_DIR_ENTRY_SIZE;
+        var bm_size = load64(bm_entry + 8);
+        store64(bm_entry + 8, 0);
+        assert_eq(map_load("E1M2"), 0, "a map with an empty BLOCKMAP still loads");
+        assert_eq(map_blockmap, 0, "and collision falls back to the linedef scan");
+        store64(bm_entry + 8, bm_size);
         assert_eq(map_load("E1M2"), 0, "E1M2 loads before the REJECT check");
+        assert_eq(map_blockmap, bm_buf, "one BLOCKMAP buffer across map loads");
         var rj_buf = map_reject;
         assert_eq(rj_buf != 0, 1, "E1M2 has a REJECT table");
         assert_eq(map_load("E1M1"), 0, "E1M1 loads for the REJECT check");
@@ -1822,11 +1893,10 @@ fn main() {
         # ============================================================
         test_group("status: name-scratch lump lookup (R-2)");
         # ============================================================
-        # The death-face name "STFDEAD0" is EXACTLY 8 chars; st_name_buf must be 9
-        # bytes so the NUL fits and wad_name_eq's strlen doesn't over-read the
-        # adjacent face_patch_buf (which rejected every lump → blank death face).
+        # The death-face name "STFDEAD0" is EXACTLY 8 chars, so a name buffer needs 9
+        # bytes for its NUL: a shorter one made every lookup miss (blank death face).
         status_init_font();
-        var fnb = st_name_buf();
+        var fnb = alloc(9);
         memcpy(fnb, "STFDEAD0", 8);
         store8(fnb + 8, 0);
         assert(wad_find_lump(fnb) >= 0, "STFDEAD0 death face resolves (R-2)");
@@ -3102,6 +3172,49 @@ fn main() {
         secret_exit_flag = 0;
 
         # ============================================================
+        test_group("sky step: a low sky hides nothing above it (v0.36.2)");
+        # From E1M1's low-sky yard (ceiling 24) facing the step up to the courtyard (216):
+        # the wall beyond stands above the near sky's height. Repainting this pixel as sky
+        # must change it; before the fix it was already sky.
+        assert_eq(map_load("E1M1"), 0, "E1M1 loads for the sky-step check");
+        texture_build_map_caches();
+        view_x = 2360 << 16;
+        view_y = (0 - 3712) << 16;
+        view_angle = 512;
+        render_frame();
+        var sky_step_px = framebuf_get_pixel(134, 20);
+        render_draw_sky_column(134, 20, 20);
+        assert(framebuf_get_pixel(134, 20) != sky_step_px, "the wall beyond the sky step is drawn");
+
+        test_group("v0.36.2 audit: one-row walls, width clamp, one-time buffers");
+        # At E1M5's spawn these columns have a wall exactly one row tall here. It used to
+        # be skipped, leaving a black speck in the middle of the wall.
+        assert_eq(map_load("E1M5"), 0, "E1M5 loads for the one-row wall check");
+        texture_build_map_caches();
+        map_find_player_start();
+        view_x = player_start_x();
+        view_y = player_start_y();
+        view_angle = player_start_angle();
+        render_frame();
+        assert(framebuf_get_pixel(12, 125) != 0, "a one-row wall is drawn");
+        var wlump = alloc(64);
+        store8(wlump, 1);                               # one texture
+        store8(wlump + 4, 8);                           # at offset 8
+        memcpy(wlump + 8, "BIGTEX", 6);
+        store8(wlump + 20, 0xFF); store8(wlump + 21, 0xFF);   # width 65535
+        store8(wlump + 22, 16);                         # height 16
+        var wsave = alloc(TEX_ENTRY_SIZE);
+        memcpy(wsave, tex_table, TEX_ENTRY_SIZE);
+        texture_parse_lump(wlump, 64, 0);
+        assert_eq(load64(tex_table + 8), TEX_COMP_W_MAX, "a huge declared width is clamped at parse");
+        memcpy(tex_table, wsave, TEX_ENTRY_SIZE);
+        var lb = wad_lump_buf;
+        wad_alloc();
+        assert_eq(wad_lump_buf, lb, "the lump buffer is allocated once");
+        var pc = pcache;
+        pcache_init();
+        assert_eq(pcache, pc, "the patch cache is allocated once");
+
         test_group("finale: the text fits, the picture is HELP2 (v0.35.8 P4)");
         # ============================================================
         finale_load_font();

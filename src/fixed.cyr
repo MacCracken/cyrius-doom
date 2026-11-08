@@ -25,7 +25,6 @@ enum Angle {
 
 fn fixed_from_int(n): i64 { return n << 16; }
 fn fixed_to_int(f): i64 { return ((f) >>> (16)); }
-fn fixed_round(f): i64 { return ((f + FIXED_HALF) >>> (16)); }
 
 fn fixed_mul(a, b): i64 {
     return ((a * b) >>> (16));

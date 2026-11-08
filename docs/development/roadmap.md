@@ -97,8 +97,6 @@ any overlapping body · **W-6** dead player's extra tick · **P-13** chainsaw li
 hitscan hits barrels · **P-16** kills credited at death, not at animation end · **P-17** rocket collision
 uses the rocket's own floor and radius.
 
-**Consolidate first (from the v0.36.0 closeout; no runtime change, so do these before the new specials copy them again)**: **RF-1** `thing_slot_acquire` + one initialiser + `thing_remove` — `thing_spawn_tfog` / `_missile` / `_fireball` each repeat the freed-slot scan, the append and the field stores · **RF-2** `map_sector_special` / `_tag` and `map_linedef_special` / `_tag` accessors over the raw +24 / +32 / +40 / +48 offsets (`level.cyr` records a shipped bug from exactly this confusion) · **RF-3** `line_other_sector(i, sec)` for the four two-sided neighbour scans in `doors.cyr`.
-
 **AI-1 (found by the v0.35.8 E1M9 probe)**: a chasing monster that loses sight of the player for 100 tics
 **gives up and goes back to idle** (`thing_ai_tick`, the "lost sight?" branch) — vanilla never abandons a
 target. In a 60-second staged probe of E1M9's closet ambush (player in the launcher room, a noise alert each
@@ -137,7 +135,7 @@ v0.35.8 at the v0.35.6 cut — teleporters depended on it — and shipped there.
 **MUSIC-2** MUS percussion (channel 15 is dropped entirely — E1M1's track is drum-driven, so this is the
 high-impact one) · **MUSIC-3** pitch bend + expression/pan controllers · **AUDIO-6** gate the PC-speaker
 beep when `audio_dev != 0` (resolve the `sound.cyr`/`audio.cyr` include-order constraint with a shared flag)
-· **AUDIO-7** the four 0.30.7 cosmetic nits · **AUDIO-8** `audio_load` allocates the raw lump before checking its format and a rejected lump is never cached, so each play of a bad `DS*` lump leaks up to 64 KB (v0.36.0 review).
+· **AUDIO-7** the four 0.30.7 cosmetic nits.
 
 **Gate**: none. Exit: `fuzz_mus` over the new paths + a deterministic PCM dump of E1M1's track.
 
@@ -173,7 +171,9 @@ engine rather than one mid-rewrite: BSP traversal invariants (`bsp_point_on_side
 order) · subsector containment sweep · wall-slide collision parity · blockmap cell-list parity on E1M6 (the
 C3 bounds half shipped in 0.33.8 — only the parity half remains) · visplane budget stress (E1M9 + max
 things, `plane_dropped` stays 0) · **G-13** sector-0 degenerate leaf → −1 plus the caller sweep the
-containment audit produces · **BM-1** a map with an empty BLOCKMAP lump keeps the previous map's grid (memory-safe, wrong collision; v0.36.0 review).
+containment audit produces.
+
+**Left open by the v0.36.2 audit** ([`2026-11-08-code-audit.md`](../audit/2026-11-08-code-audit.md) §4): a weapon pickup re-opens the fire gate (at most one early shot) · the non-monster death countdown in `thing_ai_tick` looks unreachable · back-facing segs are not culled and fully occluded segs still use plane and drawseg slots (measure with the visplane stress above) · `map_alloc`, `music_init` and `input_init` still assume their allocations succeed · BSP recursion depth on the AGNOS stack is unmeasured.
 
 **Gate**: after v0.35.2. Exit: new assert groups per item — this cut's deliverable *is* tests.
 

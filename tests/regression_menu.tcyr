@@ -1,0 +1,96 @@
+# regression_menu.tcyr — ESC backs out of a submenu without quitting the game
+#
+# menu_run tested input_quit before menu_tick. Backends that report key state
+# (Wayland, setu, AGNOS) set input_quit on every poll while ESC is down, so a normal
+# press went back to the main menu on its first tick and quit the game on its second.
+#
+# The main suite stubs the menu out, so this file includes the real menu.cyr and drives
+# menu_tick the way menu_run does: set the input for a tick, tick, ask whether to leave.
+
+include "lib/string.cyr"
+include "lib/alloc.cyr"
+include "lib/vec.cyr"
+include "lib/str.cyr"
+include "lib/fmt.cyr"
+include "lib/io.cyr"
+include "lib/args.cyr"
+include "lib/assert.cyr"
+include "lib/sakshi.cyr"
+include "src/wad.cyr"
+
+enum StubConst { SCREEN_WIDTH = 320; SCREEN_HEIGHT = 200; SFX_VOL_MAX = 15; }
+
+var input_quit = 0;
+var input_flags = 0;
+var input_weapon = 0;
+var sfx_volume = 8;
+var music_volume = 8;
+var game_skill = 3;
+
+fn input_poll(): i64 { return 0; }
+fn input_forward(): i64 { return 0; }
+fn input_backward(): i64 { return 0; }
+fn input_turn_left(): i64 { return 0; }
+fn input_turn_right(): i64 { return 0; }
+fn input_strafe_left(): i64 { return 0; }
+fn input_strafe_right(): i64 { return 0; }
+fn input_use(): i64 { return 0; }
+fn framebuf_clear(c): i64 { return 0; }
+fn framebuf_flip(): i64 { return 0; }
+fn framebuf_pixel(x, y, c): i64 { return 0; }
+fn framebuf_get_pixel(x, y): i64 { return 0; }
+fn framebuf_hline(a, b, y, c): i64 { return 0; }
+fn framebuf_fill_rect(x, y, w, h, c): i64 { return 0; }
+fn tick_begin(): i64 { return 0; }
+fn tick_wait(): i64 { return 0; }
+fn sound_tick(): i64 { return 0; }
+fn audio_tick(): i64 { return 0; }
+fn audio_play_name(n): i64 { return 0; }
+fn st_draw_patch_from_buf(b, x, y, s): i64 { return 0; }
+fn music_set_volume(v): i64 { return 0; }
+
+include "src/menu.cyr"
+
+# One tick with ESC down (1) or up (0). Returns menu_should_exit afterwards.
+fn tick(esc): i64 {
+    input_quit = esc;
+    menu_tick();
+    return menu_should_exit();
+}
+
+fn main() {
+    alloc_init();
+
+    test_group("held ESC backs out of a submenu and stays in the menu");
+    menu_screen = MENU_SKILL;
+    menu_cursor = 0;
+    assert_eq(tick(0), 0, "no key, nothing happens");
+    assert_eq(tick(1), 0, "the press backs out");
+    assert_eq(menu_screen, MENU_MAIN, "to the main menu");
+    assert_eq(tick(1), 0, "still held on the next tick: no quit");
+    assert_eq(tick(1), 0, "and on the one after");
+    assert_eq(menu_screen, MENU_MAIN, "still on the main menu");
+
+    test_group("options, and sound back to options");
+    tick(0);
+    menu_screen = MENU_OPTIONS;
+    assert_eq(tick(1), 0, "ESC leaves options");
+    assert_eq(menu_screen, MENU_MAIN, "for the main menu");
+    assert_eq(tick(1), 0, "held, no quit");
+    tick(0);
+    menu_screen = MENU_SOUND;
+    assert_eq(tick(1), 0, "ESC leaves sound");
+    assert_eq(menu_screen, MENU_OPTIONS, "for options");
+    assert_eq(tick(1), 0, "held, no quit");
+    assert_eq(menu_screen, MENU_OPTIONS, "and no double back-out");
+
+    test_group("a fresh ESC on the main menu still leaves");
+    tick(0);
+    menu_screen = MENU_MAIN;
+    assert_eq(tick(1), 1, "a fresh press quits from the main menu");
+
+    return assert_summary();
+}
+
+var r = main();
+syscall(60, r);

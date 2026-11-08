@@ -30,8 +30,6 @@ var view_z = 0;
 
 enum ViewConst {
     VIEW_HEIGHT = 2686976;
-    VIEW_FOV = 256;
-    VIEW_FOV_HALF = 128;
     PROJ_DIST = 10485760;
     HALF_WIDTH = 160;
     HALF_HEIGHT = 100;
@@ -150,7 +148,6 @@ var weapon_flash_name_buf = 0;
 
 enum WeaponConst {
     WEAPON_BUF_SIZE = 16384;
-    FIRE_TICKS = 2;
     BOB_RANGE = 4;
 }
 
@@ -302,12 +299,12 @@ fn render_blit_psprite(buf, psz, light): i64 {
         var post = buf + col_off;
 
         var safety = 0;
+        var top_min = 0;
         while (safety < PATCH_POST_MAX) {
-            if (post + 1 >= pend) { break; }
+            var length = patch_post_len(post, pend, top_min);
+            if (length < 0) { break; }
             var td = load8(post);
-            if (td == 255) { break; }
-            var length = load8(post + 1);
-            if (post + 4 + length > pend) { break; }
+            top_min = td + length;
             var pixels = post + 3;
 
             var post_top = sy + td;
@@ -823,6 +820,11 @@ fn render_draw_tex_column(x, y1, y2, tex_idx, tex_col, tex_y_start, tex_y_step, 
 }
 
 fn render_init_clip(): i64 {
+    # Allocated here rather than on first use, so a WAD that fills the heap with
+    # composited textures cannot make a mid-frame allocation fail.
+    if (masked_segs == 0) { masked_segs = alloc(MASKED_MAX * MASKED_ENTRY_SIZE); }
+    if (rc_band_top == 0) { rc_band_top = alloc(2560); rc_band_bot = alloc(2560); }
+    if (rc_subj == 0) { rc_subj = alloc(2560); }
     if (clip_top == 0) {
         clip_top = alloc(2560);
         clip_bottom = alloc(2560);
@@ -1096,7 +1098,6 @@ fn render_seg(seg_idx): i64 {
     if (lightnum >= LIGHTLEVELS) { lightnum = LIGHTLEVELS - 1; }
 
     # Look up sidedef textures
-    var sd_base = map_sidedefs + sidedef_idx * MAP_SIDEDEF_SIZE;
     # OP-7: indices frozen at map load (texture_build_map_caches) — these used to
     # be three name-hash + linear-scan lookups per seg per frame. This is also
     # what makes the SLADRIP wall animation visible: a by-name lookup followed
@@ -1271,6 +1272,7 @@ fn render_seg(seg_idx): i64 {
     var d_open_top = (ceil_h << 16) - eye_h;
     var d_bceil = (back_ceil_h << 16) - eye_h;
     if (d_bceil < d_open_top) { d_open_top = d_bceil; }
+    if (is_sky == 1 && back_is_sky == 1) { d_open_top = d_bceil; }   # as pn_ceil below
     var d_open_bot = (floor_h << 16) - eye_h;
     var d_bfloor = (back_floor_h << 16) - eye_h;
     if (d_bfloor > d_open_bot) { d_open_bot = d_bfloor; }
@@ -1296,6 +1298,10 @@ fn render_seg(seg_idx): i64 {
     var pn_floor = fixed_mul((floor_h << 16) - eye_h, PROJ_DIST);
     var pn_bceil = fixed_mul((back_ceil_h << 16) - eye_h, PROJ_DIST);
     var pn_bfloor = fixed_mul((back_floor_h << 16) - eye_h, PROJ_DIST);
+    # Two sky ceilings: the line between them is open sky, so the portal's top is the
+    # back ceiling whichever is higher. A low sky used to hide everything above its own
+    # height in the sectors beyond it, and to paint that band as sky.
+    if (is_sky == 1 && back_is_sky == 1) { pn_ceil = pn_bceil; }
 
     # TX-3: anchor texture-V at the VIEW CENTRE (vanilla dc_texturemid) instead
     # of the wall-top row.
@@ -1474,36 +1480,24 @@ fn render_seg(seg_idx): i64 {
 
             # Upper wall
             if (back_ceil_screen > ceil_screen) {
-                if (is_sky == 1 && back_is_sky == 1) {
-                    # Sky-to-sky portal (RC-W1): vanilla draws NO upper wall
-                    # between two F_SKY1 ceilings (R_StoreWallRange treats
-                    # worldhigh = worldtop) — the band between the two sky
-                    # heights is open sky. Drawing it painted a screen-filling
-                    # texture band across the E1M1 courtyard. v_ref = ct keeps
-                    # this band continuous with the ceiling sky above it.
-                    var sky_y2 = upper_y2;
-                    if (sky_y2 > SCREEN_HEIGHT - 1) { sky_y2 = SCREEN_HEIGHT - 1; }
-                    render_draw_sky_column(col, ceil_screen, sky_y2);
-                } else {
-                    if (upper_tex >= 0) {
-                        var uh = back_ceil_screen - ceil_screen;
-                        if (uh > 0) {
-                            # NATIVE vertical scale (F06 / RC-W3): 1 texel = 1 world
-                            # unit, so the step is FRACUNIT/col_scale (= vanilla
-                            # dc_iscale, depth-only), NOT tex_h/section-height which
-                            # squashed the whole texture into the section. Tall walls
-                            # now tile (render_draw_tex_column %th), short walls clip.
-                            # TX-3: V from the per-seg world anchor (upper_vmid,
-                            # which already carries the DONTPEGTOP choice) rather
-                            # than pinned to the floored ceil_screen row.
-                            var upper_ystart = upper_vmid + (ceil_screen - HALF_HEIGHT) * ty_step;
-                            render_draw_tex_column(col, ceil_screen, upper_y2,
-                              upper_tex, tex_u, upper_ystart, ty_step, col_light);
-                        }
-                    } else {
-                        framebuf_vline(col, ceil_screen, upper_y2,
-                          render_shade(wall_base_pal, col_light));
+                if (upper_tex >= 0) {
+                    var uh = back_ceil_screen - ceil_screen;
+                    if (uh > 0) {
+                        # NATIVE vertical scale (F06 / RC-W3): 1 texel = 1 world
+                        # unit, so the step is FRACUNIT/col_scale (= vanilla
+                        # dc_iscale, depth-only), NOT tex_h/section-height which
+                        # squashed the whole texture into the section. Tall walls
+                        # now tile (render_draw_tex_column %th), short walls clip.
+                        # TX-3: V from the per-seg world anchor (upper_vmid,
+                        # which already carries the DONTPEGTOP choice) rather
+                        # than pinned to the floored ceil_screen row.
+                        var upper_ystart = upper_vmid + (ceil_screen - HALF_HEIGHT) * ty_step;
+                        render_draw_tex_column(col, ceil_screen, upper_y2,
+                          upper_tex, tex_u, upper_ystart, ty_step, col_light);
                     }
+                } else {
+                    framebuf_vline(col, ceil_screen, upper_y2,
+                      render_shade(wall_base_pal, col_light));
                 }
             }
 
@@ -1557,7 +1551,7 @@ fn render_seg(seg_idx): i64 {
             # One-sided: mid texture
             if (mid_tex >= 0) {
                 var wh = floor_screen - ceil_screen;
-                if (wh > 0) {
+                if (wh >= 0) {     # the range is inclusive: 0 is a one-row wall
                     # TX-3: V from the per-seg world anchor (mid_vmid already
                     # carries the F06 DONTPEGBOTTOM floor-anchor choice) rather
                     # than pinned to the floored ceil_screen row.

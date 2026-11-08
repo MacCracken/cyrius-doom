@@ -185,6 +185,15 @@ fn framebuf_init(): i64 {
     if (fb_bpp  <= 0) { fb_bpp  = 32; }
     if (fb_pitch < fb_xres * (fb_bpp / 8)) { fb_pitch = fb_xres * (fb_bpp / 8); }
 
+    # The blit always writes all 200 rows of 320 pixels, so a smaller panel would
+    # overrun fb_buf. Run without it, as when /dev/fb0 cannot be opened.
+    if (framebuf_panel_fits(fb_xres, fb_yres) == 0) {
+        sakshi_warn("framebuffer is smaller than 320x200 - not used", 46);
+        file_close(fb_fd);
+        fb_fd = -1;
+        return 0;
+    }
+
     # Largest integer scale that fits both axes (>= 1).
     var sx = fb_xres / SCREEN_WIDTH;
     var sy = fb_yres / SCREEN_HEIGHT;
@@ -201,6 +210,13 @@ fn framebuf_init(): i64 {
     fb_buf = alloc(fb_pitch * fb_yres);
     memset(fb_buf, 0, fb_pitch * fb_yres);
     return 0;
+}
+
+# 1 when a panel of xres x yres can hold the whole 320x200 frame.
+fn framebuf_panel_fits(xres, yres): i64 {
+    if (xres < SCREEN_WIDTH) { return 0; }
+    if (yres < SCREEN_HEIGHT) { return 0; }
+    return 1;
 }
 
 # OP-10: palette -> XRGB8888 lookup table. All three present paths (fb0, agnos

@@ -57,7 +57,6 @@ var wl_verbose = 0;        # 1 = print globals (the --wayland-probe path); 0 = q
 # bound-global registry names + the bound object ids
 var wl_reg_id = 0;
 var wl_gn_comp = 0; var wl_gn_shm = 0; var wl_gn_xdg = 0; var wl_gn_seat = 0;
-var wl_gv_seat = 0;
 var wl_comp_oid = 0; var wl_shm_oid = 0; var wl_xdg_oid = 0; var wl_seat_oid = 0;
 var wl_surf_oid = 0; var wl_xsurf_oid = 0; var wl_top_oid = 0;
 var wl_kbd_oid = 0; var wl_frame_oid = 0;
@@ -327,7 +326,7 @@ fn wl__handle(o): i64 {
             if (wl__streq(sp, L - 1, "wl_compositor")) { wl_gn_comp = nm; }
             if (wl__streq(sp, L - 1, "wl_shm")) { wl_gn_shm = nm; }
             if (wl__streq(sp, L - 1, "xdg_wm_base")) { wl_gn_xdg = nm; }
-            if (wl__streq(sp, L - 1, "wl_seat")) { wl_gn_seat = nm; wl_gv_seat = ver; }
+            if (wl__streq(sp, L - 1, "wl_seat")) { wl_gn_seat = nm; }
             if (wl_verbose == 1) {
                 wl__emit_str("  "); wl__emit(sp, L - 1);
                 wl__emit_str(" v"); wl__emit_uint(ver); wl__emit_str("\n");

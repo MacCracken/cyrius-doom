@@ -128,12 +128,15 @@ fn ref_column(buf, sz, pend, col, scr_x, y0, hud, light): i64 {
     if (col_off >= sz) { return 0; }
     var post = buf + col_off;
     var safety = 0;
+    var top_min = 0;
     while (safety < PATCH_POST_MAX) {
         if (post + 1 >= pend) { return 0; }
         var td = load8(post);
         if (td == 255) { return 0; }
+        if (td < top_min) { return 0; }   # same rule as patch_post_len
         var length = load8(post + 1);
         if (post + 4 + length > pend) { return 0; }
+        top_min = td + length;
         var pixels = post + 3;
         for (var r = 0; r < length; r += 1) {
             var scr_y = y0 + td + r;

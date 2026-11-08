@@ -578,14 +578,8 @@ fn thing_check_sight(mx, my, tx, ty): i64 {
             if (ls < 0) { continue; }
             var fs = map_sidedef_sector(rs);
             var bs = map_sidedef_sector(ls);
-            var open_low = map_sector_floorh(fs);
-            var bfh = map_sector_floorh(bs);
-            if (bfh > open_low) { open_low = bfh; }
-            var open_high = map_sector_ceilh(fs);
-            var bch = map_sector_ceilh(bs);
-            if (bch < open_high) { open_high = bch; }
             # Open portal: sight passes; skip the intersection test.
-            if (open_high > open_low) { continue; }
+            if (map_sectors_open(fs, bs) == 1) { continue; }
         }
 
         var v1 = map_linedef_v1(i);
@@ -751,15 +745,22 @@ fn chase_try_walk(idx, d): i64 {
     thing_set_x(idx, nx);
     thing_set_y(idx, ny);
     thing_update_z(idx);          # v0.35.4: z follows the mover onto a new floor
-    # Commit to this direction for a randomised interval, as vanilla does.
     thing_movedir_set(idx, d);
-    thing_movecount_set(idx, p_random_range(16));
     # Face the direction actually being walked, which is what the sprite and
     # other monsters' ai_in_front FOV gate both read.
     thing_set_angle(idx, (d * 128) & ANG_MASK);
     # v0.35.8 (TELE-1): the step may have crossed a teleport line. Last, so the
     # landing's angle is the one that sticks.
     monster_cross_teleports(idx, cx, cy, nx, ny);
+    return 1;
+}
+
+# A step in a NEWLY chosen direction: commit to it for a randomised interval, as
+# vanilla's P_TryWalk does. Steps along an existing commitment go through chase_try_walk
+# alone, so the interval counts down instead of being re-rolled on every step.
+fn chase_try_commit(idx, d): i64 {
+    if (chase_try_walk(idx, d) == 0) { return 0; }
+    thing_movecount_set(idx, p_random_range(16));
     return 1;
 }
 
@@ -791,7 +792,7 @@ fn chase_new_dir(idx, px, py): i64 {
             if (deltax > 0) { diag = DI_NORTHEAST; } else { diag = DI_NORTHWEST; }
         }
         if (diag != turnaround) {
-            if (chase_try_walk(idx, diag) == 1) { return 1; }
+            if (chase_try_commit(idx, diag) == 1) { return 1; }
         }
     }
 
@@ -805,26 +806,26 @@ fn chase_new_dir(idx, px, py): i64 {
     if (d1 == turnaround) { d1 = DI_NODIR; }
     if (d2 == turnaround) { d2 = DI_NODIR; }
 
-    if (d1 != DI_NODIR) { if (chase_try_walk(idx, d1) == 1) { return 1; } }
-    if (d2 != DI_NODIR) { if (chase_try_walk(idx, d2) == 1) { return 1; } }
+    if (d1 != DI_NODIR) { if (chase_try_commit(idx, d1) == 1) { return 1; } }
+    if (d2 != DI_NODIR) { if (chase_try_commit(idx, d2) == 1) { return 1; } }
 
     # No direct path — keep going the old way if that still works.
-    if (olddir != DI_NODIR) { if (chase_try_walk(idx, olddir) == 1) { return 1; } }
+    if (olddir != DI_NODIR) { if (chase_try_commit(idx, olddir) == 1) { return 1; } }
 
     # Sweep all eight, in a randomly-chosen rotation so a stuck monster does not
     # bias one way forever.
     if ((p_random() & 1) != 0) {
         for (var t1 = DI_EAST; t1 <= DI_SOUTHEAST; t1 += 1) {
-            if (t1 != turnaround) { if (chase_try_walk(idx, t1) == 1) { return 1; } }
+            if (t1 != turnaround) { if (chase_try_commit(idx, t1) == 1) { return 1; } }
         }
     } else {
         for (var t2 = DI_SOUTHEAST; t2 >= DI_EAST; t2 -= 1) {
-            if (t2 != turnaround) { if (chase_try_walk(idx, t2) == 1) { return 1; } }
+            if (t2 != turnaround) { if (chase_try_commit(idx, t2) == 1) { return 1; } }
         }
     }
 
     # Last resort: reverse.
-    if (turnaround != DI_NODIR) { if (chase_try_walk(idx, turnaround) == 1) { return 1; } }
+    if (turnaround != DI_NODIR) { if (chase_try_commit(idx, turnaround) == 1) { return 1; } }
 
     thing_movedir_set(idx, DI_NODIR);
     return 0;
@@ -1044,19 +1045,6 @@ fn ai_in_front(ang, mx, my, tx, ty): i64 {
     if (d < 0) { d += ANG360; }
     if (d > ANG180) { d = ANG360 - d; }
     if (d <= ANG90) { return 1; }
-    return 0;
-}
-
-fn ai_stats_reset(): i64 {
-    ai_stat_reject_skips = 0;
-    ai_stat_fov_rejects = 0;
-    ai_stat_wakes = 0;
-    ai_stat_chases = 0;
-    ai_stat_melee = 0;
-    ai_stat_ranged = 0;
-    ai_stat_sight_calls = 0;
-    ai_stat_sight_true = 0;
-    ai_stat_move_blocked = 0;
     return 0;
 }
 
@@ -1631,49 +1619,72 @@ fn barrel_tick(idx): i64 {
     thing_set_tics(idx, t);
     if (t == BARREL_EXPLODE_AT) { thing_explode(idx, 128 << 16, 128); }
     if (t <= 0) {
-        thing_set_flags(idx, 0);           # gone, as vanilla removes it after BEXP E
-        thing_set_state(idx, STATE_NONE);
+        thing_remove(idx);                 # gone, as vanilla removes it after BEXP E
         return 0;
     }
     thing_set_frame(idx, barrel_bexp_frame(t));
     return 0;
 }
 
-# v0.35.8 (TELE-1) — spawn a teleport fog at (x, y, z). Reuses a finished fog's
-# slot when there is one — the rule the rocket uses for spent projectiles — else
-# appends; with THING_MAX reached the fog is skipped, it is only cosmetic.
-fn thing_spawn_tfog(x, y, z): i64 {
-    var idx = -1;
+# RF-1: the slot a spawned thing goes in. A finished thing of the same kind is reused
+# when there is one, else the table grows; -1 with THING_MAX reached. `ttype` names
+# the kind, and a negative `ttype` means any finished projectile.
+fn thing_slot_acquire(ttype): i64 {
     for (var i = 0; i < thing_count; i += 1) {
-        if (thing_type(i) == TTYPE_TFOG) {
-            if ((thing_flags(i) & TF_ACTIVE) == 0) { idx = i; break; }
+        if ((thing_flags(i) & TF_ACTIVE) == 0) {
+            if (ttype < 0) {
+                if (thing_category(i) == CAT_PROJECTILE) { return i; }
+            } else {
+                if (thing_type(i) == ttype) { return i; }
+            }
         }
     }
-    if (idx < 0) {
-        if (thing_count >= THING_MAX) { return -1; }
-        idx = thing_count;
-        thing_count += 1;
-    }
+    if (thing_count >= THING_MAX) { return -1; }
+    thing_count += 1;
+    return thing_count - 1;
+}
+
+# RF-1: write every field of a spawned thing. Any new thing field, or anything else a
+# recycled slot must not inherit, belongs here. The frame and the +112 word start at 0.
+fn thing_fill(idx, x, y, z, ang, ttype, state, cat, vx, vy, radius, height, tics, flags, aux): i64 {
     var base = things + idx * THING_SIZE;
     store64(base,       x);
     store64(base + 8,   y);
     store64(base + 16,  z);
-    store64(base + 24,  0);
-    store64(base + 32,  TTYPE_TFOG);
-    store64(base + 40,  STATE_DIE);
+    store64(base + 24,  ang);
+    store64(base + 32,  ttype);
+    store64(base + 40,  state);
     store64(base + 48,  0);
-    store64(base + 56,  CAT_DECOR);
-    store64(base + 64,  0);
-    store64(base + 72,  0);
-    store64(base + 80,  20 << 16);
-    store64(base + 88,  56 << 16);
-    store64(base + 96,  TFOG_TICS);
-    store64(base + 104, TF_ACTIVE);
+    store64(base + 56,  cat);
+    store64(base + 64,  vx);
+    store64(base + 72,  vy);
+    store64(base + 80,  radius);
+    store64(base + 88,  height);
+    store64(base + 96,  tics);
+    store64(base + 104, flags);
     store64(base + 112, 0);
-    store64(base + 120, 0);
-    # PRE-1: raw position stores, possibly into a recycled slot.
+    store64(base + 120, aux);
+    # PRE-1: the position stores are raw and the slot may be recycled, so the cache
+    # would otherwise still hold the previous occupant's sector.
     thing_invalidate_sector(idx);
     return idx;
+}
+
+# RF-1: take a thing out of play. Its slot stays reusable by thing_slot_acquire.
+fn thing_remove(idx): i64 {
+    thing_set_flags(idx, 0);
+    thing_set_state(idx, STATE_NONE);
+    return 0;
+}
+
+# v0.35.8 (TELE-1) — spawn a teleport fog at (x, y, z). Reuses a finished fog's
+# slot when there is one, as the rocket does for spent projectiles; with THING_MAX
+# reached the fog is skipped, since it is only cosmetic.
+fn thing_spawn_tfog(x, y, z): i64 {
+    var idx = thing_slot_acquire(TTYPE_TFOG);
+    if (idx < 0) { return -1; }
+    return thing_fill(idx, x, y, z, 0, TTYPE_TFOG, STATE_DIE, CAT_DECOR,
+                      0, 0, 20 << 16, 56 << 16, TFOG_TICS, TF_ACTIVE, 0);
 }
 
 # One tic of a teleport fog: A..J, TFOG_FRAME_TICS each, then gone.
@@ -1681,8 +1692,7 @@ fn tfog_tick(idx): i64 {
     var t = thing_tics(idx) - 1;
     thing_set_tics(idx, t);
     if (t <= 0) {
-        thing_set_flags(idx, 0);
-        thing_set_state(idx, STATE_NONE);
+        thing_remove(idx);
         return 0;
     }
     thing_set_frame(idx, (TFOG_TICS - t) / TFOG_FRAME_TICS);
@@ -1773,17 +1783,8 @@ enum MissileConst {
 # Spawn a rocket from (px,py) heading `ang`. Reuses a spent projectile slot
 # when one is free, else appends (bounded by THING_MAX). Returns the slot.
 fn thing_spawn_missile(px, py, ang): i64 {
-    var idx = -1;
-    for (var i = 0; i < thing_count; i += 1) {
-        if (thing_category(i) == CAT_PROJECTILE) {
-            if ((thing_flags(i) & TF_ACTIVE) == 0) { idx = i; break; }
-        }
-    }
-    if (idx < 0) {
-        if (thing_count >= THING_MAX) { return -1; }
-        idx = thing_count;
-        thing_count += 1;
-    }
+    var idx = thing_slot_acquire(-1);
+    if (idx < 0) { return -1; }
 
     var ca = fixed_cos(ang);
     var sa = fixed_sin(ang);
@@ -1798,28 +1799,11 @@ fn thing_spawn_missile(px, py, ang): i64 {
         spx = px;
         spy = py;
     }
-    var base = things + idx * THING_SIZE;
-    store64(base,       spx);
-    store64(base + 8,   spy);
-    store64(base + 16,  player_z + MISSILE_LAUNCH_Z);   # v0.35.4: real launch z (was 0 + sprite's raw +=32)
-    store64(base + 24,  ang);
-    store64(base + 32,  TTYPE_ROCKET_MISSILE);
-    store64(base + 40,  STATE_SPAWN);
-    store64(base + 48,  0);
-    store64(base + 56,  CAT_PROJECTILE);
-    store64(base + 64,  fixed_mul(ca, MISSILE_SPEED));   # velocity x
-    store64(base + 72,  fixed_mul(sa, MISSILE_SPEED));   # velocity y
-    store64(base + 80,  11 << 16);                       # radius
-    store64(base + 88,  8 << 16);                        # height
-    store64(base + 96,  MISSILE_LIFETIME);
-    store64(base + 104, TF_ACTIVE | TF_MISSILE);
-    store64(base + 112, 0);
-    store64(base + 120, 0 - 1);   # owner: the player
-    # PRE-1: the position stores above are raw, and this slot is RECYCLED from a
-    # spent projectile (the caller scans for a cleared TF_ACTIVE), so the cache
-    # would otherwise still hold the previous rocket's sector.
-    thing_invalidate_sector(idx);
-    return idx;
+    return thing_fill(idx, spx, spy, player_z + MISSILE_LAUNCH_Z, ang,   # v0.35.4: real launch z
+                      TTYPE_ROCKET_MISSILE, STATE_SPAWN, CAT_PROJECTILE,
+                      fixed_mul(ca, MISSILE_SPEED), fixed_mul(sa, MISSILE_SPEED),
+                      11 << 16, 8 << 16, MISSILE_LIFETIME,               # radius, height, fuse
+                      TF_ACTIVE | TF_MISSILE, 0 - 1);                    # owner: the player
 }
 
 # ================================================================
@@ -1866,17 +1850,8 @@ fn thing_hitscan_player(idx): i64 {
 # the rocket's slot pool; owner recorded in aux so the ball doesn't detonate
 # on the imp that threw it.
 fn thing_spawn_fireball(owner): i64 {
-    var idx = -1;
-    for (var i = 0; i < thing_count; i += 1) {
-        if (thing_category(i) == CAT_PROJECTILE) {
-            if ((thing_flags(i) & TF_ACTIVE) == 0) { idx = i; break; }
-        }
-    }
-    if (idx < 0) {
-        if (thing_count >= THING_MAX) { return -1; }
-        idx = thing_count;
-        thing_count += 1;
-    }
+    var idx = thing_slot_acquire(-1);
+    if (idx < 0) { return -1; }
 
     var tx = thing_x(owner);
     var ty = thing_y(owner);
@@ -1886,27 +1861,13 @@ fn thing_spawn_fireball(owner): i64 {
     var btype = TTYPE_IMP_FIREBALL;
     if (thing_type(owner) == TTYPE_CACODEMON) { btype = TTYPE_CACO_FIREBALL; }
 
-    var base = things + idx * THING_SIZE;
-    store64(base,       tx + fixed_mul(ca, MISSILE_SPAWN_OFFSET));
-    store64(base + 8,   ty + fixed_mul(sa, MISSILE_SPAWN_OFFSET));
-    # v0.35.4: read the OWNER's z before this recycled slot is overwritten.
-    store64(base + 16,  thing_z(owner) + MISSILE_LAUNCH_Z);
-    store64(base + 24,  ang);
-    store64(base + 32,  btype);
-    store64(base + 40,  STATE_SPAWN);
-    store64(base + 48,  0);
-    store64(base + 56,  CAT_PROJECTILE);
-    store64(base + 64,  fixed_mul(ca, FIREBALL_SPEED));
-    store64(base + 72,  fixed_mul(sa, FIREBALL_SPEED));
-    store64(base + 80,  6 << 16);
-    store64(base + 88,  8 << 16);
-    store64(base + 96,  MISSILE_LIFETIME * 2);   # slower ball, longer fuse
-    store64(base + 104, TF_ACTIVE | TF_MISSILE);
-    store64(base + 112, 0);
-    store64(base + 120, owner);
-    # PRE-1: raw position stores into a recycled projectile slot — same reason as
-    # thing_spawn_missile above.
-    thing_invalidate_sector(idx);
+    thing_fill(idx, tx + fixed_mul(ca, MISSILE_SPAWN_OFFSET),
+               ty + fixed_mul(sa, MISSILE_SPAWN_OFFSET),
+               thing_z(owner) + MISSILE_LAUNCH_Z, ang,            # v0.35.4: the owner's z
+               btype, STATE_SPAWN, CAT_PROJECTILE,
+               fixed_mul(ca, FIREBALL_SPEED), fixed_mul(sa, FIREBALL_SPEED),
+               6 << 16, 8 << 16, MISSILE_LIFETIME * 2,            # slower ball, longer fuse
+               TF_ACTIVE | TF_MISSILE, owner);
     audio_play_at("DSFIRSHT", tx, ty);
     return idx;
 }
@@ -1926,8 +1887,7 @@ fn thing_ranged_release(idx): i64 {
 # Detonate a missile: splash damage, then free the slot for reuse.
 fn thing_missile_explode(idx): i64 {
     thing_explode(idx, ROCKET_SPLASH_RADIUS, ROCKET_SPLASH_DMG);
-    thing_set_flags(idx, 0);
-    thing_set_state(idx, STATE_NONE);
+    thing_remove(idx);
     return 0;
 }
 
@@ -1940,8 +1900,7 @@ fn thing_fireball_damage(btype): i64 {
 
 # Deactivate a monster fireball without splash (vanilla balls just puff out).
 fn thing_fireball_out(idx): i64 {
-    thing_set_flags(idx, 0);
-    thing_set_state(idx, STATE_NONE);
+    thing_remove(idx);
     return 0;
 }
 
@@ -2132,13 +2091,7 @@ fn things_noise_alert(sx, sy): i64 {
             if (other < 0) { continue; }
             if (other >= map_num_sectors) { continue; }
             # Closed portal (shut door / lift) blocks sound.
-            var open_low = map_sector_floorh(fs);
-            var bfh = map_sector_floorh(bs);
-            if (bfh > open_low) { open_low = bfh; }
-            var open_high = map_sector_ceilh(fs);
-            var bch = map_sector_ceilh(bs);
-            if (bch < open_high) { open_high = bch; }
-            if (open_high <= open_low) { continue; }
+            if (map_sectors_open(fs, bs) == 0) { continue; }
             var nb = blocks;
             if ((map_linedef_flags(i) & ML_SOUNDBLOCK) != 0) { nb += 1; }
             if (nb >= 2) { continue; }

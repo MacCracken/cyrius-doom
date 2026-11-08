@@ -37,26 +37,7 @@ var st_gnums = 0;       # STGNUM0-9  grey ARMS -- 10 slots, cap ST_CAP_DIGIT, sh
 var st_faces = 0;       # 0-4 STFST{band}0 / 5 STFDEAD0 -- 6 slots, cap ST_CAP_FACE, shade 0
 var st_keys = 0;        # STKEYS0/1/2          -- 3 slots,  cap ST_CAP_DIGIT, shade 0
 var st_percent = 0;     # STTPRCNT             -- 1 [buf,sz] slot ptr, cap ST_CAP_DIGIT
-var st_minus = 0;       # STTMINUS lump index -- resolved but never drawn (pre-existing dead)
-var st_patch_buf = 0;   # retained: backs the now-dead st_draw_patch (prune in cleanup)
-# Shared 8-byte lump-name scratch (RC-G7): the face/ARMS/grey-number draws
-# each alloc'd a fresh name buffer PER FRAME on the never-free bump allocator
-# (~2 KB/s at 35 Hz). Each use fully consumes the buffer before returning,
-# so one lazily-allocated scratch serves them all.
-var st_name_scratch = 0;
-
-fn st_name_buf(): i64 {
-    # 9 bytes, not 8: the face lumps ("STFDEAD0" etc.) are EXACTLY 8 chars, so the
-    # NUL terminator needs a 9th byte. An alloc(8) left the name un-terminated →
-    # wad_name_eq's strlen over-read into the adjacent face_patch_buf (nonzero after
-    # the first draw) → every lump rejected → STFDEAD0 never resolves → blank death
-    # face. Same over-read class as the 0.29.4 PNAMES bug (audit R-2).
-    if (st_name_scratch == 0) { st_name_scratch = alloc(9); }
-    return st_name_scratch;
-}
-
 fn status_init_font(): i64 {
-    st_patch_buf = alloc(16384);
     st_nums = alloc(10 * 16);       # [buf,sz] slots -- 16 B each
     st_ynums = alloc(10 * 16);
     st_gnums = alloc(10 * 16);
@@ -138,16 +119,6 @@ fn status_init_font(): i64 {
     # Percent glyph (health / armor)
     st_cache_slot(st_percent, wad_find_lump("STTPRCNT"), ST_CAP_DIGIT);
 
-    st_minus = wad_find_lump("STTMINUS");
-    return 0;
-}
-
-fn st_draw_patch(lump, px, py): i64 {
-    if (lump < 0) { return 0; }
-    var sz = wad_lump_size(lump);
-    if (sz < 8 || sz > 16384) { return 0; }
-    wad_read_lump_into(lump, st_patch_buf, sz);
-    st_draw_patch_from_buf(st_patch_buf, px, py, sz);
     return 0;
 }
 
@@ -185,12 +156,12 @@ fn st_draw_patch_shaded(buf, px, py, shade, sz): i64 {
         if (col_off >= sz) { continue; }
         var post = buf + col_off;
         var safety = 0;
+        var top_min = 0;
         while (safety < PATCH_POST_MAX) {
-            if (post + 1 >= pend) { break; }
+            var length = patch_post_len(post, pend, top_min);
+            if (length < 0) { break; }
             var td = load8(post);
-            if (td == 255) { break; }
-            var length = load8(post + 1);
-            if (post + 4 + length > pend) { break; }
+            top_min = td + length;
             var pixels = post + 3;
             var post_top = py + td;
             var row_lo = 0;
@@ -275,19 +246,6 @@ fn st_draw_small_num(digit, px, py): i64 {
     return 0;
 }
 
-# Grey (subdued) small number using STGNUM
-fn st_draw_grey_num(digit, px, py): i64 {
-    if (digit < 0) { return 0; }
-    if (digit > 9) { return 0; }
-    var gname = st_name_buf();
-    memcpy(gname, "STGNUM", 6);
-    store8(gname + 6, 48 + digit);
-    store8(gname + 7, 0);
-    var gl = wad_find_lump(gname);
-    if (gl >= 0) { st_draw_patch(gl, px, py); }
-    return 0;
-}
-
 fn st_draw_small_number(num, px, py): i64 {
     if (num < 0) { num = 0; }
     if (num > 999) { num = 999; }
@@ -303,25 +261,6 @@ fn st_draw_small_number(num, px, py): i64 {
     st_draw_small_num(ones, px + 8, py);
     return 0;
 }
-
-# Grey version for ammo totals
-fn st_draw_grey_number(num, px, py): i64 {
-    if (num < 0) { num = 0; }
-    if (num > 999) { num = 999; }
-    var hundreds = num / 100;
-    var tens = (num / 10) % 10;
-    var ones = num % 10;
-    if (hundreds > 0) { st_draw_grey_num(hundreds, px, py); }
-    if (hundreds > 0) {
-        st_draw_grey_num(tens, px + 4, py);
-    } else {
-        if (tens > 0) { st_draw_grey_num(tens, px + 4, py); }
-    }
-    st_draw_grey_num(ones, px + 8, py);
-    return 0;
-}
-
-var face_patch_buf = 0;
 
 fn status_face_color(): i64 {
     if (player_health > 80) { return 0; }

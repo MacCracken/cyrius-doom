@@ -1,0 +1,111 @@
+# regression_audio_load.tcyr — a rejected sound lump must cost nothing (AUDIO-8)
+#
+# audio_load used to allocate the whole lump before checking its header. A rejected
+# lump is never cached, so every later play of it came back and allocated again, up
+# to 64 KB a time on an allocator that never frees.
+#
+# The main suite stubs audio out, so this file includes the real audio.cyr. It builds
+# a small WAD in a memfd: audio_init is not called, because it would open a sound card.
+
+include "lib/string.cyr"
+include "lib/alloc.cyr"
+include "lib/vec.cyr"
+include "lib/str.cyr"
+include "lib/fmt.cyr"
+include "lib/io.cyr"
+include "lib/args.cyr"
+include "lib/assert.cyr"
+include "lib/sakshi.cyr"
+include "vendor/vani-core.cyr"
+include "src/fixed.cyr"
+include "src/tables.cyr"
+include "src/wad.cyr"
+
+# What audio.cyr reads from modules this file does not include.
+var player_x = 0;
+var player_y = 0;
+var player_angle = 0;
+var music_volume = 0;
+fn music_render_sample(): i64 { return 0; }
+
+include "src/audio.cyr"
+
+var build_buf = 0;
+var build_len = 0;
+
+fn put16(p, v): i64 {
+    store8(p, v & 255);
+    store8(p + 1, (v >>> 8) & 255);
+    return 0;
+}
+
+# Append one DMX lump to the image and to the directory. `samples` is the header's
+# claim; `body` is how many sample bytes really follow.
+fn add_sound(idx, name, fmt_word, rate, samples, body): i64 {
+    var at = build_len;
+    var p = build_buf + at;
+    put16(p, fmt_word);
+    put16(p + 2, rate);
+    put16(p + 4, samples & 65535);
+    put16(p + 6, (samples >>> 16) & 65535);
+    for (var i = 0; i < body; i += 1) { store8(p + 8 + i, i & 255); }
+    build_len = at + 8 + body;
+
+    var entry = wad_dir + idx * WAD_DIR_ENTRY_SIZE;
+    var q, ok = wad_name_pack(name);
+    store64(entry, at);
+    store64(entry + 8, 8 + body);
+    store64(entry + 16, q);
+    return 0;
+}
+
+fn rejected_costs_nothing(name, msg): i64 {
+    var before = alloc_used();
+    var r = 0;
+    for (var i = 0; i < 20; i += 1) { r = audio_load(name); }
+    assert_eq(r, 0 - 1, msg);
+    assert_eq(alloc_used(), before, "and twenty plays of it allocate nothing");
+    return 0;
+}
+
+fn main() {
+    alloc_init();
+
+    build_buf = alloc(8192);
+    wad_numlumps = 4;
+    wad_dir_reserve(4);
+    add_sound(0, "DSGOOD", 3, 11025, 64, 64);
+    add_sound(1, "DSBADF", 1, 11025, 64, 64);
+    add_sound(2, "DSEMPTY", 3, 11025, 0, 16);
+    add_sound(3, "DSONE22", 3, 22050, 1, 1);
+
+    wad_fd = syscall(319, "doom-audio-test", 0);    # memfd_create
+    assert_eq(wad_fd >= 0, 1, "memfd for the test WAD");
+    syscall(1, wad_fd, build_buf, build_len);
+
+    snd_cache_lumps = alloc(SND_CACHE_MAX * 8);
+    snd_cache_data = alloc(SND_CACHE_MAX * 8);
+    snd_cache_sizes = alloc(SND_CACHE_MAX * 8);
+    snd_cache_rates = alloc(SND_CACHE_MAX * 8);
+    snd_cache_count = 0;
+
+    test_group("audio_load: a rejected lump allocates nothing (AUDIO-8)");
+    rejected_costs_nothing("DSBADF", "wrong format word is rejected");
+    rejected_costs_nothing("DSEMPTY", "a lump claiming no samples is rejected");
+    rejected_costs_nothing("DSONE22", "a 22 kHz lump decimating to nothing is rejected");
+    assert_eq(snd_cache_count, 0, "no rejected lump reached the cache");
+
+    test_group("audio_load: a good lump still loads");
+    assert_eq(audio_load("DSGOOD"), 0, "the good lump takes slot 0");
+    assert_eq(snd_cache_count, 1, "one lump cached");
+    assert_eq(load64(snd_cache_sizes), 32, "64 samples less the 16 + 16 DMX pad");
+    assert_eq(load8(load64(snd_cache_data)), 16, "the first kept sample is the 17th");
+    var cached = alloc_used();
+    assert_eq(audio_load("DSGOOD"), 0, "a second load hits the cache");
+    assert_eq(alloc_used(), cached, "and allocates nothing");
+
+    return assert_summary();
+}
+
+var r = main();
+syscall(60, r);

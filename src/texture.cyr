@@ -36,10 +36,13 @@ enum TexConst {
     # the height to this bound. DOOM textures top out at 128, so valid content
     # is unaffected.
     TEX_COL_MAX = 256;
-    # OP-2 composite cache (v0.34.4): textures wider than this bypass the
-    # composite (served uncached) so a malformed huge width can't blow up the
-    # one-time build loop / alloc(tw*th). Real DOOM textures top out at 256 wide.
+    # A declared width is clamped to this at parse, so a malformed huge width can't
+    # blow up the OP-2 composite build. Real DOOM textures top out at 256 wide.
     TEX_COMP_W_MAX = 4096;
+    # Patch refs per texture: each one costs a patch lookup per column (DOOM1's most is 64).
+    TEX_PATCH_REFS_MAX = 256;
+    # Total bytes of composited textures; past this, textures are served uncached.
+    TEX_COMP_BYTES_MAX = 67108864;
     # R-9: shared cap on the patch post-walk, used by ALL FOUR decoders
     # (texture / render psprite / sprite / status). They previously used 256 /
     # 128 / 128 / 64 independently, so the same legal column decoded completely
@@ -76,14 +79,16 @@ var flat_names = 0;
 var flat_count = 0;
 
 # Simple 8-char name hash for fast lookup
-fn tex_name_hash(name_ptr): i64 {
+# The up-to-8-byte uppercase name packed into one word: an exact key, where the old
+# h*31+c could give two names the same value.
+fn tex_name_key(name_ptr): i64 {
     var h = 0;
     for (var i = 0; i < 8; i += 1) {
         var c = load8(name_ptr + i);
         if (c == 0) { break; }
         # Uppercase
         if (c >= 97 && c <= 122) { c -= 32; }
-        h = h * 31 + c;
+        h = h | (c << (i * 8));
     }
     return h;
 }
@@ -155,9 +160,13 @@ fn texture_parse_lump(base, size, start): i64 {
         var tex = base + off;
 
         var entry = tex_table + (start + i) * TEX_ENTRY_SIZE;
-        store64(entry, tex_name_hash(tex));
+        store64(entry, tex_name_key(tex));
         var tw = read_le16(tex + 12);
         var th = read_le16(tex + 14);
+        if (tw > TEX_COMP_W_MAX) {
+            sakshi_warn("texture width clamped to TEX_COMP_W_MAX", 39);
+            tw = TEX_COMP_W_MAX;
+        }
         # F06-1: clamp the WAD-declared height HERE, at the single point it is
         # stored, rather than only inside the column decoders. texture_height()
         # returns this field raw, and since TX-3 (v0.34.6) it feeds three V
@@ -202,6 +211,9 @@ fn texture_init(): i64 {
     # Read into a dedicated buffer (not shared lump buf)
     var pn_size = wad_lump_size(pn_idx);
     if (pn_size < 4) { return 0; }             # need at least the 4-byte count
+    # Nothing past PATCH_MAX names is ever used, so a huge directory size must not
+    # commit gigabytes here.
+    if (pn_size > 4 + PATCH_MAX * 8) { pn_size = 4 + PATCH_MAX * 8; }
     var pn_data = alloc(pn_size);
     if (pn_data == 0) { return 0; }
     wad_read_lump_into(pn_idx, pn_data, pn_size);
@@ -221,7 +233,7 @@ fn texture_init(): i64 {
 
     # PNAMES patch names are 8-byte fixed fields, null-padded ONLY when shorter
     # than 8 chars — 161/350 in DOOM1.WAD are exactly 8 chars with NO terminator.
-    # wad_find_lump -> wad_name_eq -> strlen() reads word-at-a-time and over-reads
+    # wad_find_lump -> strlen() reads word-at-a-time and over-reads
     # such a field past byte 8, returns >8, and rejects the name, so patch_lumps[i]
     # = -1 and texture_get_column composites nothing -> the wall renders
     # framebuffer-black (the E1M9 corridor "void" + E1M1 far doorways). Copy each
@@ -328,7 +340,7 @@ fn texture_init(): i64 {
                     if (sz == FLAT_SIZE) {
                         # Store flat name hash
                         var fname = wad_dir + li * WAD_DIR_ENTRY_SIZE + 16;
-                        store64(flat_names + fi * 8, tex_name_hash(fname));
+                        store64(flat_names + fi * 8, tex_name_key(fname));
                         # Load flat data (64x64 raw palette indices)
                         wad_read_lump_into(li, flat_cache + fi * FLAT_SIZE, FLAT_SIZE);
                         fi += 1;
@@ -362,7 +374,7 @@ var pcache = 0;
 var pcache_next = 0;
 
 fn pcache_init(): i64 {
-    pcache = alloc(PCACHE_SLOTS * PCACHE_SLOT_SIZE);
+    if (pcache == 0) { pcache = alloc(PCACHE_SLOTS * PCACHE_SLOT_SIZE); }
     pcache_next = 0;
     for (var i = 0; i < PCACHE_SLOTS; i += 1) {
         store64(pcache + i * PCACHE_SLOT_SIZE, -1);
@@ -397,7 +409,7 @@ fn pcache_data_size(pdata): i64 {
 
 # Find texture index by name (8-char, null-padded)
 fn texture_find(name): i64 {
-    var h = tex_name_hash(name);
+    var h = tex_name_key(name);
     for (var i = 0; i < tex_count; i += 1) {
         if (load64(tex_table + i * TEX_ENTRY_SIZE) == h) {
             return i;
@@ -471,14 +483,15 @@ fn texture_get_column(tex_idx, col, dest): i64 {
     if (th > TEX_COL_MAX) { th = TEX_COL_MAX; }
     if (th <= 0) { return 0; }
     if (tw <= 0) { return 0; }
-    # Malformed-WAD safety valve: a texture wider than any legitimate content
-    # would make the one-time build loop + alloc(tw*th) pathologically large.
-    # Serve those uncached (byte-identical), so tw can never blow up the cache.
-    if (tw > TEX_COMP_W_MAX) { return texture_get_column_uncached(tex_idx, col, dest); }
 
     # First touch (or a freshly-invalidated slot): composite every column once.
     var cd = load64(tex_comp_data + tex_idx * 8);
     if (cd == 0) {
+        # A WAD can declare thousands of maximum-size textures: stop caching before
+        # they eat the heap, and keep serving them column by column.
+        if (tex_comp_bytes + tw * th * 2 > TEX_COMP_BYTES_MAX) {
+            return texture_get_column_uncached(tex_idx, col, dest);
+        }
         cd = alloc(tw * th);
         var cm = alloc(tw * th);
         # alloc failure: fall back to the uncached path, leave the slot empty.
@@ -491,6 +504,7 @@ fn texture_get_column(tex_idx, col, dest): i64 {
         }
         store64(tex_comp_data + tex_idx * 8, cd);
         store64(tex_comp_mask + tex_idx * 8, cm);
+        tex_comp_bytes += tw * th * 2;
     }
 
     # Serve: reproduce uncached's wrap, then two th-byte copies (pixels + mask).
@@ -500,6 +514,15 @@ fn texture_get_column(tex_idx, col, dest): i64 {
     memcpy(dest, cd + col * th, th);
     memcpy(tex_col_mask, load64(tex_comp_mask + tex_idx * 8) + col * th, th);
     return th;
+}
+
+var tex_comp_bytes = 0;
+
+# How many patch refs of a texture definition to composite.
+fn tex_patch_refs(tex_def): i64 {
+    var n = read_le16(tex_def + 20);
+    if (n > TEX_PATCH_REFS_MAX) { n = TEX_PATCH_REFS_MAX; }
+    return n;
 }
 
 # Per-column patch decoder — the original texture_get_column body, now the
@@ -531,7 +554,7 @@ fn texture_get_column_uncached(tex_idx, col, dest): i64 {
 
     # Texture definition: patches start at offset 22
     # Each patch ref: originx(2) originy(2) patch_idx(2) stepdir(2) colormap(2) = 10 bytes
-    var num_patches = read_le16(tex_def + 20);
+    var num_patches = tex_patch_refs(tex_def);
 
     # Clear destination column + fill mask
     if (tex_col_mask == 0) { tex_col_mask = alloc(TEX_COL_MAX); }
@@ -588,14 +611,12 @@ fn texture_get_column_uncached(tex_idx, col, dest): i64 {
         # Read posts: topdelta(1) length(1) pad(1) pixels(length) pad(1)
         # Terminated by topdelta = 0xFF
         var safety = 0;
+        var top_min = 0;
         while (safety < PATCH_POST_MAX) {
-            # +1 so the `load8(post_ptr + 1)` length read below stays in-bounds
-            # too (audit F-S5 — the other patch decoders already use this form).
-            if (post_ptr + 1 >= pdata_end) { break; }
+            var length = patch_post_len(post_ptr, pdata_end, top_min);
+            if (length < 0) { break; }
             var topdelta = load8(post_ptr);
-            if (topdelta == 255) { break; }
-            var length = load8(post_ptr + 1);
-            if (post_ptr + 4 + length > pdata_end) { break; }
+            top_min = topdelta + length;
             # Skip padding byte
             var pixels = post_ptr + 3;
 
@@ -635,19 +656,10 @@ fn texture_init_anim(): i64 {
 
     # Find NUKAGE flats by name hash
     anim_nukage = alloc(24);
-    store64(anim_nukage, flat_find_name("NUKAGE1"));
-    store64(anim_nukage + 8, flat_find_name("NUKAGE2"));
-    store64(anim_nukage + 16, flat_find_name("NUKAGE3"));
+    store64(anim_nukage, flat_find("NUKAGE1"));
+    store64(anim_nukage + 8, flat_find("NUKAGE2"));
+    store64(anim_nukage + 16, flat_find("NUKAGE3"));
     return 0;
-}
-
-# Find flat by exact name string (not hash of raw WAD bytes)
-fn flat_find_name(name): i64 {
-    var h = tex_name_hash(name);
-    for (var i = 0; i < flat_count; i += 1) {
-        if (load64(flat_names + i * 8) == h) { return i; }
-    }
-    return -1;
 }
 
 # Rotate pixel data for a 3-frame animation group
@@ -678,14 +690,10 @@ var anim_tex_buf = 0;
 fn texture_init_wall_anim(): i64 {
     anim_tex_buf = alloc(TEX_ENTRY_SIZE);
     anim_sladrip = alloc(24);
-    store64(anim_sladrip, texture_find_name("SLADRIP1"));
-    store64(anim_sladrip + 8, texture_find_name("SLADRIP2"));
-    store64(anim_sladrip + 16, texture_find_name("SLADRIP3"));
+    store64(anim_sladrip, texture_find("SLADRIP1"));
+    store64(anim_sladrip + 8, texture_find("SLADRIP2"));
+    store64(anim_sladrip + 16, texture_find("SLADRIP3"));
     return 0;
-}
-
-fn texture_find_name(name): i64 {
-    return texture_find(name);
 }
 
 # Rotate wall texture table entries for a 3-frame group
@@ -739,7 +747,7 @@ fn texture_animate(): i64 {
 
 # Find flat index by name hash
 fn flat_find(name): i64 {
-    var h = tex_name_hash(name);
+    var h = tex_name_key(name);
     for (var i = 0; i < flat_count; i += 1) {
         if (load64(flat_names + i * 8) == h) { return i; }
     }

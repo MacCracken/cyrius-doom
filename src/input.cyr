@@ -281,6 +281,33 @@ fn doom_agnos_sc_to_key(sc, ext): i64 {
 }
 #endif
 
+# RF-5: the action flags every key_state backend shares (Linux tty, Wayland, setu):
+# arrows TURN, A/D strafe, Space/E use, F/Ctrl fire. The AGNOS raw-scancode path differs
+# (Shift-to-turn and its tap latch), so it builds its own.
+fn input_flags_from_keys(): i64 {
+    if (load64(key_state + KEY_W * 8) == 1) { input_flags |= INP_FORWARD; }
+    if (load64(key_state + KEY_UP * 8) == 1) { input_flags |= INP_FORWARD; }
+    if (load64(key_state + KEY_S * 8) == 1) { input_flags |= INP_BACKWARD; }
+    if (load64(key_state + KEY_DOWN * 8) == 1) { input_flags |= INP_BACKWARD; }
+    if (load64(key_state + KEY_LEFT * 8) == 1) { input_flags |= INP_TURN_LEFT; }
+    if (load64(key_state + KEY_RIGHT * 8) == 1) { input_flags |= INP_TURN_RIGHT; }
+    if (load64(key_state + KEY_A * 8) == 1) { input_flags |= INP_STRAFE_LEFT; }
+    if (load64(key_state + KEY_D * 8) == 1) { input_flags |= INP_STRAFE_RIGHT; }
+    if (load64(key_state + KEY_SPACE * 8) == 1) { input_flags |= INP_USE; }
+    if (load64(key_state + KEY_E * 8) == 1) { input_flags |= INP_USE; }
+    if (load64(key_state + KEY_CTRL * 8) == 1) { input_flags |= INP_FIRE; }
+    if (load64(key_state + 102 * 8) == 1) { input_flags |= INP_FIRE; }   # F
+    if (load64(key_state + KEY_R * 8) == 1) { input_flags |= INP_RUN; }
+    if (load64(key_state + KEY_TAB * 8) == 1) { input_flags |= INP_TAB; }
+    input_weapon = 0;
+    for (var wwi = 1; wwi <= 7; wwi += 1) {
+        if (load64(key_state + (48 + wwi) * 8) == 1) { input_weapon = wwi; }
+    }
+    if (load64(key_state + KEY_Q * 8) == 1) { input_quit = 1; }
+    if (load64(key_state + KEY_ESC * 8) == 1) { input_quit = 1; }
+    return 0;
+}
+
 #ifndef CYRIUS_TARGET_AGNOS
 # evdev keycode -> doom key_state index (Wayland desktop backend, v0.33.0).
 # Distinct from the AGNOS Set-1 table: evdev arrows are 103/108/105/106 (no E0
@@ -359,26 +386,7 @@ fn input_poll_wayland(): i64 {
     # (arrows TURN, A/D strafe, F/Ctrl fire), matching the fb0/tty build (F5).
     # Required so the menu (which edge-detects input_flags) is navigable and the
     # game is playable, not just quit-only.
-    if (load64(key_state + KEY_W * 8) == 1) { input_flags |= INP_FORWARD; }
-    if (load64(key_state + KEY_UP * 8) == 1) { input_flags |= INP_FORWARD; }
-    if (load64(key_state + KEY_S * 8) == 1) { input_flags |= INP_BACKWARD; }
-    if (load64(key_state + KEY_DOWN * 8) == 1) { input_flags |= INP_BACKWARD; }
-    if (load64(key_state + KEY_LEFT * 8) == 1) { input_flags |= INP_TURN_LEFT; }
-    if (load64(key_state + KEY_RIGHT * 8) == 1) { input_flags |= INP_TURN_RIGHT; }
-    if (load64(key_state + KEY_A * 8) == 1) { input_flags |= INP_STRAFE_LEFT; }
-    if (load64(key_state + KEY_D * 8) == 1) { input_flags |= INP_STRAFE_RIGHT; }
-    if (load64(key_state + KEY_SPACE * 8) == 1) { input_flags |= INP_USE; }
-    if (load64(key_state + KEY_E * 8) == 1) { input_flags |= INP_USE; }
-    if (load64(key_state + KEY_CTRL * 8) == 1) { input_flags |= INP_FIRE; }
-    if (load64(key_state + 102 * 8) == 1) { input_flags |= INP_FIRE; }   # F
-    if (load64(key_state + KEY_R * 8) == 1) { input_flags |= INP_RUN; }
-    if (load64(key_state + KEY_TAB * 8) == 1) { input_flags |= INP_TAB; }
-    input_weapon = 0;
-    for (var wwi = 1; wwi <= 7; wwi += 1) {
-        if (load64(key_state + (48 + wwi) * 8) == 1) { input_weapon = wwi; }
-    }
-    if (load64(key_state + KEY_Q * 8) == 1) { input_quit = 1; }
-    if (load64(key_state + KEY_ESC * 8) == 1) { input_quit = 1; }
+    input_flags_from_keys();
     return 0;
 }
 #endif
@@ -415,26 +423,7 @@ fn input_poll_setu(): i64 {
     if (doom_setu_focus == 0) {
         for (var ci = 0; ci < 256; ci += 1) { store64(key_state + ci * 8, 0); }
     }
-    if (load64(key_state + KEY_W * 8) == 1) { input_flags |= INP_FORWARD; }
-    if (load64(key_state + KEY_UP * 8) == 1) { input_flags |= INP_FORWARD; }
-    if (load64(key_state + KEY_S * 8) == 1) { input_flags |= INP_BACKWARD; }
-    if (load64(key_state + KEY_DOWN * 8) == 1) { input_flags |= INP_BACKWARD; }
-    if (load64(key_state + KEY_LEFT * 8) == 1) { input_flags |= INP_TURN_LEFT; }
-    if (load64(key_state + KEY_RIGHT * 8) == 1) { input_flags |= INP_TURN_RIGHT; }
-    if (load64(key_state + KEY_A * 8) == 1) { input_flags |= INP_STRAFE_LEFT; }
-    if (load64(key_state + KEY_D * 8) == 1) { input_flags |= INP_STRAFE_RIGHT; }
-    if (load64(key_state + KEY_SPACE * 8) == 1) { input_flags |= INP_USE; }
-    if (load64(key_state + KEY_E * 8) == 1) { input_flags |= INP_USE; }
-    if (load64(key_state + KEY_CTRL * 8) == 1) { input_flags |= INP_FIRE; }
-    if (load64(key_state + 102 * 8) == 1) { input_flags |= INP_FIRE; }   # F
-    if (load64(key_state + KEY_R * 8) == 1) { input_flags |= INP_RUN; }
-    if (load64(key_state + KEY_TAB * 8) == 1) { input_flags |= INP_TAB; }
-    input_weapon = 0;
-    for (var wwi = 1; wwi <= 7; wwi += 1) {
-        if (load64(key_state + (48 + wwi) * 8) == 1) { input_weapon = wwi; }
-    }
-    if (load64(key_state + KEY_Q * 8) == 1) { input_quit = 1; }
-    if (load64(key_state + KEY_ESC * 8) == 1) { input_quit = 1; }
+    input_flags_from_keys();
     # No per-frame clear — key_state is PERSISTENT make/break held state now (aethersafha
     # sends key-UP, which zeroes the slot above), exactly like the raw-scancode kbscan path.
     return 0;
@@ -455,6 +444,32 @@ fn ag_key_down(kc): i64 {
     return 0;
 }
 #endif
+
+# One escape sequence in a tty read, where bufp[pos] is ESC and the read is n bytes.
+# Returns the position after it. CSI (ESC [ params final) resolves on its final byte,
+# so ESC [ 1 ; 2 C is an arrow and its digits are not weapon keys, and a sequence split
+# at the end of the read is consumed (F-U5). SS3 (ESC O x, sent by F1-F4 and by arrows in
+# application mode) is handled the same way, and ESC + any other byte is Alt+key. Only an
+# ESC that ends the read is a real Escape press.
+fn input_tty_escape(bufp, pos, n): i64 {
+    if (pos + 1 >= n) { input_quit = 1; return pos + 1; }
+    var next = load8(bufp + pos + 1);
+    var q = pos + 2;
+    var final = 0;
+    if (next == 91) {
+        while (q < n) {
+            var fb = load8(bufp + q);
+            q += 1;
+            if (fb >= 64 && fb <= 126) { final = fb; break; }
+        }
+    }
+    if (next == 79 && q < n) { final = load8(bufp + q); q += 1; }
+    if (final == 65) { store64(key_state + KEY_UP * 8, 1); }
+    if (final == 66) { store64(key_state + KEY_DOWN * 8, 1); }
+    if (final == 67) { store64(key_state + KEY_RIGHT * 8, 1); }
+    if (final == 68) { store64(key_state + KEY_LEFT * 8, 1); }
+    return q;
+}
 
 fn input_poll(): i64 {
     input_flags = 0;
@@ -555,31 +570,7 @@ fn input_poll(): i64 {
         while (pos < n) {
             var ch = load8(&buf + pos);
             if (ch == KEY_ESC) {
-                if (pos + 1 < n && load8(&buf + pos + 1) == 91) {
-                    # CSI escape sequence (ESC '['). Scan to its final byte
-                    # (0x40..0x7E) and act only on that — so a bare arrow
-                    # (ESC [ A) and a modified arrow (ESC [ 1 ; 2 C) both resolve
-                    # to the arrow WITHOUT leaking the intermediate '1'/';'/'2'
-                    # into the key scan as spurious weapon selects, and a
-                    # sequence split at the buffer end is consumed instead of
-                    # being mis-read as a quit (audit F-U5).
-                    var q = pos + 2;
-                    var final = 0;
-                    while (q < n) {
-                        var fb = load8(&buf + q);
-                        q += 1;
-                        if (fb >= 64 && fb <= 126) { final = fb; break; }
-                    }
-                    if (final == 65) { store64(key_state + KEY_UP * 8, 1); }
-                    if (final == 66) { store64(key_state + KEY_DOWN * 8, 1); }
-                    if (final == 67) { store64(key_state + KEY_RIGHT * 8, 1); }
-                    if (final == 68) { store64(key_state + KEY_LEFT * 8, 1); }
-                    pos = q;
-                    continue;
-                }
-                # A lone ESC (not the start of a CSI) is a real Escape press.
-                input_quit = 1;
-                pos += 1;
+                pos = input_tty_escape(&buf, pos, n);
             } else {
                 if (ch < 256) { store64(key_state + ch * 8, 1); }
                 pos += 1;
@@ -587,47 +578,18 @@ fn input_poll(): i64 {
         }
     }
 
-    # Map key state to bitmask
-    if (load64(key_state + KEY_W * 8) == 1) { input_flags |= INP_FORWARD; }
-    if (load64(key_state + 87 * 8) == 1) { input_flags |= INP_FORWARD; }    # 'W' (Shift+w)
-    if (load64(key_state + KEY_UP * 8) == 1) { input_flags |= INP_FORWARD; }
-    if (load64(key_state + KEY_S * 8) == 1) { input_flags |= INP_BACKWARD; }
-    if (load64(key_state + 83 * 8) == 1) { input_flags |= INP_BACKWARD; }   # 'S' (Shift+s)
-    if (load64(key_state + KEY_DOWN * 8) == 1) { input_flags |= INP_BACKWARD; }
-    # Linux keeps the simple scheme: arrows turn (the only keyboard turn until
-    # mouse input arrives), A/D strafe. No Shift-to-turn here — a raw tty can't see
-    # a bare Shift, and reading Shift from uppercase letters is ambiguous with Caps
-    # Lock. The faithful Shift-to-turn controls live on the AGNOS path (real keys).
-    if (load64(key_state + KEY_LEFT * 8) == 1) { input_flags |= INP_TURN_LEFT; }
-    if (load64(key_state + KEY_RIGHT * 8) == 1) { input_flags |= INP_TURN_RIGHT; }
-    # A/D strafe. Uppercase 'A'/'D' (from Caps Lock or Shift) map the SAME as
-    # lowercase so Caps Lock can never swap strafe for something else and blow out
-    # movement — a raw tty can't tell Shift+a from CapsLock+a (identical bytes).
-    if (load64(key_state + KEY_A * 8) == 1) { input_flags |= INP_STRAFE_LEFT; }
+    # Map key state to bitmask: the shared scheme, plus the uppercase forms, because a raw
+    # tty cannot tell Shift+a from Caps Lock+a and Caps Lock must never change the controls.
+    # A tty also cannot report a bare Ctrl, so on Linux F is the working fire key.
+    input_flags_from_keys();
+    if (load64(key_state + 87 * 8) == 1) { input_flags |= INP_FORWARD; }        # 'W'
+    if (load64(key_state + 83 * 8) == 1) { input_flags |= INP_BACKWARD; }       # 'S'
     if (load64(key_state + 65 * 8) == 1) { input_flags |= INP_STRAFE_LEFT; }    # 'A'
-    if (load64(key_state + KEY_D * 8) == 1) { input_flags |= INP_STRAFE_RIGHT; }
     if (load64(key_state + 68 * 8) == 1) { input_flags |= INP_STRAFE_RIGHT; }   # 'D'
-    if (load64(key_state + KEY_SPACE * 8) == 1) { input_flags |= INP_USE; }
-    if (load64(key_state + KEY_E * 8) == 1) { input_flags |= INP_USE; }
-    if (load64(key_state + 69 * 8) == 1) { input_flags |= INP_USE; }      # 'E' (Caps/Shift)
-    # KEY_CTRL (132) is the DOOM-faithful fire button, but a raw Linux tty cannot
-    # report a bare Ctrl (it is a modifier — only Ctrl+key yields a byte), so on
-    # Linux this index is never set and F (102) is the working fire key. The
-    # AGNOS scancode path (raw PS/2) does set 132, making Ctrl fire there.
-    if (load64(key_state + KEY_CTRL * 8) == 1) { input_flags |= INP_FIRE; }
-    if (load64(key_state + 102 * 8) == 1) { input_flags |= INP_FIRE; }
-    if (load64(key_state + 70 * 8) == 1) { input_flags |= INP_FIRE; }     # 'F' (Caps/Shift)
-    if (load64(key_state + KEY_R * 8) == 1) { input_flags |= INP_RUN; }
-    if (load64(key_state + 82 * 8) == 1) { input_flags |= INP_RUN; }      # 'R' (Caps/Shift) — keep run under Caps Lock
-    if (load64(key_state + KEY_TAB * 8) == 1) { input_flags |= INP_TAB; }
-    if (load64(key_state + KEY_Q * 8) == 1) { input_quit = 1; }
-    if (load64(key_state + 81 * 8) == 1) { input_quit = 1; }              # 'Q' (Caps/Shift)
-
-    # Weapon select: keys 1-7 (ASCII 49-55)
-    input_weapon = 0;
-    for (var wi = 1; wi <= 7; wi += 1) {
-        if (load64(key_state + (48 + wi) * 8) == 1) { input_weapon = wi; }
-    }
+    if (load64(key_state + 69 * 8) == 1) { input_flags |= INP_USE; }            # 'E'
+    if (load64(key_state + 70 * 8) == 1) { input_flags |= INP_FIRE; }           # 'F'
+    if (load64(key_state + 82 * 8) == 1) { input_flags |= INP_RUN; }            # 'R'
+    if (load64(key_state + 81 * 8) == 1) { input_quit = 1; }                    # 'Q'
 
     for (var i = 0; i < 256; i += 1) { store64(key_state + i * 8, 0); }
     return 0;

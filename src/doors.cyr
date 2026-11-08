@@ -8,7 +8,9 @@
 # Each tick, all active thinkers are updated.
 
 enum DoorConst {
-    DOOR_MAX = 32;
+    # One per sector at most (every starter checks door_find_sector), so with one slot
+    # per sector a one-shot switch can never be spent on a mover that could not start.
+    DOOR_MAX = 256;
     DOOR_ENTRY_SIZE = 64;
     DOOR_SPEED = 2;
     # v0.35.6 (U-4): vanilla holds a door open 150 tics — "four seconds after
@@ -86,7 +88,7 @@ fn doors_init(): i64 {
     tele_line_count = 0;
     if (tele_lines == 0) { return 0; }   # out of memory: no monster teleports
     for (var li = 0; li < map_num_linedefs; li += 1) {
-        var lsp = load64(map_linedefs + li * MAP_LINEDEF_SIZE + 24);
+        var lsp = map_linedef_special(li);
         if (lsp == 39 || lsp == 97 || lsp == 125 || lsp == 126) {
             store64(tele_lines + tele_line_count * 8, li);
             tele_line_count += 1;
@@ -204,20 +206,10 @@ fn find_lowest_neighbor_ceil(sector_idx): i64 {
     var best = 0;
     var found = 0;
     for (var i = 0; i < map_num_linedefs; i += 1) {
-        var rs = map_linedef_side_right(i);
-        var ls = map_linedef_side_left(i);
-        if (rs < 0) { continue; }
-        if (ls < 0) { continue; }
-        var rs_sec = map_sidedef_sector(rs);
-        var ls_sec = map_sidedef_sector(ls);
-        if (rs_sec == sector_idx) {
-            var ch = map_sector_ceilh(ls_sec);
-            if (found == 0 || ch < best) { best = ch; found = 1; }
-        }
-        if (ls_sec == sector_idx) {
-            var ch = map_sector_ceilh(rs_sec);
-            if (found == 0 || ch < best) { best = ch; found = 1; }
-        }
+        var other = map_line_other_sector(i, sector_idx);
+        if (other < 0) { continue; }
+        var ch = map_sector_ceilh(other);
+        if (found == 0 || ch < best) { best = ch; found = 1; }
     }
     if (found == 0) { return map_sector_ceilh(sector_idx); }
     return best;
@@ -227,20 +219,10 @@ fn find_lowest_neighbor_ceil(sector_idx): i64 {
 fn find_lowest_neighbor_floor(sector_idx): i64 {
     var best = map_sector_floorh(sector_idx);
     for (var i = 0; i < map_num_linedefs; i += 1) {
-        var rs = map_linedef_side_right(i);
-        var ls = map_linedef_side_left(i);
-        if (rs < 0) { continue; }
-        if (ls < 0) { continue; }
-        var rs_sec = map_sidedef_sector(rs);
-        var ls_sec = map_sidedef_sector(ls);
-        if (rs_sec == sector_idx) {
-            var fh = map_sector_floorh(ls_sec);
-            if (fh < best) { best = fh; }
-        }
-        if (ls_sec == sector_idx) {
-            var fh = map_sector_floorh(rs_sec);
-            if (fh < best) { best = fh; }
-        }
+        var other = map_line_other_sector(i, sector_idx);
+        if (other < 0) { continue; }
+        var fh = map_sector_floorh(other);
+        if (fh < best) { best = fh; }
     }
     return best;
 }
@@ -254,20 +236,10 @@ fn find_highest_neighbor_floor(sector_idx): i64 {
     var best = 0;
     var found = 0;
     for (var i = 0; i < map_num_linedefs; i += 1) {
-        var rs = map_linedef_side_right(i);
-        var ls = map_linedef_side_left(i);
-        if (rs < 0) { continue; }
-        if (ls < 0) { continue; }
-        var rs_sec = map_sidedef_sector(rs);
-        var ls_sec = map_sidedef_sector(ls);
-        if (rs_sec == sector_idx) {
-            var fh = map_sector_floorh(ls_sec);
-            if (found == 0 || fh > best) { best = fh; found = 1; }
-        }
-        if (ls_sec == sector_idx) {
-            var fh = map_sector_floorh(rs_sec);
-            if (found == 0 || fh > best) { best = fh; found = 1; }
-        }
+        var other = map_line_other_sector(i, sector_idx);
+        if (other < 0) { continue; }
+        var fh = map_sector_floorh(other);
+        if (found == 0 || fh > best) { best = fh; found = 1; }
     }
     if (found == 0) { return map_sector_floorh(sector_idx); }
     return best;
@@ -280,20 +252,11 @@ fn find_next_higher_neighbor_floor(sector_idx, height): i64 {
     var best = height;
     var found = 0;
     for (var i = 0; i < map_num_linedefs; i += 1) {
-        var rs = map_linedef_side_right(i);
-        var ls = map_linedef_side_left(i);
-        if (rs < 0) { continue; }
-        if (ls < 0) { continue; }
-        var rs_sec = map_sidedef_sector(rs);
-        var ls_sec = map_sidedef_sector(ls);
-        var other = 0 - 1;
-        if (rs_sec == sector_idx) { other = ls_sec; }
-        if (ls_sec == sector_idx) { other = rs_sec; }
-        if (other >= 0) {
-            var fh = map_sector_floorh(other);
-            if (fh > height) {
-                if (found == 0 || fh < best) { best = fh; found = 1; }
-            }
+        var other = map_line_other_sector(i, sector_idx);
+        if (other < 0) { continue; }
+        var fh = map_sector_floorh(other);
+        if (fh > height) {
+            if (found == 0 || fh < best) { best = fh; found = 1; }
         }
     }
     return best;
@@ -372,7 +335,7 @@ fn floor_raise_change(sector_idx, src_sec): i64 {
         store64(map_sectors + sector_idx * MAP_SECTOR_SIZE + 16, load64(map_sectors + src_sec * MAP_SECTOR_SIZE + 16));
         sector_flat_floor_copy(sector_idx, src_sec);
     }
-    store64(map_sectors + sector_idx * MAP_SECTOR_SIZE + 40, 0);
+    map_sector_set_special(sector_idx, 0);
     var fh = map_sector_floorh(sector_idx);
     floor_move_start(sector_idx, find_next_higher_neighbor_floor(sector_idx, fh), FLOOR_Q_PLAT, DS_FLOOR_RAISE);
     return 1;
@@ -807,7 +770,7 @@ fn doors_use(): i64 {
         if (t2 < 0) { continue; }
         if (t2 > FIXED_ONE) { continue; }
 
-        var lspecial = load64(map_linedefs + i * MAP_LINEDEF_SIZE + 24);
+        var lspecial = map_linedef_special(i);
         if (lspecial != 0) {
             if (t1 < best_t) {
                 best_t = t1;
@@ -829,13 +792,7 @@ fn doors_use(): i64 {
             if (blocks == 0) {
                 var fs = map_sidedef_sector(rs);
                 var bs = map_sidedef_sector(ls);
-                var open_low = map_sector_floorh(fs);
-                var bfh = map_sector_floorh(bs);
-                if (bfh > open_low) { open_low = bfh; }
-                var open_high = map_sector_ceilh(fs);
-                var bch = map_sector_ceilh(bs);
-                if (bch < open_high) { open_high = bch; }
-                if (open_high <= open_low) { blocks = 1; }
+                if (map_sectors_open(fs, bs) == 0) { blocks = 1; }
             }
         }
         if (blocks == 1) {
@@ -846,7 +803,7 @@ fn doors_use(): i64 {
     if (best_line < 0) { return 0; }
     if (block_t < best_t) { return 0; }
 
-    var special = load64(map_linedefs + best_line * MAP_LINEDEF_SIZE + 24);
+    var special = map_linedef_special(best_line);
 
     # One-shot latch (0.33.7 item 3): an S1/D1 "once" switch/door already used stays
     # used — don't re-fire on a second press. Repeatable DR/SR forms fall through.
@@ -902,14 +859,14 @@ fn doors_use(): i64 {
     # Tag-based SWITCH specials (S1/SR push-use): act on the TAGGED sectors, not
     # the switch line's back sector (audit G-2). Flat if statements — a switch may
     # legitimately drive several tagged sectors, so every match fires per sector.
-    var tag = load64(map_linedefs + best_line * MAP_LINEDEF_SIZE + 32);
+    var tag = map_linedef_tag(best_line);
     if (tag > 0) {
         # 20 takes its new floor flat from the switch line's FRONT sector.
         var src_sec = 0 - 1;
         if (rs >= 0) { src_sec = map_sidedef_sector(rs); }
         var started = 0;
         for (var si = 0; si < map_num_sectors; si += 1) {
-            var stag = load64(map_sectors + si * MAP_SECTOR_SIZE + 48);
+            var stag = map_sector_tag(si);
             if (stag == tag) {
                 # Doors + lifts
                 if (special == 29)  { started |= door_open(si); }        # S1 door open-wait-close
@@ -1013,7 +970,7 @@ var walk_trigger_calls = 0;
 fn doors_walk_trigger(old_x, old_y, new_x, new_y): i64 {
     walk_trigger_calls += 1;
     for (var i = 0; i < map_num_linedefs; i += 1) {
-        var special = load64(map_linedefs + i * MAP_LINEDEF_SIZE + 24);
+        var special = map_linedef_special(i);
         if (special == 0) { continue; }
 
         # if/else, NOT switch: this is a hot per-tick fn with sparse/out-of-order
@@ -1062,7 +1019,7 @@ fn doors_walk_trigger(old_x, old_y, new_x, new_y): i64 {
         if (special == 52)  { level_exit_normal(); return 0; }
         if (special == 124) { level_exit_secret(); return 0; }
 
-        var tag = load64(map_linedefs + i * MAP_LINEDEF_SIZE + 32);
+        var tag = map_linedef_tag(i);
 
         # v0.35.8 (TELE-1) — teleports, from the front side only. The sweep ENDS on
         # a teleport: every remaining line was being tested against a move that no
@@ -1083,7 +1040,7 @@ fn doors_walk_trigger(old_x, old_y, new_x, new_y): i64 {
             var wsrc = 0 - 1;
             if (wrs >= 0) { wsrc = map_sidedef_sector(wrs); }
             for (var si = 0; si < map_num_sectors; si += 1) {
-                var stag = load64(map_sectors + si * MAP_SECTOR_SIZE + 48);
+                var stag = map_sector_tag(si);
                 if (stag == tag) {
                     # Flat if statements (return-smash-safe). Act on the tagged
                     # sectors with the vanilla motion.
@@ -1138,7 +1095,7 @@ fn doors_walk_trigger(old_x, old_y, new_x, new_y): i64 {
 fn teleport_find_dest(tag): i64 {
     if (tag <= 0) { return 0 - 1; }
     for (var s = 0; s < map_num_sectors; s += 1) {
-        if (load64(map_sectors + s * MAP_SECTOR_SIZE + 48) == tag) {
+        if (map_sector_tag(s) == tag) {
             for (var t = 0; t < thing_count; t += 1) {
                 if (thing_type(t) == TTYPE_TELEPORT_DEST) {
                     if ((thing_flags(t) & TF_ACTIVE) != 0) {
@@ -1226,12 +1183,12 @@ fn teleport_monster(idx, tag): i64 {
 fn monster_cross_teleports(idx, ox, oy, nx, ny): i64 {
     for (var k = 0; k < tele_line_count; k += 1) {
         var li = load64(tele_lines + k * 8);
-        var special = load64(map_linedefs + li * MAP_LINEDEF_SIZE + 24);
+        var special = map_linedef_special(li);
         if (special_is_once(special) == 1) { if (door_line_used(li) == 1) { continue; } }
         var side = walk_line_cross_side(li, ox, oy, nx, ny);
         if (side == 0) { continue; }
         var moved = 0;
-        if (side == 1) { moved = teleport_monster(idx, load64(map_linedefs + li * MAP_LINEDEF_SIZE + 32)); }
+        if (side == 1) { moved = teleport_monster(idx, map_linedef_tag(li)); }
         if (special_is_once(special) == 1) { door_mark_used(li); }
         if (moved == 1) { return 1; }
     }
@@ -1264,7 +1221,7 @@ fn boss_death_check(idx): i64 {
         }
     }
     for (var s = 0; s < map_num_sectors; s += 1) {
-        if (load64(map_sectors + s * MAP_SECTOR_SIZE + 48) == 666) { floor_lower_to_lowest(s); }
+        if (map_sector_tag(s) == 666) { floor_lower_to_lowest(s); }
     }
     return 1;
 }

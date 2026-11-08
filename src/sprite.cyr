@@ -10,8 +10,6 @@
 
 # DoomEd type → sprite prefix mapping
 # We store the S_START lump range for fast lookups
-var sprite_s_start = 0;
-var sprite_s_end = 0;
 
 # Sorted draw list: thing index + distance, sized to THING_MAX (RC-S7)
 var sprite_order = 0;
@@ -21,14 +19,13 @@ var sprite_visible = 0;
 # Per-column clip heights from wall rendering (reuse clip_top/clip_bottom)
 
 fn sprite_init(): i64 {
-    sprite_s_start = wad_find_lump("S_START");
-    sprite_s_end = wad_find_lump("S_END");
     # Sized to THING_MAX (RC-S7): the old 128-entry cap kept the FIRST 128
     # things by index — not the nearest — silently popping arbitrary sprites
     # in crowded views. Every active thing can now be collected.
     sprite_order = alloc(THING_MAX * 8);
     sprite_dist = alloc(THING_MAX * 8);
     sprite_build_lookup();
+    sprite_alloc_buffers();
     return 0;
 }
 
@@ -137,6 +134,19 @@ var spr_col_mask = 0;
 var masked_morder = 0;
 var masked_mdepth = 0;
 
+# Allocated at init rather than on first use, so a WAD that fills the heap with
+# composited textures cannot make a mid-frame allocation fail.
+fn sprite_alloc_buffers(): i64 {
+    if (spr_patch_buf == 0) { spr_patch_buf = alloc(16384); }
+    if (spr_col_buf == 0) { spr_col_buf = alloc(256); }
+    if (spr_col_mask == 0) { spr_col_mask = alloc(256); }
+    if (masked_morder == 0) {
+        masked_morder = alloc(MASKED_MAX * 8);
+        masked_mdepth = alloc(MASKED_MAX * 8);
+    }
+    return 0;
+}
+
 fn sprite_find_lump(thing_type): i64 {
     if (_spr_prefix == 0) { _spr_prefix = alloc(16); }
     var prefix = _spr_prefix;
@@ -164,13 +174,6 @@ fn sprite_find_lump(thing_type): i64 {
     # Try specific rotation (1-8)
     store8(prefix + 5, 49);
     return wad_find_lump(prefix);
-}
-
-# Find sprite lump with rotation based on viewer angle (dead helper kept for
-# API symmetry; discards the flip flag). rotation: 1-8, 1=front, 5=back.
-fn sprite_find_rotated(thing_type, rotation): i64 {
-    var l, fl = sprite_find_frame(thing_type, rotation, 0);
-    return l;
 }
 
 # sprite_find_frame: permanent memo over sprite_find_frame_uncached (OP-1).
@@ -362,12 +365,12 @@ fn sprite_decode_column(pdata, psz, src_col, ph): i64 {
     }
 
     var safety = 0;
+    var top_min = 0;
     while (safety < PATCH_POST_MAX) {
-        if (post_ptr + 1 >= pend) { break; }
+        var length = patch_post_len(post_ptr, pend, top_min);
+        if (length < 0) { break; }
         var topdelta = load8(post_ptr);
-        if (topdelta == 255) { break; }
-        var length = load8(post_ptr + 1);
-        if (post_ptr + 4 + length > pend) { break; }
+        top_min = topdelta + length;
         var pixels = post_ptr + 3;
 
         for (var py = 0; py < length; py += 1) {
@@ -425,10 +428,7 @@ fn sprite_render_all(): i64 {
         var ty = thing_y(i);
 
         # Transform to view space
-        var dx = tx - view_x;
-        var dy = ty - view_y;
-        var vx = fixed_mul(dx, view_sin) - fixed_mul(dy, view_cos);
-        var vy = fixed_mul(dx, view_cos) + fixed_mul(dy, view_sin);
+        var vx, vy = render_transform_vertex(tx, ty);
 
         # Behind viewer?
         if (vy <= 4096) { continue; }
@@ -530,7 +530,6 @@ fn sprite_render_all(): i64 {
         if (psz < 8 || psz > 16384) { continue; }
         wad_read_lump_into(lump, spr_patch_buf, psz);
         var pdata = spr_patch_buf;
-        var pend = pdata + psz;
 
         var pw = read_le16(pdata);
         var ph = read_le16(pdata + 2);
@@ -538,10 +537,7 @@ fn sprite_render_all(): i64 {
         if (left_off >= 0x8000) { left_off -= 0x10000; }
         var top_off = read_le16(pdata + 6);
         if (top_off >= 0x8000) { top_off -= 0x10000; }
-        var dx = tx - view_x;
-        var dy = ty - view_y;
-        var vx = fixed_mul(dx, view_sin) - fixed_mul(dy, view_cos);
-        var vy = fixed_mul(dx, view_cos) + fixed_mul(dy, view_sin);
+        var vx, vy = render_transform_vertex(tx, ty);
 
         # Project to screen
         var screen_x = HALF_WIDTH + fixed_to_int(fixed_div(fixed_mul(vx, PROJ_DIST), vy));

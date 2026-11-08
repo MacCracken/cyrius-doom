@@ -7,6 +7,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.2] - 2026-11-08 — code audit, refactor sweep and repairs
+
+A whole-tree audit of `src/`, in three independent reviews with every finding re-checked against the code. It found
+no memory corruption reachable from a WAD, one heap overflow on very small framebuffers, three frame-stall paths from
+a hostile WAD, and five bugs a player can see. All are fixed, each with its own proof. Full report:
+[`docs/audit/2026-11-08-code-audit.md`](docs/audit/2026-11-08-code-audit.md).
+
+### Fixed — visible in play
+
+- **ESC or Q in a submenu quit the whole game** on Wayland, setu and AGNOS. A normal press backed out to the main menu
+  on its first tick and quit on its second. It now just backs out.
+- **Tall walls beyond a sky boundary were cut off flat** when looking out of a low sky into a higher one, with sky
+  painted above the cut; sprites were clipped at the same line. Visible on E1M1 and E1M2.
+- **Monsters barely re-aimed while chasing.** The commitment to a direction was re-rolled on every step, so it almost
+  never ran out. Only a newly chosen direction commits now, as the documented algorithm says. Melee rises 2–4% and
+  ranged attacks 1–2% over 41 staged fights.
+- **F1–F4 and Alt+key quit the game** on a Linux terminal. Only a real Escape press does now.
+- **One-row walls were skipped**, leaving black specks.
+
+### Security and robustness
+
+- **Heap overflow on a framebuffer smaller than 320×200.** Such a panel is no longer used.
+- **A one-shot switch or staircase could be spent** on movers that never started when all 32 thinker slots were busy.
+  There is now a slot per sector.
+- **Frame-stall paths from a hostile WAD**: subsectors that overlap (rejected at load; all 9 shareware maps sum
+  exactly), textures with up to 65,535 patch refs or huge widths (capped at 256 and clamped to 4096), and patch posts
+  that repeat rows (a post may not start above the last one's end; none of DOOM1's 944 patches does).
+- **`PNAMES` could commit up to 2 GiB at boot**, and composited textures had no total budget. PNAMES now reads only
+  what can be used, composites stop at 64 MiB and fall back to uncached, and frame-path buffers are allocated at init.
+- **AUDIO-8**: a rejected sound lump is decided from its header, so it no longer allocates on every play.
+- **BM-1**: a map with no usable BLOCKMAP uses the linedef scan instead of the previous map's grid.
+- Texture names are exact 8-byte keys rather than a hash that could collide (none do in DOOM1).
+
+### Changed
+
+- **Nine refactors, byte-identical on every capture and AI gate**: shared thing spawning and removal, map field
+  accessors, neighbour-sector and portal helpers, one lump reader (over-cap counts now warn), one input-flag builder,
+  one patch post walker, the shared view transform, one intermission digit draw.
+- **Dead code removed**, including a 16 KB boot allocation and a 2.5 KB table nothing read.
+- **Binary sizes**: plain 547,024 → **542,984 B**, release 346,320 → **342,280 B**, agnos 550,800 → **546,760 B**
+  (−4,040 each). `CYRIUS_DCE=1` removes 850 fns / 199,480 B.
+- **Roadmap**: RF-1..3, AUDIO-8 and BM-1 shipped here; what the audit left open is listed under v0.37.6.
+
+### Verification
+
+- 412 / 33 / 14 / 22 / 14 / 12 WAD-free across six test files, **731 / 731** full. Two new test files drive the real
+  `menu.cyr` and `audio.cyr`. **Mutation: 19 of 19 killed.** Fuzz ×8 clean at full iteration counts. No compile
+  warnings on Linux or `--agnos`.
+- **Captures against v0.36.1** (baseline hashes match its gate row): 42 of 46 PPMs identical on the plain and release
+  builds; E1M5's four differ by the same 19 pixels, every one a former black speck on a wall. All 9 `--ai-probe`
+  fingerprints identical.
+- **The sky repair** could not be seen from any spawn point, so 137 staged views were compared, 22 of which changed,
+  and the largest were inspected by eye.
+- **Bench neutral**, 3 interleaved rounds against v0.36.1, best average: `render_frame` 381.7 → 375.3 µs,
+  `render_frame+sprites_spawned` 543.0 → 535.4 µs, `things_tick` −4.0%, `status_render` +3.2%.
+- A fresh `rm -rf lib && cyrius deps` reproduces release `2b715f0b…` and agnos `213fa80d…` byte for byte.
+- **AGNOS QEMU** on the final `doom_agnos`: boots v0.36.2, setu refuses as designed, **64,000 / 64,000** blocks exact
+  against Linux. The harness's floor-band gate still false-FAILs (agnos-side origin assumption).
+- **Not verified**: the small-panel path on a real panel; the ESC and tty fixes interactively (they are driven through
+  the real functions in tests); the `PNAMES` cap and composite budget have no direct test.
+
 ## [0.36.1] - 2026-11-08 — cyrius 6.7.18, every dep at its newest tag, setu off TCP
 
 A toolchain and dependency cut. Linux rendering and monster behaviour are byte-identical to v0.36.0, and the

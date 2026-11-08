@@ -35,6 +35,7 @@ var map_num_things = 0;
 
 # BLOCKMAP for fast collision
 var map_blockmap = 0;
+var map_blockmap_buf = 0;
 # REJECT: sector-visibility bit matrix (see map_load). map_reject_ok gates every
 # read so a WAD without a usable REJECT simply falls back to the full line walk.
 var map_reject = 0;
@@ -111,6 +112,8 @@ fn map_linedef_v2(idx): i64 { return load64(map_linedefs + idx * MAP_LINEDEF_SIZ
 fn map_linedef_flags(idx): i64 { return load64(map_linedefs + idx * MAP_LINEDEF_SIZE + 16); }
 fn map_linedef_side_right(idx): i64 { return load64(map_linedefs + idx * MAP_LINEDEF_SIZE + 40); }
 fn map_linedef_side_left(idx): i64 { return load64(map_linedefs + idx * MAP_LINEDEF_SIZE + 48); }
+fn map_linedef_special(idx): i64 { return load64(map_linedefs + idx * MAP_LINEDEF_SIZE + 24); }
+fn map_linedef_tag(idx): i64 { return load64(map_linedefs + idx * MAP_LINEDEF_SIZE + 32); }
 
 fn map_sidedef_xoff(idx): i64 { return load64(map_sidedefs + idx * MAP_SIDEDEF_SIZE); }
 fn map_sidedef_yoff(idx): i64 { return load64(map_sidedefs + idx * MAP_SIDEDEF_SIZE + 8); }
@@ -121,6 +124,37 @@ fn map_sector_ceilh(idx): i64 { return load64(map_sectors + idx * MAP_SECTOR_SIZ
 fn map_sector_floor_tex(idx): i64 { return map_sectors + idx * MAP_SECTOR_SIZE + 16; }
 fn map_sector_ceil_tex(idx): i64 { return map_sectors + idx * MAP_SECTOR_SIZE + 24; }
 fn map_sector_light(idx): i64 { return load64(map_sectors + idx * MAP_SECTOR_SIZE + 32); }
+fn map_sector_special(idx): i64 { return load64(map_sectors + idx * MAP_SECTOR_SIZE + 40); }
+fn map_sector_set_special(idx, v): i64 { store64(map_sectors + idx * MAP_SECTOR_SIZE + 40, v); return 0; }
+fn map_sector_tag(idx): i64 { return load64(map_sectors + idx * MAP_SECTOR_SIZE + 48); }
+
+# RF-8: 1 when the opening between two sectors has any height; a shut door or a
+# raised lift has none.
+fn map_sectors_open(fs, bs): i64 {
+    var open_low = map_sector_floorh(fs);
+    var bfh = map_sector_floorh(bs);
+    if (bfh > open_low) { open_low = bfh; }
+    var open_high = map_sector_ceilh(fs);
+    var bch = map_sector_ceilh(bs);
+    if (bch < open_high) { open_high = bch; }
+    if (open_high > open_low) { return 1; }
+    return 0;
+}
+
+# RF-3: the sector across two-sided linedef `i` from `sector_idx`, or -1 when the line
+# is one-sided or does not border that sector.
+fn map_line_other_sector(i, sector_idx): i64 {
+    var rs = map_linedef_side_right(i);
+    var ls = map_linedef_side_left(i);
+    if (rs < 0) { return 0 - 1; }
+    if (ls < 0) { return 0 - 1; }
+    var rs_sec = map_sidedef_sector(rs);
+    var ls_sec = map_sidedef_sector(ls);
+    if (rs_sec == sector_idx) { return ls_sec; }
+    if (ls_sec == sector_idx) { return rs_sec; }
+    return 0 - 1;
+}
+
 fn map_seg_v1(idx): i64 { return load64(map_segs + idx * MAP_SEG_SIZE); }
 fn map_seg_v2(idx): i64 { return load64(map_segs + idx * MAP_SEG_SIZE + 8); }
 fn map_seg_linedef(idx): i64 { return load64(map_segs + idx * MAP_SEG_SIZE + 24); }
@@ -154,6 +188,21 @@ fn sign_extend_16(val): i64 {
     return lo;
 }
 
+# RF-4: read the lump at `marker + offset` into the shared lump buffer. Returns the
+# buffer, or 0 if the read failed, and leaves the record count, capped at `max`, in
+# map_lump_count. A count over the cap used to lose its tail without a word.
+var map_lump_count = 0;
+fn map_lump_read(marker, offset, rec_size, max): i64 {
+    var lump_idx = marker + offset;
+    var data = wad_read_lump(lump_idx);
+    map_lump_count = wad_lump_size(lump_idx) / rec_size;
+    if (map_lump_count > max) {
+        map_lump_count = max;
+        sakshi_warn("map lump exceeds the engine cap - truncated", 43);
+    }
+    return data;
+}
+
 # Load a map from the WAD
 fn map_load(map_name): i64 {
     map_alloc();
@@ -174,12 +223,9 @@ fn map_load(map_name): i64 {
     }
 
     # VERTEXES (marker + 4)
-    var lump_idx = marker + 4;
-    var lump_size = wad_lump_size(lump_idx);
-    var data = wad_read_lump(lump_idx);
+    var data = map_lump_read(marker, 4, 4, MAP_MAX_VERTEXES);
     if (data == 0) { return -1; }
-    map_num_vertexes = lump_size / 4;
-    if (map_num_vertexes > MAP_MAX_VERTEXES) { map_num_vertexes = MAP_MAX_VERTEXES; }
+    map_num_vertexes = map_lump_count;
     for (var i = 0; i < map_num_vertexes; i += 1) {
         var src = data + i * 4;
         var dst = map_vertexes + i * MAP_VERTEX_SIZE;
@@ -188,12 +234,9 @@ fn map_load(map_name): i64 {
     }
 
     # LINEDEFS (marker + 2)
-    lump_idx = marker + 2;
-    lump_size = wad_lump_size(lump_idx);
-    data = wad_read_lump(lump_idx);
+    data = map_lump_read(marker, 2, 14, MAP_MAX_LINEDEFS);
     if (data == 0) { return -1; }
-    map_num_linedefs = lump_size / 14;
-    if (map_num_linedefs > MAP_MAX_LINEDEFS) { map_num_linedefs = MAP_MAX_LINEDEFS; }
+    map_num_linedefs = map_lump_count;
     for (var i = 0; i < map_num_linedefs; i += 1) {
         var src = data + i * 14;
         var base = map_linedefs + i * MAP_LINEDEF_SIZE;
@@ -215,12 +258,9 @@ fn map_load(map_name): i64 {
     }
 
     # SIDEDEFS (marker + 3)
-    lump_idx = marker + 3;
-    lump_size = wad_lump_size(lump_idx);
-    data = wad_read_lump(lump_idx);
+    data = map_lump_read(marker, 3, 30, MAP_MAX_SIDEDEFS);
     if (data == 0) { return -1; }
-    map_num_sidedefs = lump_size / 30;
-    if (map_num_sidedefs > MAP_MAX_SIDEDEFS) { map_num_sidedefs = MAP_MAX_SIDEDEFS; }
+    map_num_sidedefs = map_lump_count;
     for (var i = 0; i < map_num_sidedefs; i += 1) {
         var src = data + i * 30;
         var base = map_sidedefs + i * MAP_SIDEDEF_SIZE;
@@ -233,12 +273,9 @@ fn map_load(map_name): i64 {
     }
 
     # SECTORS (marker + 8)
-    lump_idx = marker + 8;
-    lump_size = wad_lump_size(lump_idx);
-    data = wad_read_lump(lump_idx);
+    data = map_lump_read(marker, 8, 26, MAP_MAX_SECTORS);
     if (data == 0) { return -1; }
-    map_num_sectors = lump_size / 26;
-    if (map_num_sectors > MAP_MAX_SECTORS) { map_num_sectors = MAP_MAX_SECTORS; }
+    map_num_sectors = map_lump_count;
     for (var i = 0; i < map_num_sectors; i += 1) {
         var src = data + i * 26;
         var base = map_sectors + i * MAP_SECTOR_SIZE;
@@ -252,12 +289,9 @@ fn map_load(map_name): i64 {
     }
 
     # SEGS (marker + 5)
-    lump_idx = marker + 5;
-    lump_size = wad_lump_size(lump_idx);
-    data = wad_read_lump(lump_idx);
+    data = map_lump_read(marker, 5, 12, MAP_MAX_SEGS);
     if (data == 0) { return -1; }
-    map_num_segs = lump_size / 12;
-    if (map_num_segs > MAP_MAX_SEGS) { map_num_segs = MAP_MAX_SEGS; }
+    map_num_segs = map_lump_count;
     for (var i = 0; i < map_num_segs; i += 1) {
         var src = data + i * 12;
         var base = map_segs + i * MAP_SEG_SIZE;
@@ -273,12 +307,9 @@ fn map_load(map_name): i64 {
     }
 
     # SSECTORS (marker + 6)
-    lump_idx = marker + 6;
-    lump_size = wad_lump_size(lump_idx);
-    data = wad_read_lump(lump_idx);
+    data = map_lump_read(marker, 6, 4, MAP_MAX_SSECTORS);
     if (data == 0) { return -1; }
-    map_num_ssectors = lump_size / 4;
-    if (map_num_ssectors > MAP_MAX_SSECTORS) { map_num_ssectors = MAP_MAX_SSECTORS; }
+    map_num_ssectors = map_lump_count;
     for (var i = 0; i < map_num_ssectors; i += 1) {
         var src = data + i * 4;
         var base = map_ssectors + i * MAP_SSECTOR_SIZE;
@@ -287,12 +318,9 @@ fn map_load(map_name): i64 {
     }
 
     # NODES (marker + 7)
-    lump_idx = marker + 7;
-    lump_size = wad_lump_size(lump_idx);
-    data = wad_read_lump(lump_idx);
+    data = map_lump_read(marker, 7, 28, MAP_MAX_NODES);
     if (data == 0) { return -1; }
-    map_num_nodes = lump_size / 28;
-    if (map_num_nodes > MAP_MAX_NODES) { map_num_nodes = MAP_MAX_NODES; }
+    map_num_nodes = map_lump_count;
     for (var i = 0; i < map_num_nodes; i += 1) {
         var src = data + i * 28;
         var base = map_nodes + i * MAP_NODE_SIZE;
@@ -313,12 +341,9 @@ fn map_load(map_name): i64 {
     }
 
     # THINGS (marker + 1)
-    lump_idx = marker + 1;
-    lump_size = wad_lump_size(lump_idx);
-    data = wad_read_lump(lump_idx);
+    data = map_lump_read(marker, 1, 10, MAP_MAX_THINGS);
     if (data == 0) { return -1; }
-    map_num_things = lump_size / 10;
-    if (map_num_things > MAP_MAX_THINGS) { map_num_things = MAP_MAX_THINGS; }
+    map_num_things = map_lump_count;
     for (var i = 0; i < map_num_things; i += 1) {
         var src = data + i * 10;
         var base = map_things + i * MAP_THING_SIZE;
@@ -341,7 +366,7 @@ fn map_load(map_name): i64 {
     # short lump disables it rather than truncating.
     map_reject = 0;
     map_reject_ok = 0;
-    lump_idx = marker + 9;
+    var lump_idx = marker + 9;
     if (lump_idx < wad_numlumps) {
         var rj_size = wad_lump_size(lump_idx);
         var need = (map_num_sectors * map_num_sectors + 7) / 8;
@@ -365,18 +390,27 @@ fn map_load(map_name): i64 {
     # lazily allocated once (RC-G7 — a per-map alloc(lump_size) leaked the
     # old buffer every reload) and a hard size bound (the vanilla BLOCKMAP
     # format cannot exceed 64 KB anyway: 16-bit offsets).
+    # BM-1: a missing, truncated or zero-sized grid leaves map_blockmap 0, and
+    # collision scans every linedef instead; the previous map's grid used to stay live.
     lump_idx = marker + 10;
-    lump_size = wad_lump_size(lump_idx);
+    var lump_size = wad_lump_size(lump_idx);
     if (lump_size > 65536) { lump_size = 65536; }
-    if (lump_size > 0) {
-        if (map_blockmap == 0) { map_blockmap = alloc(65536); }
-        wad_read_lump_into(lump_idx, map_blockmap, lump_size);
+    map_blockmap = 0;
+    map_bm_cols = 0;
+    map_bm_rows = 0;
+    map_bm_size = 0;
+    if (lump_size >= 8) {
+        if (map_blockmap_buf == 0) { map_blockmap_buf = alloc(65536); }
+    }
+    if (lump_size >= 8 && map_blockmap_buf != 0) {
+        wad_read_lump_into(lump_idx, map_blockmap_buf, lump_size);
         # Header: originx(2) originy(2) columns(2) rows(2)
-        map_bm_originx = sign_extend_16(read_le16(map_blockmap)) << 16;
-        map_bm_originy = sign_extend_16(read_le16(map_blockmap + 2)) << 16;
-        map_bm_cols = read_le16(map_blockmap + 4);
-        map_bm_rows = read_le16(map_blockmap + 6);
+        map_bm_originx = sign_extend_16(read_le16(map_blockmap_buf)) << 16;
+        map_bm_originy = sign_extend_16(read_le16(map_blockmap_buf + 2)) << 16;
+        map_bm_cols = read_le16(map_blockmap_buf + 4);
+        map_bm_rows = read_le16(map_blockmap_buf + 6);
         map_bm_size = lump_size;
+        if (map_bm_cols > 0 && map_bm_rows > 0) { map_blockmap = map_blockmap_buf; }
     }
 
     # Validate all cross-references
@@ -517,12 +551,17 @@ fn map_validate(): i64 {
     # Validate subsector seg ranges. Vanilla requires every subsector to have at
     # least ONE seg; count==0 (0.33.8, R-3) would leave map_point_sector reading
     # first_seg == map_num_segs (one past the array). Reject it at load.
+    # Real node builders emit each seg exactly once. Subsectors that overlap would make
+    # the renderer walk the seg list once per subsector, every frame.
+    var ss_seg_total = 0;
     for (var i = 0; i < map_num_ssectors; i += 1) {
         var base = map_ssectors + i * MAP_SSECTOR_SIZE;
         var count = load64(base);
         var first = load64(base + 8);
         if (count == 0) { return -1; }
         if (first + count > map_num_segs) { return -1; }
+        ss_seg_total += count;
+        if (ss_seg_total > map_num_segs) { return -1; }
     }
 
     # Validate node child indices

@@ -437,6 +437,14 @@ fn menu_tick(): i64 {
     return 0;
 }
 
+# 1 when a quit request survives menu_tick on a screen where it means leave the game.
+fn menu_should_exit(): i64 {
+    if (input_quit != 1) { return 0; }
+    if (menu_screen == MENU_TITLE) { return 1; }
+    if (menu_screen == MENU_MAIN) { return 1; }
+    return 0;
+}
+
 # ================================================================
 # Start menu mode
 # Returns: 1 = start game, -1 = quit
@@ -455,14 +463,14 @@ fn menu_run(): i64 {
         tick_begin();
         input_poll();
 
-        if (input_quit == 1) {
-            if (menu_screen == MENU_TITLE) { return -1; }
-            if (menu_screen == MENU_MAIN) { return -1; }
-        }
-
         menu_tick();
         audio_tick();   # pump the SFX mixer so the volume-slider preview plays
         sound_tick();   # drain PC-speaker menu tones instead of leaving them stuck (F-U7)
+
+        # After menu_tick, which consumes a held ESC: backends that report key state
+        # re-set input_quit every poll, so testing it first turned the press that backs
+        # out of a submenu into a program quit on its second tick.
+        if (menu_should_exit() == 1) { return -1; }
 
         if (menu_result != 0) { return menu_result; }
 

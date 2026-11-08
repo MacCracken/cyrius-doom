@@ -104,8 +104,6 @@ fn sound_switch(): i64 { sound_play(600, 2); return 0; }
 fn sound_explode(): i64 { sound_play(80, 10); return 0; }
 
 # Menu sounds
-fn sound_menu_move(): i64 { sound_play(500, 1); return 0; }
-fn sound_menu_select(): i64 { sound_play(1000, 2); return 0; }
 
 # ================================================================
 # Sound tick (called each game tick)

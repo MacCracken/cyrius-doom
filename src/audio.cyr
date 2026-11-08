@@ -275,17 +275,18 @@ fn audio_load(lump_name): i64 {
     if (sz < SND_HEADER_SIZE) { return -1; }
     if (sz > SND_MAX_SIZE) { sz = SND_MAX_SIZE; }
 
-    var raw = alloc(sz);
-    wad_read_lump_into(lump, raw, sz);
-
     # DMX digital-sound header: bytes 0-1 = format (always 3), 2-3 = sample
     # rate, 4-7 = sample count, 8+ = unsigned 8-bit PCM. Reject anything whose
     # format word isn't 3 before trusting the rest of the header offsets.
-    var fmt_word = read_le16(raw);
+    # AUDIO-8: every rejection is decided from this header, before the first alloc.
+    # A rejected lump is never cached, so it comes back here on every play.
+    var hdr[8];
+    wad_read_lump_into(lump, &hdr, SND_HEADER_SIZE);
+    var fmt_word = read_le16(&hdr);
     if (fmt_word != 3) { return -1; }
 
-    var rate = read_le16(raw + 2);
-    var nsamples = read_le32(raw + 4);
+    var rate = read_le16(&hdr + 2);
+    var nsamples = read_le32(&hdr + 4);
     var data_size = sz - SND_HEADER_SIZE;
     if (nsamples > data_size) { nsamples = data_size; }
     # Reject empty/garbage payloads so audio_play never hands ALSA a 0-frame
@@ -296,19 +297,25 @@ fn audio_load(lump_name): i64 {
     # the only off-rate in shareware is DSITMBK @ 22050, which we decimate 2:1
     # at load (crude, no low-pass -- acceptable for SFX) so playback is 1 cached
     # sample == 1 output frame for every voice. Anything else is taken as-is.
-    var src = raw + SND_HEADER_SIZE;
+    var lead = 0;
     var eff = nsamples;
     # Skip the DMX 16-sample lead + 16-sample tail PAD (0x80 = silence, present in the
     # shareware DS* lumps for the original DAC's sample-and-hold) as Chocolate/PrBoom do
     # -> removes ~1.5 ms of "empty air" at each SFX's start (and a trailing click).
     # Guarded so a short/degenerate lump is left untouched.
-    if (nsamples > 32) { src = src + 16; eff = nsamples - 32; }
+    if (nsamples > 32) { lead = 16; eff = nsamples - 32; }
     var stored = eff;
     if (rate == MIX_RATE_22K) { stored = eff / 2; }
     # A degenerate 1-sample 22050 lump decimates to 0 -> alloc(0) would cache a
     # null pointer in a live slot. Reject it.
     if (stored <= 0) { return -1; }
+
+    var raw = alloc(sz);
+    if (raw == 0) { return -1; }
+    wad_read_lump_into(lump, raw, sz);
+    var src = raw + SND_HEADER_SIZE + lead;
     var pcm = alloc(stored);
+    if (pcm == 0) { return -1; }
     if (rate == MIX_RATE_22K) {
         for (var i = 0; i < stored; i += 1) {
             store8(pcm + i, load8(src + i * 2));
