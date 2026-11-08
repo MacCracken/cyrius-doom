@@ -171,7 +171,7 @@ fn st_draw_patch_shaded(buf, px, py, shade, sz): i64 {
     var pw = read_le16(buf);
     if (pw > TEX_COMP_W_MAX) { pw = TEX_COMP_W_MAX; }
     # v0.35.6 — on-screen tests are RANGE CLAMPS, not `continue`s: this for >
-    # while > for nest is the shape cyrius (still, as of 6.6.6) mis-binds — an
+    # while > for nest is the shape cyrius (through 6.6.6; fixed by 6.6.20) mis-binds — an
     # innermost-`for` continue jumps to the OUTER loop's latch and the outer
     # continues it displaced compile to no-ops. See render_blit_psprite.
     var col_lo = 0;

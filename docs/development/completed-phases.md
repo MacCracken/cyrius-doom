@@ -4,6 +4,12 @@
 
 Each entry: one row, headline only. For the full changelog see [`CHANGELOG.md`](../../CHANGELOG.md).
 
+## v0.36.x — Toolchain closeout
+
+| Version | Shipped | Milestone |
+|---------|---------|-----------|
+| v0.36.0 | 2026-11-08 | **Toolchain 6.6.20 → 6.7.9, deps as bundled, and the 0.35.x closeout.** Stdlib as 6.7.9 bundles it (lock 41 / 0), vani vendor → 1.2.10; bsp 1.2.5 and setu 0.7.0 stay. The closeout's independent review of the whole 0.35.x `src/` diff found no WAD-reachable memory-safety defect and four small ones, fixed: shells / rockets / cells surviving a pistol start, a respawn jumping to the next level, a per-load REJECT leak, four unchecked allocations. Rendering and AI byte-identical to v0.35.9 (46 PPMs + 9 fingerprints + a 25-staging sweep, plain and release); 384 / 33 / 22 / 12 + 689 full; mutation 8 / 8; fuzz ×8; bench neutral; AGNOS QEMU 64,000 / 64,000. Roadmap moved onto 0.37.x–0.40.0 and v1. Binary 607,184 / 410,576 release / 606,552 agnos. |
+
 ## v0.35.x — The gameplay arc
 
 | Version | Shipped | Milestone |

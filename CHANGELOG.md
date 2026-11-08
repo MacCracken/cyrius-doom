@@ -7,6 +7,84 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.0] - 2026-11-08 — cyrius 6.7.9, deps as bundled, and the 0.35.x closeout
+
+Closes the 0.35.x minor. Rendering and monster behaviour are byte-identical to v0.35.9 on 6.6.20. The
+closeout's code review found four small defects, all fixed here; its three refactor candidates moved to the
+roadmap rather than ride a toolchain cut.
+
+### Changed
+
+- **Toolchain 6.6.20 → 6.7.9**, and the stdlib as 6.7.9 bundles it: 25 of doom's resolved files changed, most
+  by a few lines (sakshi is now 2.5.8). `cyrius.lock` regenerated from a clean resolve: **41 / 0**, same file
+  set. No doom source needed changing, and none of 6.7.x's new compile errors fired.
+- **vani vendor 1.2.9 → 1.2.10** (`vendor/vani-core.cyr`), the release 6.7.9 bundles: the PCM fd is now
+  close-on-exec. No `audio_*` signature change.
+- **bsp stays 1.2.5** (not bundled, still the newest tag, `lib/bsp.cyr` matches the tag's dist byte for byte)
+  and **setu stays frozen at 0.7.0** (not a stdlib member; still compiles under `--agnos`).
+- **Binary sizes**: plain 607,728 → **607,184 B** (−544), release 411,120 → **410,576 B** (−544), agnos
+  602,984 → **606,552 B** (+3,568).
+- **Roadmap moved onto 0.37.x and up.** Unplanned toolchain cuts used up the v0.35.x numbers and v0.36.0. The
+  gameplay slots are now **v0.37.0–v0.37.6**, desktop polish v0.37.7, mouse **v0.38.0**, X11 **v0.39.0**, OPL2
+  **v0.40.0**, then v1.0.0; `roadmap.md` carries the old → new table.
+
+### Fixed
+
+From the closeout's review of the whole 0.35.x `src/` diff:
+
+- **Shells, rockets and cells survived every pistol start.** `player_init` reset only the bullets, so after a
+  death respawn, or a new game from the finale, the old ammo was still on the HUD, a full type left pickups on
+  the floor, and the empty-ammo auto-switch stopped firing. All four ammo types reset now.
+- **A respawn could jump straight to the next level.** The dead player still ticks once (roadmap W-6), so an
+  exit line crossed on that tick set `next_level_flag`, and the death branch reloaded the map without clearing
+  it: the first live tick of the new life went to the intermission, or on E1M8 to the finale. A starting level
+  now clears any pending exit (`level_reset_stats`).
+- **The REJECT table leaked on every map load**: 685 B to 7,813 B a load on the shareware maps, on the
+  never-free bump allocator. It is now one buffer sized for the largest map, as BLOCKMAP has been since RC-G7.
+- **Four allocations added this minor had no null check**: the teleport line list and the finale's font and
+  flat. On exhaustion the game now loses monster teleports or draws a blank finale instead of writing through
+  a null pointer.
+
+### Upstream fixes checked against doom
+
+6.7.x fixes several silent-wrong-value bugs that could have reached this code, so each was checked by scanning
+`src/`, `vendor/`, `tests/`, `fuzz/` and `benches/` rather than assumed: a lone `!` compiled as nothing until
+6.7.3 (**0 uses in doom**), and on 6.6.10–6.7.8 a unary `-` or `~` on a constant ahead of a literal operator
+folded wrong, `-K + 10` giving 15 (**0 sites**). The `*T` pointer-step and method-result fixes need typed
+pointers or methods, and doom has neither (0 `*T` annotations, `impl` blocks or generics).
+
+### Closeout
+
+- **Bench**: neutral. Three interleaved rounds against the 6.6.20 build, best average: `render_frame` 385.1 →
+  387.5 µs (+0.6%), `render_frame+sprites_spawned` 549.5 → 557.7 µs (+1.5%), `things_tick` 4.56 µs both.
+  `texture_find` is about 10% slower on 6.7.9 (134 → 148 ns, seen in two separate runs); it is not on the
+  per-frame path. Against the prior closeout (v0.35.0, 385.5 µs) `render_frame` is flat at 386.2 µs.
+- **Dead code**: `CYRIUS_DCE=1` removes 812 fns / 197,591 B. 28 of those are doom's own, several of them seam
+  or planned-sound entry points; none removed.
+- **Code review** of `0.34.10..HEAD -- src/` (2,388 added, 389 removed) by an independent static read: **no
+  memory-safety or out-of-bounds defect reachable from a WAD**. The four defects above came from it, each
+  re-verified against the code before fixing.
+- **Refactor pass**: three third-instance duplications found, none applied here; they lead the v0.37.1 slot
+  (RF-1..3), where the new specials would otherwise copy them again.
+- **Security re-scan**: no new exec surface or raw buffers over 100 bytes; the only new direct writes are the
+  `--ai-probe` report lines.
+- **Cleanup**: three comments still saying `for > while > for` was broken "as of 6.6.6", and the slot pointer
+  in `doors.cyr`.
+
+### Verification
+
+- 384 / 33 / 22 / 12 WAD-free, **689 / 689** full (+12 asserts). **Mutation: 8 of 8 killed**, one per fix line.
+  Fuzz ×8 clean at full iteration counts. No compile warnings on Linux or `--agnos`.
+- **46 PPMs + 9 `--ai-probe` fingerprints byte-identical** to the v0.35.9 / 6.6.20 baseline (its release and
+  agnos hashes match the v0.35.9 gate row) on the plain **and** `CYRIUS_DCE=1` builds, and the top 25
+  `ai-staging-sweep` stagings are identical too.
+- A fresh `rm -rf lib && cyrius deps` reproduces release `a9250957…` and agnos `7c7c2843…` byte for byte.
+- **AGNOS QEMU** on the final `doom_agnos`: boots v0.36.0, WAD loads, **64,000 / 64,000** blocks exact against
+  Linux. The harness's floor-band gate still false-FAILs (agnos-side origin assumption).
+- **Not verified**: a successful PCM open on real audio hardware (unchanged since v0.35.9); the respawn fix is
+  tested at the flag level, not by running a dead player across an exit line; the teleport-list and finale-flat
+  null checks have no direct test, since forcing them needs allocator exhaustion.
+
 ## [0.35.9] - 2026-11-08 — toolchain: cyrius 6.6.20, deps as bundled
 
 A toolchain cut with no game or render change: every capture and AI fingerprint is byte-identical to the

@@ -47,7 +47,9 @@ fn finale_e1_text(): i64 {
 fn finale_load_font(): i64 {
     if (fin_font != 0) { return 0; }
     fin_font = alloc(FIN_FONT_COUNT * 16);
+    if (fin_font == 0) { return 0; }
     var nm = alloc(16);
+    if (nm == 0) { fin_font = 0; return 0; }
     memcpy(nm, "STCFN", 5);
     for (var g = 0; g < FIN_FONT_COUNT; g += 1) {
         var code = FIN_FONT_FIRST + g;
@@ -75,7 +77,7 @@ fn finale_text_end(len): i64 {
 fn finale_draw_flat(name): i64 {
     if (fin_flat == 0) { fin_flat = alloc(FIN_FLAT_SIZE); }
     var idx = wad_find_lump(name);
-    if (idx < 0 || wad_lump_size(idx) < FIN_FLAT_SIZE) {
+    if (fin_flat == 0 || idx < 0 || wad_lump_size(idx) < FIN_FLAT_SIZE) {
         framebuf_clear(0);
         return 0;
     }
@@ -120,7 +122,7 @@ fn finale_draw_text(text, count): i64 {
                 if (ch >= 97 && ch <= 122) { ch -= 32; }
                 var g = ch - FIN_FONT_FIRST;
                 var buf = 0;
-                if (g >= 0 && g < FIN_FONT_COUNT) { buf = load64(fin_font + g * 16); }
+                if (fin_font != 0 && g >= 0 && g < FIN_FONT_COUNT) { buf = load64(fin_font + g * 16); }
                 if (buf == 0) {
                     cx += FIN_SPACE_W;
                     n += 1;

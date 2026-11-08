@@ -3,8 +3,8 @@
 # v0.35.6 rewrote render_blit_psprite (the HUD gun) and st_draw_patch_shaded
 # (every status-bar / menu / title patch) to clamp their column and row ranges
 # instead of testing each pixel with `continue`. The rewrite was forced: both
-# are for > while > for nests, a shape cyrius still mis-binds `continue` in as
-# of 6.6.6. A clamp is only a correct replacement if it draws EXACTLY the pixels
+# are for > while > for nests, a shape cyrius mis-bound `continue` in through
+# 6.6.6. A clamp is only a correct replacement if it draws EXACTLY the pixels
 # the per-pixel tests would have — an off-by-one at an edge loses or smears a
 # row or column, and no crash-only fuzz can see that.
 #

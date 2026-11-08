@@ -1024,9 +1024,16 @@ fn main() {
     assert_eq(player_armor, 100, "level advance keeps armor");
     assert_eq(player_keys, 0, "keys are cleared per level");
     # A full reset (new game / respawn) does wipe back to pistol start.
+    player_ammo_bullets = 7;
+    player_ammo_rockets = 3;
+    player_ammo_cells = 40;
     player_init();
     assert_eq(player_weapons, 6, "player_init wipes weapons back to pistol start");
     assert_eq(player_health, 100, "player_init resets health");
+    assert_eq(player_ammo_bullets, 50, "player_init refills bullets to 50");
+    assert_eq(player_ammo_shells, 0, "player_init clears shells (v0.36.0)");
+    assert_eq(player_ammo_rockets, 0, "player_init clears rockets (v0.36.0)");
+    assert_eq(player_ammo_cells, 0, "player_init clears cells (v0.36.0)");
 
     # ============================================================
     test_group("sprite: rotation faces the viewer (F-R1)");
@@ -1502,6 +1509,25 @@ fn main() {
     secret_exit_flag = 0;
 
     # ============================================================
+    test_group("v0.36.0 closeout: exit flags, finale without a font");
+    # ============================================================
+    # A death respawn reloads the map without level_advance; an exit crossed on
+    # the dead player's last tic must not survive into the new life.
+    var lr_tc = thing_count;
+    thing_count = 0;
+    level_exit_secret();
+    assert_eq(next_level_flag, 1, "the exit is pending before the reload");
+    level_reset_stats();
+    assert_eq(next_level_flag, 0, "a starting level has no exit pending");
+    assert_eq(secret_exit_flag, 0, "nor a secret exit pending");
+    thing_count = lr_tc;
+    # With no glyph table (out of memory) the text still advances, as blanks.
+    var ff_save = fin_font;
+    fin_font = 0;
+    assert_eq(finale_draw_text("AB", 2), 2, "finale text with no font draws blanks");
+    fin_font = ff_save;
+
+    # ============================================================
     # WAD tests require DOOM1.WAD — skip if not available
     # ============================================================
 
@@ -1612,7 +1638,12 @@ fn main() {
         # BLOCKED, the real walk must also say blocked. (The converse is not
         # required — REJECT is allowed to say "maybe" and be wrong that way,
         # which just costs a scan.)
+        assert_eq(map_load("E1M2"), 0, "E1M2 loads before the REJECT check");
+        var rj_buf = map_reject;
+        assert_eq(rj_buf != 0, 1, "E1M2 has a REJECT table");
         assert_eq(map_load("E1M1"), 0, "E1M1 loads for the REJECT check");
+        assert_eq(map_reject, rj_buf, "one REJECT buffer across map loads (v0.36.0)");
+        assert_eq(map_reject_ok, 1, "and the reload still holds a valid table");
         var rj_pairs = 0;
         var rj_blocked = 0;
         var rj_disagree = 0;

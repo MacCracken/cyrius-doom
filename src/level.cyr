@@ -54,6 +54,12 @@ fn level_get_name(): i64 {
 }
 
 fn level_reset_stats(): i64 {
+    # A level that is starting has no exit pending. The death branch reloads the
+    # map without level_advance, so an exit line crossed on the dead player's
+    # last tic would otherwise fire on the first live tic of the respawn.
+    next_level_flag = 0;
+    secret_exit_flag = 0;
+
     level_kills = 0;
     level_items = 0;
     level_secrets = 0;

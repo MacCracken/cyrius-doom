@@ -84,6 +84,7 @@ fn doors_init(): i64 {
     while (i < MAP_MAX_LINEDEFS) { store8(linedef_used + i, 0); i += 1; }
     door_count = 0;
     tele_line_count = 0;
+    if (tele_lines == 0) { return 0; }   # out of memory: no monster teleports
     for (var li = 0; li < map_num_linedefs; li += 1) {
         var lsp = load64(map_linedefs + li * MAP_LINEDEF_SIZE + 24);
         if (lsp == 39 || lsp == 97 || lsp == 125 || lsp == 126) {
@@ -1221,7 +1222,7 @@ fn teleport_monster(idx, tag): i64 {
 
 # Monster `idx` just stepped (ox,oy)->(nx,ny): take any teleport line it crossed
 # (39 / 97 / 125 / 126). Called at the end of chase_try_walk. 1 = teleported.
-# The door and lift lines monsters may also walk (4 / 10 / 88) are v0.35.11.
+# The door and lift lines monsters may also walk (4 / 10 / 88) are v0.37.1.
 fn monster_cross_teleports(idx, ox, oy, nx, ny): i64 {
     for (var k = 0; k < tele_line_count; k += 1) {
         var li = load64(tele_lines + k * 8);

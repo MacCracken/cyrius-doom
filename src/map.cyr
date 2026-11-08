@@ -38,6 +38,7 @@ var map_blockmap = 0;
 # REJECT: sector-visibility bit matrix (see map_load). map_reject_ok gates every
 # read so a WAD without a usable REJECT simply falls back to the full line walk.
 var map_reject = 0;
+var map_reject_buf = 0;
 var map_reject_ok = 0;
 var map_bm_originx = 0;
 var map_bm_originy = 0;
@@ -346,12 +347,15 @@ fn map_load(map_name): i64 {
         var need = (map_num_sectors * map_num_sectors + 7) / 8;
         if (rj_size >= need) {
             if (need > 0) {
-                if (need <= 1048576) {
-                    map_reject = alloc(need);
-                    if (map_reject != 0) {
-                        wad_read_lump_into(lump_idx, map_reject, need);
-                        map_reject_ok = 1;
-                    }
+                # Allocated once, sized for the largest map, as BLOCKMAP below
+                # (RC-G7): a per-map alloc(need) leaked on the bump allocator.
+                if (map_reject_buf == 0) {
+                    map_reject_buf = alloc((MAP_MAX_SECTORS * MAP_MAX_SECTORS + 7) / 8);
+                }
+                if (map_reject_buf != 0) {
+                    wad_read_lump_into(lump_idx, map_reject_buf, need);
+                    map_reject = map_reject_buf;
+                    map_reject_ok = 1;
                 }
             }
         }

@@ -5,7 +5,7 @@ description = "DOOM in Cyrius — clean-room, direct framebuffer, no libc, just 
 license = "GPL-3.0-only"
 repository = "https://github.com/MacCracken/cyrius-doom"
 language = "cyrius"
-cyrius = "6.6.20"
+cyrius = "6.7.9"
 
 [build]
 src = "src/main.cyr"
@@ -34,11 +34,11 @@ stdlib = ["string", "alloc", "fmt", "vec", "str", "io", "fs", "args", "syscalls"
 # the shim → "dep vani requires 'yukti'" errors. Vendoring compiles just
 # the shim against doom's own stdlib list. Refresh: copy vani's
 # `dist/vani-core.cyr` on a vani release. Mirrors cyrius-polyomino/-bb.
-# (Provenance: vani 1.2.9 — the same release the 6.6.20 stdlib bundles as
-#  `lib/vani.cyr` (full profile); this file is its `core` profile. 1.2.5→1.2.9
-#  on the surface doom calls: no signature change, and a busy PCM now fails
-#  the open at once (→ 0, doom runs silent) instead of sleeping until its
-#  holder lets go. Every audio_* return is still a plain i64, so 1.2.3's
+# (Provenance: vani 1.2.10 — the same release the 6.7.9 stdlib bundles as
+#  `lib/vani.cyr` (full profile); this file is its `core` profile. 1.2.5→1.2.10
+#  on the surface doom calls: no signature change, a busy PCM now fails the
+#  open at once (→ 0, doom runs silent) instead of sleeping until its holder
+#  lets go, and the PCM fd is close-on-exec. Every audio_* return is still a plain i64, so 1.2.3's
 #  Result value-form break (vani_result_unwrap) cannot reach doom, which
 #  calls no vani_* fn.)
 

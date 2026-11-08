@@ -277,7 +277,7 @@ fn render_blit_psprite(buf, psz, light): i64 {
     var pend = buf + psz;
 
     # v0.35.6 — the on-screen tests are RANGE CLAMPS, not `continue`s. This is
-    # a for > while > for nest, and cyrius (still, as of 6.6.6) mis-binds a
+    # a for > while > for nest, and cyrius (through 6.6.6; fixed by 6.6.20) mis-binds a
     # `continue` in the innermost `for` once the outer `for` has recorded one:
     # the outer continue compiles to a NO-OP and the inner one jumps to the
     # OUTER loop's latch, abandoning the rest of the column. The old

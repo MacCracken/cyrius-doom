@@ -26,8 +26,8 @@ checklist items already ship. Only two things stand in the way, and they are ind
 
 | Blocker | Release | Why it is the blocker |
 |---|---|---|
-| Playable start-to-finish — the evidence | **v0.35.10** | *The mechanisms shipped in v0.35.8* — E1M8's boss floor, teleports, the exit room and the finale — so the episode can now end: the reachability model shows every map's exit reachable, and an in-engine test drives E1M8's whole ending. What v1.0.0 item 1 still lacks is a **scripted E1M1 → E1M8 playthrough** that reaches the finale through the real game loop — its own slot, by choice at the v0.35.8 cut, because it is a harness, not a mechanism. |
-| X11 backend | **v0.37.0** | The only unmet "multiple display backends" item; fb0 / Wayland ship. ⛔ **AGNOS-setu does NOT ship** (corrected 2026-08-03): its TCP-on-loopback transport is retired as the **wrong primitive** for a local display protocol, and doom has no honest agnos proof over it — the `aethersafha-doom-smoke.sh` greens came from the deleted `AETHERSAFHA_SETU_SELFTEST` kernel hook. (Scope note: the handshake could not complete on an ordinary boot only **before agnos 1.56.34 / `net_src_for`**; afterwards other clients did connect un-rigged, QEMU `-smp 1`. doom was not one of them.) doom's only honest agnos display path today is `PM_FB0` (blit#39). See agnos `planning/ipc.md` §9-§10. |
+| Playable start-to-finish — the evidence | **v0.37.0** | *The mechanisms shipped in v0.35.8* — E1M8's boss floor, teleports, the exit room and the finale — so the episode can now end: the reachability model shows every map's exit reachable, and an in-engine test drives E1M8's whole ending. What v1.0.0 item 1 still lacks is a **scripted E1M1 → E1M8 playthrough** that reaches the finale through the real game loop — its own slot, by choice at the v0.35.8 cut, because it is a harness, not a mechanism. |
+| X11 backend | **v0.39.0** | The only unmet "multiple display backends" item; fb0 / Wayland ship. ⛔ **AGNOS-setu does NOT ship** (corrected 2026-08-03): its TCP-on-loopback transport is retired as the **wrong primitive** for a local display protocol, and doom has no honest agnos proof over it — the `aethersafha-doom-smoke.sh` greens came from the deleted `AETHERSAFHA_SETU_SELFTEST` kernel hook. (Scope note: the handshake could not complete on an ordinary boot only **before agnos 1.56.34 / `net_src_for`**; afterwards other clients did connect un-rigged, QEMU `-smp 1`. doom was not one of them.) doom's only honest agnos display path today is `PM_FB0` (blit#39). See agnos `planning/ipc.md` §9-§10. |
 
 Everything else below is quality, fidelity, robustness, or performance.
 
@@ -52,28 +52,32 @@ gated on a PPM A/B. Nothing below is.
 
 ---
 
-## v0.35.x — The gameplay arc
+## v0.37.x — The gameplay arc, continued
 
-**Minor bump on purpose**: unlike everything above, these cuts are *not* byte-identical — they change what
-monsters do, where things sit in z, and how a level ends. The PPM A/B gate stops being sufficient here, so
-each release below names a gameplay gate instead.
+v0.35.0–v0.35.9 shipped the first half of this arc (sight and wake, the chase, thing physics, real thing-z,
+the interactables review, the sprite anchor, Episode end) and v0.36.0 closed out that minor on cyrius 6.7.9;
+see [`completed-phases.md`](completed-phases.md). These cuts are *not* byte-identical — they change what
+monsters do and how a level plays — so each release below names a gameplay gate instead of a PPM A/B.
 
-> **Renumbered at v0.35.6.** v0.35.5 and v0.35.6 went to unplanned cuts — the 6.6.2 / 6.6.6 toolchain
-> bumps and the interactables review ([`completed-phases.md`](completed-phases.md)). Every planned slot
-> below moved up two, in the same order; the review's follow-ups are two new slots after Episode end.
-> **v0.35.7** (the `top_off` sprite-anchor revival) shipped 2026-09-26 — every moved sprite adjudicated
-> against its patch metadata; see [`completed-phases.md`](completed-phases.md).
+> **Renumbered at v0.36.0.** Unplanned toolchain cuts used up the v0.35.x numbers and v0.36.0, so the plan
+> moved, in the same order. The CHANGELOG, audit reports and older docs keep the numbers they were written
+> with; read them through this table.
 >
-> **v0.35.8** (Episode end: teleports, E1M8's boss death, damaging floors + the radiation suit, the
-> finale, D_INTER / D_VICTOR) shipped 2026-09-26. **Renumbered again at v0.35.8**: the scripted
-> playthrough (v1.0.0-1) left the Episode-end slot for one of its own, **v0.35.9**, so every later slot
-> moved up one, in the same order.
->
-> **v0.35.9** (toolchain 6.6.20 + deps as bundled) shipped 2026-11-08. **Renumbered again at v0.35.9**: an
-> unplanned toolchain cut took the number, so every planned slot moved up one, in the same order — the
-> playthrough is now **v0.35.10**.
+> | Was | Now | Slot |
+> |---|---|---|
+> | v0.35.10 | **v0.37.0** | Playable start-to-finish ⭐ |
+> | v0.35.11 | **v0.37.1** | Interactables II |
+> | v0.35.12 | **v0.37.2** | Items II |
+> | v0.35.13 | **v0.37.3** | Combat cosmetics |
+> | v0.35.14 | **v0.37.4** | Audio + music fidelity |
+> | v0.35.15 | **v0.37.5** | Lighting + plane parity |
+> | v0.35.16 | **v0.37.6** | Engine-invariant audit |
+> | v0.35.17 | **v0.37.7** | Desktop present polish |
+> | v0.36.0 | **v0.38.0** | Mouse / pointer input |
+> | v0.37.0 | **v0.39.0** | Native X11 backend ⭐ |
+> | v0.38.0 | **v0.40.0** | OPL2 FM synthesis |
 
-### v0.35.10 — Playable start-to-finish ⭐ *critical path*
+### v0.37.0 — Playable start-to-finish ⭐ *critical path*
 
 | # | Item | Detail |
 |---|------|--------|
@@ -82,7 +86,7 @@ each release below names a gameplay gate instead.
 **Gate**: none — every map's exit is reachable in the model since v0.35.8. Exit: the playthrough reaches
 the E1M8 finale on Linux (fb0 or a headless present), with the per-map route recorded in-repo.
 
-### v0.35.11 — Interactables II (feedback + the remaining specials)
+### v0.37.1 — Interactables II (feedback + the remaining specials)
 
 From the v0.35.6 review, §3. **U-10** use-key edge latch (holding E re-fires every tick; must survive tty
 autorepeat gaps and the AGNOS kbscan drain) then **U-5** re-using a moving DR door reverses it · switch
@@ -92,6 +96,8 @@ wait 30 s, reopen) · monsters triggering walk lines and opening doors · **U-12
 any overlapping body · **W-6** dead player's extra tick · **P-13** chainsaw lights ARMS 6 · **P-15** monster
 hitscan hits barrels · **P-16** kills credited at death, not at animation end · **P-17** rocket collision
 uses the rocket's own floor and radius.
+
+**Consolidate first (from the v0.36.0 closeout; no runtime change, so do these before the new specials copy them again)**: **RF-1** `thing_slot_acquire` + one initialiser + `thing_remove` — `thing_spawn_tfog` / `_missile` / `_fireball` each repeat the freed-slot scan, the append and the field stores · **RF-2** `map_sector_special` / `_tag` and `map_linedef_special` / `_tag` accessors over the raw +24 / +32 / +40 / +48 offsets (`level.cyr` records a shipped bug from exactly this confusion) · **RF-3** `line_other_sector(i, sec)` for the four two-sided neighbour scans in `doors.cyr`.
 
 **AI-1 (found by the v0.35.8 E1M9 probe)**: a chasing monster that loses sight of the player for 100 tics
 **gives up and goes back to idle** (`thing_ai_tick`, the "lost sight?" branch) — vanilla never abandons a
@@ -104,7 +110,7 @@ behaviour gate.
 the monster door / lift lines (4 / 10 / 88) should reuse. Exit: each special on its real line in the
 WAD-gated interactables groups, as v0.35.6 did.
 
-### v0.35.12 — Items II
+### v0.37.2 — Items II
 
 Backpack (type 8, E1M2–M9: max ammo doubled) · the three remaining DOOM1 powerups (invisibility, computer
 map, light amplification) with timers — and then they join the items-% count (v0.35.6 §5) · monster drops
@@ -115,7 +121,7 @@ counts toward items %, as in vanilla — and today nothing on screen says it is 
 
 **Gate**: none (v0.35.8 shipped the damaging floors the suit is for).
 
-### v0.35.13 — Combat cosmetics + a dormant one-liner
+### v0.37.3 — Combat cosmetics + a dormant one-liner
 
 BEXP rocket-explosion frames (a rocket's detonation is still instant — barrels got theirs in v0.35.6) · the
 teleport fog's vanilla frame order (v0.35.8 runs TFOG A..J once; vanilla opens A B A B, then C..J) · full
@@ -126,12 +132,12 @@ v0.35.8 at the v0.35.6 cut — teleporters depended on it — and shipped there.
 
 **Gate**: after v0.35.2. Exit: staged-viewpoint PPMs at successive ticks per animation.
 
-### v0.35.14 — Audio + music fidelity
+### v0.37.4 — Audio + music fidelity
 
 **MUSIC-2** MUS percussion (channel 15 is dropped entirely — E1M1's track is drum-driven, so this is the
 high-impact one) · **MUSIC-3** pitch bend + expression/pan controllers · **AUDIO-6** gate the PC-speaker
 beep when `audio_dev != 0` (resolve the `sound.cyr`/`audio.cyr` include-order constraint with a shared flag)
-· **AUDIO-7** the four 0.30.7 cosmetic nits.
+· **AUDIO-7** the four 0.30.7 cosmetic nits · **AUDIO-8** `audio_load` allocates the raw lump before checking its format and a rejected lump is never cached, so each play of a bad `DS*` lump leaks up to 64 KB (v0.36.0 review).
 
 **Gate**: none. Exit: `fuzz_mus` over the new paths + a deterministic PCM dump of E1M1's track.
 
@@ -146,7 +152,7 @@ change into a cut gated on "shareware output must not move" would have muddied b
 **Gate**: independent. Exit: byte-identical 9-map A/B (a typed-error refactor must not move pixels)
 plus the existing texture asserts re-pointed at the new signatures.
 
-### v0.35.15 — Lighting + plane parity
+### v0.37.5 — Lighting + plane parity
 
 Sector light specials 1 / 2 / 3 / 8 / 12 / 13 / 17 (108 DOOM1 sectors) and W1 **35** (from the v0.35.6 review — the sector struct is full, so a parallel array) · Closes the last of the v0.28.7 sub-audit: **brightness/lighting A-B vs the COLORMAP reference** (write the
 per-light-level PPM diff to `docs/audit/`) · **RC-S8** sprite dimming still uses an ad-hoc `/96` ramp
@@ -160,37 +166,37 @@ viewpoints (E1M1's blue pool is FLAT14, not NUKAGE), so the SLADRIP animation fi
 gated by WAD-gated unit asserts rather than the PPM sweep. Stage a viewpoint onto a SLADRIP wall
 here, where staged-viewpoint work already lives, and add it to the captured set.
 
-### v0.35.16 — Engine-invariant audit (verification-first)
+### v0.37.6 — Engine-invariant audit (verification-first)
 
 The original Black Book sub-audits, deliberately run **after** the gameplay arc so they assert the shipped
 engine rather than one mid-rewrite: BSP traversal invariants (`bsp_point_on_side` parity, front-to-back walk
 order) · subsector containment sweep · wall-slide collision parity · blockmap cell-list parity on E1M6 (the
 C3 bounds half shipped in 0.33.8 — only the parity half remains) · visplane budget stress (E1M9 + max
 things, `plane_dropped` stays 0) · **G-13** sector-0 degenerate leaf → −1 plus the caller sweep the
-containment audit produces.
+containment audit produces · **BM-1** a map with an empty BLOCKMAP lump keeps the previous map's grid (memory-safe, wrong collision; v0.36.0 review).
 
 **Gate**: after v0.35.2. Exit: new assert groups per item — this cut's deliverable *is* tests.
 
 ---
 
-## v0.35.17–v0.38.0 — Desktop, input, and synthesis
+## v0.37.7–v0.40.0 — Desktop, input, and synthesis
 
 Ordered so the `win_*` seam churns exactly once: scaling → pointer → X11.
 
 | Release | Theme | Contents |
 |---|---|---|
-| **v0.35.17** | Desktop present polish | **WF-4** aspect-correct (1.2× vertical) + fill-to-window modes · **WF-3** HiDPI / fractional scale (`set_buffer_scale`, `wp_fractional_scale_v1` + viewporter) · **WF-7** re-present in the death-wait loop so the death frame rescales · **WF-6** per-event size table for the remaining fixed-offset wire handlers. Independent of the entire gameplay arc. |
-| **v0.36.0** | **Mouse / pointer input** (WF-1) | The last input mode DOOM expects on a desktop. `wl_pointer` off the seat → turn/fire/use through the existing bitmask flags; a `win_next_pointer` seam entry (fb0/AGNOS/PPM return no-pointer); `zwp_relative_pointer` + `zwp_pointer_constraints` for real mouse-look; a sensitivity option following the Sound-menu live-preview pattern. **After v0.35.17** (desktop present polish) — the seam must be settled first. *(Read "After v0.35.11" — a pointer the earlier renumberings left stale; corrected at v0.35.8.)* |
-| **v0.37.0** ⭐ | **Native X11 backend** (WF-5) | *Critical path.* `src/platform/x11/{wire,client}.cyr` mirroring the wayland/ split; MIT-SHM or PutImage present; `PM_X11` in `PresentMode`; full keyboard + the pointer seam from v0.36.0; lifecycle incl. focus clearing the input latches the way Wayland and setu already do. Closes the v1.0.0 "multiple display backends" item. |
-| **v0.38.0** | **OPL2 FM synthesis via GENMIDI** | The biggest remaining fidelity win and a genuinely large module: GENMIDI parsing (GM → 2-op OPL2 patches incl. the percussion bank), an OPL2 emulator (operator FM, ADSR, feedback) in pure 16.16, routing the MUS sequencer into OPL channels, and OPL rhythm mode replacing the percussion stand-in MUSIC-2 adds in v0.35.14. **After v0.35.14.** *(Read "v0.35.4" — stale since an earlier renumbering; corrected at v0.35.8.)* |
+| **v0.37.7** | Desktop present polish | **WF-4** aspect-correct (1.2× vertical) + fill-to-window modes · **WF-3** HiDPI / fractional scale (`set_buffer_scale`, `wp_fractional_scale_v1` + viewporter) · **WF-7** re-present in the death-wait loop so the death frame rescales · **WF-6** per-event size table for the remaining fixed-offset wire handlers. Independent of the entire gameplay arc. |
+| **v0.38.0** | **Mouse / pointer input** (WF-1) | The last input mode DOOM expects on a desktop. `wl_pointer` off the seat → turn/fire/use through the existing bitmask flags; a `win_next_pointer` seam entry (fb0/AGNOS/PPM return no-pointer); `zwp_relative_pointer` + `zwp_pointer_constraints` for real mouse-look; a sensitivity option following the Sound-menu live-preview pattern. **After v0.37.7** (desktop present polish) — the seam must be settled first. |
+| **v0.39.0** ⭐ | **Native X11 backend** (WF-5) | *Critical path.* `src/platform/x11/{wire,client}.cyr` mirroring the wayland/ split; MIT-SHM or PutImage present; `PM_X11` in `PresentMode`; full keyboard + the pointer seam from v0.38.0; lifecycle incl. focus clearing the input latches the way Wayland and setu already do. Closes the v1.0.0 "multiple display backends" item. |
+| **v0.40.0** | **OPL2 FM synthesis via GENMIDI** | The biggest remaining fidelity win and a genuinely large module: GENMIDI parsing (GM → 2-op OPL2 patches incl. the percussion bank), an OPL2 emulator (operator FM, ADSR, feedback) in pure 16.16, routing the MUS sequencer into OPL channels, and OPL rhythm mode replacing the percussion stand-in MUSIC-2 adds in v0.37.4. **After v0.37.4.** |
 
 ---
 
 ## v1.0.0 — Ship
 
-**Blocked only on v0.35.10 (the playthrough evidence) and v0.37.0.** Checklist items 4 (runs on AGNOS), 5 (runs on /dev/fb0) and 6 (in
+**Blocked only on v0.37.0 (the playthrough evidence) and v0.39.0.** Checklist items 4 (runs on AGNOS), 5 (runs on /dev/fb0) and 6 (in
 the AGNOS initrd) already ship — correct them to ✅ with their evidence at tag time, and fold item 2 (X11)
-into v0.37.0 as one row rather than two.
+into v0.39.0 as one row rather than two.
 
 > ⛔ **Corrected 2026-08-03 — "runs on AGNOS" means `PM_FB0` (blit#39 fullscreen) ONLY.** The `PM_SETU`
 > windowed backend has no honest agnos proof: its TCP-on-loopback transport is retired as the wrong
@@ -236,8 +242,8 @@ blind defaults, need a real jack · **AUDIO-5** device-pick heuristic identifies
 ### HOLD-C — upstream gated
 
 **v0.29.x items 1–4** — the deep perf pass is gated on cyrius **v6.5.x Performance-Quality** (peephole /
-strength reduction, IR-driven DCE for a *real* binary shrink — today `CYRIUS_DCE=1` only NOPs ~100 KB in
-place — and linear-scan regalloc, the single biggest projected win) · bench formatter `min > max` lives in
+strength reduction and linear-scan regalloc, the single biggest projected win; real dead-code removal
+landed upstream by 6.6.6) · bench formatter `min > max` lives in
 the cyrius stdlib · `#io` effect annotations await a stable annotation surface · **WF-2** GPU present needs
 the mabda dep + a dmabuf/EGL path.
 

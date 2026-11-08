@@ -108,6 +108,9 @@ fn player_init(): i64 {
     player_armor = 0;
     player_armor_class = 0;
     player_ammo_bullets = 50;
+    player_ammo_shells = 0;
+    player_ammo_rockets = 0;
+    player_ammo_cells = 0;
     player_weapon = 2;
     # Bitmask: bit N = has weapon N (bit 1=fist, bit 2=pistol)
     player_weapons = 6;
