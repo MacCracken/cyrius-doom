@@ -18,15 +18,16 @@
 # render_clip_band_build had the same shape, so a drawseg that was farther than
 # the sprite at one column stopped occluding at every later column.
 #
-# Still open upstream as of cyrius 6.6.6: for > while > for, when the outer for
-# records a continue before the while and the inner for owns one, keeps the
-# pre-6.6.3 behaviour. doom no longer writes that shape (render_blit_psprite and
-# st_draw_patch_shaded clamp their ranges instead); the last group below pins
-# the clamp shape they use, which compiles correctly on every version measured.
+# for > while > for — the outer for records a continue before the while and the
+# inner for owns one — stayed broken through cyrius 6.6.6 and was fixed by 6.6.20
+# (which also lifted the 8-continue cap). doom still doesn't write that shape
+# (render_blit_psprite and st_draw_patch_shaded clamp their ranges instead); the
+# clamp group pins what they use, and the last group pins the fixed shape itself.
 #
 # Every expectation is a hand-derived count, not a comparison against another
 # compiled path, so the suite cannot agree with itself about a wrong answer.
-# Measured RED on cyrius 6.6.2 and GREEN on 6.6.6.
+# Measured RED on cyrius 6.6.2 and GREEN on 6.6.6, except the for > while > for
+# group, which is RED on 6.6.6 and GREEN on 6.6.20.
 
 include "lib/string.cyr"
 include "lib/alloc.cyr"
@@ -161,6 +162,28 @@ fn shape_clamped_patch(): i64 {
     return 0;
 }
 
+# The shape 6.6.3 left broken and 6.6.20 fixed: a `continue` in the outer for
+# BEFORE the while, and one in the innermost for. col 0 skips; cols 1 and 2 each
+# walk 2 posts of rows 0..3, counting the even rows only.
+fn shape_for_while_for(): i64 {
+    c_reset();
+    for (var col = 0; col < 3; col += 1) {
+        if (col == 0) { continue; }
+        if (col == 0) { c_noop += 1; }
+        c_reached += 1;
+        var posts = 0;
+        while (posts < 2) {
+            posts += 1;
+            for (var row = 0; row < 4; row += 1) {
+                if ((row & 1) == 1) { continue; }
+                c_inner += 1;
+            }
+        }
+        c_done += 1;
+    }
+    return 0;
+}
+
 fn main() {
     alloc_init();
 
@@ -196,6 +219,13 @@ fn main() {
     assert_eq(c_reached, 4, "cols 2..5 walk their posts");
     assert_eq(c_inner, 16, "2 clamped rows x 2 posts x 4 cols");
     assert_eq(c_done, 4, "every walked column completes");
+
+    test_group("for > while > for: each continue binds its own loop (6.6.20)");
+    shape_for_while_for();
+    assert_eq(c_noop, 0, "outer continue skips col 0");
+    assert_eq(c_reached, 2, "cols 1 and 2 reach the post walk");
+    assert_eq(c_inner, 8, "rows 0 and 2 x 2 posts x 2 cols");
+    assert_eq(c_done, 2, "every walked column completes");
 
     return assert_summary();
 }

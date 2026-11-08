@@ -1221,7 +1221,7 @@ fn teleport_monster(idx, tag): i64 {
 
 # Monster `idx` just stepped (ox,oy)->(nx,ny): take any teleport line it crossed
 # (39 / 97 / 125 / 126). Called at the end of chase_try_walk. 1 = teleported.
-# The door and lift lines monsters may also walk (4 / 10 / 88) are v0.35.9.
+# The door and lift lines monsters may also walk (4 / 10 / 88) are v0.35.11.
 fn monster_cross_teleports(idx, ox, oy, nx, ny): i64 {
     for (var k = 0; k < tele_line_count; k += 1) {
         var li = load64(tele_lines + k * 8);

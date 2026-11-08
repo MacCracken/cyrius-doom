@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.35.9] - 2026-11-08 — toolchain: cyrius 6.6.20, deps as bundled
+
+A toolchain cut with no game or render change: every capture and AI fingerprint is byte-identical to the
+v0.35.8 build on 6.6.6. It takes the number the scripted playthrough held, as v0.35.5 and v0.35.6 did, so
+the planned slots each move up one (the playthrough is now v0.35.10).
+
+### Changed
+
+- **Toolchain 6.6.6 → 6.6.20**, and the stdlib as 6.6.20 bundles it: 34 of doom's resolved files changed
+  (sakshi is now 2.5.7). `cyrius.lock` regenerated from a clean resolve: **41 entries, 41 / 0** (+`chrono`
+  through `hashseed`, +`poison` through `alloc` / `freelist` — the stdlib's own includes).
+- **vani vendor 1.2.5 → 1.2.9** (`vendor/vani-core.cyr`), the release the 6.6.20 stdlib bundles. No
+  `audio_*` signature change. A busy PCM now fails the open at once and doom runs silent, where it used to
+  sleep at startup until the holder let go. doom still sets its own `O_NONBLOCK` after `audio_prepare`.
+- **bsp stays 1.2.5**: not part of the 6.6.20 stdlib and still the newest tag; `lib/bsp.cyr` matches the
+  tag's dist byte for byte. **setu stays frozen at 0.7.0**: not a stdlib member, retired transport (see
+  `state.md`); it still compiles under `--agnos`.
+- **Binary sizes**: plain 532,016 → **607,728 B** (+75,712), release 400,944 → **411,120 B** (+10,176),
+  agnos 518,696 → **602,984 B** (+84,288). All stdlib; most of the plain growth is unreachable code (dead
+  code 131,936 → 197,150 B), which `CYRIUS_DCE=1` removes.
+- **Roadmap**: planned slots v0.35.9–v0.35.16 renumbered +1.
+
+### Tests
+
+- **`regression_continue.tcyr`** gains a `for > while > for` group (+4 asserts). 6.6.20 fixes that shape,
+  miscompiled through 6.6.6, and lifts the 8-continue cap. Measured directly rather than taken from the
+  upstream changelog: the group is **RED on 6.6.6 (4 of 4 fail), GREEN on 6.6.20**. doom's two clamped
+  patch decoders stay as they are.
+
+### Verification
+
+- 376 / 33 / 22 / 12 WAD-free, **677 / 677** full. Fuzz ×8 clean at full iteration counts. No compile
+  warnings on Linux or `--agnos`.
+- **46 PPMs + 9 `--ai-probe` fingerprints byte-identical** to a v0.35.8 / 6.6.6 baseline (its release and
+  agnos hashes match the v0.35.8 gate row), on the plain **and** `CYRIUS_DCE=1` builds; the top 25
+  `ai-staging-sweep` stagings are identical too.
+- **Bench neutral**, 3 interleaved rounds against 6.6.6: `render_frame` 400.2 vs 399.8 µs and
+  `render_frame+sprites_spawned` 573.3 vs 573.0 µs best average; `things_tick` +1.4%. The CSV row is a
+  single run on a loaded box (403.3 µs) and reads high against v0.35.8's.
+- A fresh `rm -rf lib && cyrius deps` reproduces release `5f2a4a18…` and agnos `b76e8e86…` byte for byte.
+- **AGNOS QEMU** on the final `doom_agnos`: boots v0.35.9, WAD loads, **64,000 / 64,000** blocks exact
+  against Linux. The harness's floor-band gate still false-FAILs (agnos-side origin assumption).
+- **Not verified**: a successful PCM open on real audio hardware. Every open on the dev box returned 0
+  within about 1 ms with no hang, which covers the failure path only; `--audio-test` on a free device is
+  the remaining check.
+
 ## [0.35.8] - 2026-09-26 — the episode can end: teleporters, E1M8's barons, the exit room, a finale
 
 Until now E1M8 could not be finished and, had it been, the game wrapped straight back to E1M1. Every piece
