@@ -27,7 +27,7 @@ checklist items already ship. Only two things stand in the way, and they are ind
 | Blocker | Release | Why it is the blocker |
 |---|---|---|
 | Playable start-to-finish — the evidence | **v0.37.0** | *The mechanisms shipped in v0.35.8* — E1M8's boss floor, teleports, the exit room and the finale — so the episode can now end: the reachability model shows every map's exit reachable, and an in-engine test drives E1M8's whole ending. What v1.0.0 item 1 still lacks is a **scripted E1M1 → E1M8 playthrough** that reaches the finale through the real game loop — its own slot, by choice at the v0.35.8 cut, because it is a harness, not a mechanism. |
-| X11 backend | **v0.39.0** | The only unmet "multiple display backends" item; fb0 / Wayland ship. ⛔ **AGNOS-setu does NOT ship** (corrected 2026-08-03): its TCP-on-loopback transport is retired as the **wrong primitive** for a local display protocol, and doom has no honest agnos proof over it — the `aethersafha-doom-smoke.sh` greens came from the deleted `AETHERSAFHA_SETU_SELFTEST` kernel hook. (Scope note: the handshake could not complete on an ordinary boot only **before agnos 1.56.34 / `net_src_for`**; afterwards other clients did connect un-rigged, QEMU `-smp 1`. doom was not one of them.) doom's only honest agnos display path today is `PM_FB0` (blit#39). See agnos `planning/ipc.md` §9-§10. |
+| X11 backend | **v0.39.0** | The only unmet "multiple display backends" item; fb0 / Wayland ship. ⛔ **AGNOS-setu does NOT ship**: doom has no honest agnos proof as a window. v0.36.1 moved the vendored client onto the channel band (setu 0.9.1; the TCP path is gone), but nothing has run doom over it yet, and the old `aethersafha-doom-smoke.sh` greens came from the deleted `AETHERSAFHA_SETU_SELFTEST` kernel hook. doom's only honest agnos display path today is `PM_FB0` (blit#39). See agnos `planning/ipc.md` §9-§10. |
 
 Everything else below is quality, fidelity, robustness, or performance.
 
@@ -203,7 +203,7 @@ into v0.39.0 as one row rather than two.
 > primitive for a local display protocol, and the smokes that showed doom as a window built their
 > kernel with the now-deleted `AETHERSAFHA_SETU_SELFTEST` hook (`net_ip = 0x7F000001`). Do not tick an
 > AGNOS-setu box on that evidence. (Other clients *did* connect un-rigged once `net_src_for` landed in
-> agnos 1.56.34 — QEMU `-smp 1`, 2026-08-02 — but doom was not one of them, so nothing here changes.) The setu path returns when it rides the agnos socket (`anu`) — agnos `planning/ipc.md`
+> agnos 1.56.34 — QEMU `-smp 1`, 2026-08-02 — but doom was not one of them, so nothing here changes.) Since v0.36.1 the vendored client rides the agnos channel band (setu 0.9.1), so what is missing is the proof: doom launched by the compositor and presenting over that channel — agnos `planning/ipc.md`
 > §9-§10.
 
 Ship criteria: a full E1M1→E1M8 playthrough under skill_normal on **each** shipping backend (fb0,

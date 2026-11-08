@@ -7,6 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.1] - 2026-11-08 — cyrius 6.7.18, every dep at its newest tag, setu off TCP
+
+A toolchain and dependency cut. Linux rendering and monster behaviour are byte-identical to v0.36.0, and the
+AGNOS frame is pixel-exact against Linux.
+
+### Changed
+
+- **Toolchain 6.7.9 → 6.7.18**, and the stdlib as 6.7.18 bundles it: 30 of doom's resolved files changed.
+  `cyrius.lock` regenerated from a clean resolve: **42 / 0** (+`slice`, which `net.cyr` now includes). No doom
+  logic needed changing, and no target or harness gained a warning.
+- **setu vendor 0.7.0 → 0.9.1** (`vendor/setu.cyr`), byte-identical to the tag's `dist/setu.cyr`. This ends the
+  freeze and the v0.35.6 hand-migration. The TCP-on-loopback transport is gone: on agnos the client dials
+  nothing, it is handed a kernel channel (#97) at spawn and `AGNOS_CHAN` names its fd. Every `setu_*` function
+  and constant doom uses is unchanged. A doom not launched by a compositor prints `setu: refusing, AGNOS_CHAN
+  absent or malformed` on the console and falls back to fullscreen, as it did when the TCP connect failed.
+- **Already at their newest tags**: sakshi 2.5.10 (as bundled, was 2.5.8), vani 1.2.10, bsp 1.2.5.
+- **Binary sizes**: plain 607,184 → **547,024 B** (−60,160), release 410,576 → **346,320 B** (−64,256), agnos
+  606,552 → **550,800 B** (−55,752). The 60,160 B is sakshi 2.5.10 fixing four private buffers declared in
+  slots rather than bytes, each 8× oversized (8,592 B × 7 + 16 B of alignment); it left the data segment and no
+  API or behaviour changed. Release code is 5,536 B smaller. `CYRIUS_DCE=1` removes 862 fns / 202,048 B.
+- **`src/setu_present.cyr` and the `setu` notes** no longer describe the retired TCP transport.
+
+### Upstream changes checked against doom
+
+The 6.7.10–6.7.18 migration notes run to well over a thousand entries, almost all about structs, generics,
+vectors and closures, which doom does not use. They were filtered to the constructs doom does use rather than
+read in full. Two entries change what plain globals compute: a constant declared twice, and a declaration-zone
+initialiser that folds to a constant. Doom has **no redeclared globals**, and its three non-literal initialisers
+are an enum constant and two `0 - 1`s.
+
+### Verification
+
+- 384 / 33 / 22 / 12 WAD-free, **689 / 689** full. Fuzz ×8 clean at full iteration counts. No compile warnings on
+  Linux or `--agnos`.
+- **46 PPMs + 9 `--ai-probe` fingerprints byte-identical** to the v0.36.0 / 6.7.9 baseline (its release and agnos
+  hashes match the v0.36.0 gate row) on the plain **and** `CYRIUS_DCE=1` builds; the top 25 `ai-staging-sweep`
+  stagings are identical too.
+- **Bench neutral**, 3 interleaved rounds against 6.7.9, best average: `render_frame` 372.2 → 371.0 µs,
+  `render_frame+sprites_spawned` 531.3 → 536.1 µs (+0.9%), `things_tick` −1.1%. `texture_find` 142 → 130 ns
+  (−8.5%), recovering what it lost at 6.7.9.
+- A fresh `rm -rf lib && cyrius deps` reproduces release `fb9e7bbb…` and agnos `172bf02b…` byte for byte.
+- **AGNOS QEMU** on the final `doom_agnos`: boots v0.36.1, WAD loads, setu refuses as designed and doom falls back
+  to fullscreen, **64,000 / 64,000** blocks exact against Linux. The harness's floor-band gate still false-FAILs
+  (agnos-side origin assumption).
+- **Not verified**: doom has still never run as a window over setu. Only the refusal path ran, so the
+  channel-band connect, present and input are unexercised. A successful PCM open on real audio hardware also
+  remains untested.
+
 ## [0.36.0] - 2026-11-08 — cyrius 6.7.9, deps as bundled, and the 0.35.x closeout
 
 Closes the 0.35.x minor. Rendering and monster behaviour are byte-identical to v0.35.9 on 6.6.20. The
