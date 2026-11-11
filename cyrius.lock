@@ -1,4 +1,4 @@
-commit	386dd52dbfc4ffdb0202ff1b91900318f1b3965d	bsp	https://github.com/MacCracken/bsp.git	1.2.5
+commit	c4d104a6ba5e68778abea961fcbdb004c468a25b	bsp	https://github.com/MacCracken/bsp.git	1.3.2
 346716377b00f36e58eb16cf7fe1dd62dd8fe577930d0d0429f822795b35817c  lib/alloc.cyr
 5afd5bb7cba4e49fee331f6a2838f4e01d9781defaf531403f6616f42ac7151b  lib/alloc_agnos.cyr
 57af1877c5082793ecfcfb2bf358c81cda79eaaae4feaa12eb7b963c4cbdf739  lib/alloc_cx.cyr
@@ -11,7 +11,7 @@ commit	386dd52dbfc4ffdb0202ff1b91900318f1b3965d	bsp	https://github.com/MacCracke
 9583b938d791d35e24c3ca45c44e199a4e58197fbe6b3f32c3d9676908d69d9c  lib/assert.cyr
 23516d97b8eb5ba1c7a1b6e34a89b3b0653f68d858edca8521a7ccce5a06bce5  lib/atomic.cyr
 b99081e633d572569ee63c6a915fe4aa39b3ac4ff5665c08cc4c9416ed2f6928  lib/boxed.cyr
-180e486c8b04d204305337734ceb3f2d6ace72e1b32d0c607994bf24f89b1046  lib/bsp.cyr
+dbf8749de96eaac7b7275365e68a3fea798bd651a43f6dbf582434b07cc6ec70  lib/bsp.cyr
 2e2e802085112d781225c517fca853b4adbf29850a96b21b6ff32469f0736516  lib/chrono.cyr
 217f7e11e89b826b5cb789f1eaef15b7acd00e9810a04a5cfa298f72612aabd3  lib/fmt.cyr
 6077a8c1cc5cec69d0680703986af142d3d1a5bec9674481288615a2c0616d87  lib/fnptr.cyr

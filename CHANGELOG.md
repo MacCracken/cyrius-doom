@@ -7,6 +7,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.3] - 2026-11-10 — bsp 1.3.2
+
+A dependency cut: bsp moves to its newest tag. Linux rendering and monster behaviour are byte-identical to
+v0.36.2, and the AGNOS frame is pixel-exact against Linux. No doom source changed apart from the banner.
+
+### Changed
+
+- **bsp 1.2.5 → 1.3.2** (`[deps.bsp]`, commit-pin `c4d104a6…`). `lib/bsp.cyr` is byte-identical to the tag's
+  `dist/bsp.cyr`. 1.2.6–1.3.1 were toolchain-only cuts whose bundle body is byte-identical to 1.2.5. 1.3.2 is
+  bsp's review sweep: 13 defects fixed, none of them in a function doom calls. The side test, the one function
+  doom calls whose arithmetic changed, cannot change doom's results (see below).
+- **`point_on_side` is 36% faster** (28 → 18 ns, best of 3 interleaved rounds): 1.3.2 inlines the side test into
+  `bsp_point_on_side`. It is too small a share of the frame to show: `render_frame` 382.2 → 381.4 µs, spawned
+  frame 555.3 → 555.0 µs.
+- **`cyrius.lock`**: two rows change, bsp's commit pin and the `lib/bsp.cyr` hash; still **42 / 0**. Running
+  `cyrius deps` over the old lock keeps the 1.2.5 commit row *next to* the new one (`cyrius.lock keeps
+  bsp@1.2.5's pin … fail-closed; delete cyrius.lock to re-pin`), so the lock was deleted and regenerated from a
+  clean `rm -rf lib cyrius.lock && cyrius deps`. A tag bump needs the lock deleted, not just `./lib/`.
+- **Binary sizes unchanged**: 542,984 B plain / 342,280 B release / 546,760 B agnos. `CYRIUS_DCE=1` removes
+  852 fns / 201,375 B, which is 2 fns / 1,895 B more than before: 1.3.2 code that doom never calls.
+
+### Upstream changes checked against doom
+
+1.2.5 always shifted the node direction right by 8 before multiplying. 1.3.2 shifts it only when a component is
+2^24 raw or more. doom loads node dx/dy as `int16 << 16` (`map.cyr`), which is always a multiple of 256. So when
+1.3.2 skips the shift, both products are exactly 256 times the old ones, and the comparison can't change, ties
+included. When it does shift, it runs the old code. That was proven, not just argued. A harness compiled
+against the new `lib/bsp.cyr` loads all nine shareware maps through doom's own loader. It then compares 1.3.2's
+`bsp_point_on_side` and `bsp_point_side` against a renamed copy of the 1.2.5 code on every node. The run
+covered 3,414 nodes, 3,169 of which take the new no-shift path, and 27,312,000 points: random 16.16
+coordinates, bands near the partition line, and points exactly on it (9,866,170 ties). There were **0
+mismatches**. As a control, the same run with every direction moved 37 raw units off a multiple of 256 gives
+4,588,652 mismatches, so the harness does detect the change where 1.3.2 makes it.
+
+The rest of 1.3.2 is in functions doom does not call: `fx_div` past 2^55, `bsp_ray_cast`, `bsp_point_seg_dist`,
+`bsp_check_sight` / `bsp_seg_intersect` and the blockmap. doom's own sight, collision and blockmap code lives in
+`src/`. `bsp_is_subsector`, `bsp_subsector_idx`, the child accessors and `asr` differ only in comments.
+
+Two items in bsp's notes are recorded for v0.37.6 and not changed here:
+
+- bsp now documents that the child-reference helpers decode a reference without validating it. Both of doom's
+  walks already make the three checks bsp lists. Children are zero-extended 16-bit reads, and node references
+  are range-checked at load (`map.cyr`). A cyclic tree is rejected at load, and both walks stop after
+  `map_num_nodes` steps.
+- `bsp_point_side` puts a point exactly on the partition line on the front side, where vanilla DOOM puts it on
+  the back, and it shifts differently before multiplying. So doom's side test has never been bit-exact with
+  vanilla. 1.2.5 and 1.3.2 treat ties identically, so this bump changes nothing there. It is now part of the
+  v0.37.6 `bsp_point_on_side` parity item.
+
+### Verification
+
+- 412 / 33 / 14 / 22 / 14 / 12 WAD-free, **731 / 731** full. Fuzz ×8 clean at full iteration counts. No compile
+  warnings on Linux or `--agnos`.
+- **52 PPMs and 603 `--ai-probe` lines byte-identical** to v0.36.2 on the plain and `CYRIUS_DCE=1` builds,
+  both for the pre-banner build and for the final binaries. The PPMs are, for each of the 9 maps, the spawn
+  view, automap and intermission at tick 0 and the spawn view and automap at tick 35, plus the 5 menus and the
+  2 finale screens. The AI lines are 9 maps × 350 ticks. The 25 `ai-staging-sweep` stagings are identical too.
+  The baseline release (`2b715f0b…`) and agnos (`213fa80d…`) binaries match the v0.36.2 gate row.
+- A fresh `rm -rf lib && cyrius deps` reproduces release `ac07cdf1…` and agnos `a9ae2257…` byte for byte.
+- **Bench**, 3 interleaved rounds against v0.36.2, best of 3: `point_on_side` 28 → 18 ns, frames flat (above),
+  `things_tick` 4.5 → 4.4 µs. `texture_find` is 136 → 147 ns (+8%) in every round, although nothing on its code
+  path changed. bsp is included ahead of `src/`, so every later function moved, and the bench binary grew by
+  one 4 KB page. This bench also moved by about 8% at each of the last two toolchain cuts.
+- **AGNOS QEMU** on the final `doom_agnos` (`a9ae2257…`): boots v0.36.3 and loads the WAD (the first boot hit a
+  firmware hand-off failure and the harness retried it). **64,000 / 64,000** 6× blocks are exact against the
+  Linux E1M1 frame, at origin (64, 424) on the 2048×2048 screendump. Compared against E1M2's frame instead, only
+  30,547 match, so the check can fail. The harness's floor-band gate still false-FAILs because it assumes the
+  wrong frame origin; that is on the agnos side.
+
 ## [0.36.2] - 2026-11-08 — code audit, refactor sweep and repairs
 
 A whole-tree audit of `src/`, in three independent reviews with every finding re-checked against the code. It found

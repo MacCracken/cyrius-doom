@@ -173,6 +173,13 @@ C3 bounds half shipped in 0.33.8 — only the parity half remains) · visplane b
 things, `plane_dropped` stays 0) · **G-13** sector-0 degenerate leaf → −1 plus the caller sweep the
 containment audit produces.
 
+**For the `bsp_point_on_side` parity item** (from bsp 1.3.2's notes; v0.36.3 took 1.3.2 with the side test proven
+unchanged for doom's nodes): bsp's side test puts a point exactly on the partition line on the front side, where
+vanilla DOOM puts it on the back, and it shifts differently before multiplying, so doom has never been bit-exact
+with vanilla there. Measure how often a real view or thing position lands exactly on a partition: spawn points are
+whole world units and many partitions are axis-aligned. Then decide between matching vanilla and documenting the
+difference. Either fix moves pixels, so it needs its own capture gate.
+
 **Left open by the v0.36.2 audit** ([`2026-11-08-code-audit.md`](../audit/2026-11-08-code-audit.md) §4): a weapon pickup re-opens the fire gate (at most one early shot) · the non-monster death countdown in `thing_ai_tick` looks unreachable · back-facing segs are not culled and fully occluded segs still use plane and drawseg slots (measure with the visplane stress above) · `map_alloc`, `music_init` and `input_init` still assume their allocations succeed · BSP recursion depth on the AGNOS stack is unmeasured.
 
 **Gate**: after v0.35.2. Exit: new assert groups per item — this cut's deliverable *is* tests.
