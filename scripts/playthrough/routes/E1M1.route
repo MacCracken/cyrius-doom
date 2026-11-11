@@ -1,0 +1,3 @@
+# E1M1 Hangar — the exit switch is line 330 (south-east room).
+# Doors on the way are opened by the bot as its path reaches them.
+exit 330

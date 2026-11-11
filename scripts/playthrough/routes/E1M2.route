@@ -1,0 +1,11 @@
+# E1M2 Nuclear Plant — drafted by autoroute.py, proved by playthrough.py
+# door 325 (special 1) — opened by the bot on its way
+key red
+# door 527 (special 28) — opened by the bot on its way
+goto -1716 548           # west hall, past the red door
+goto -1716 980           # north along the west corridor
+goto -1580 1404          # toward the octagon; lift tag 11 (line 715, WR) on the way
+use 777    # special 103 tag 12: the octagon's north switch opens the exit wing
+# door 854 (special 1) — opened by the bot on its way
+# lift tag 13 via line 869 (special 88) — called by the bot on its way
+exit 873

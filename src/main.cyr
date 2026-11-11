@@ -57,6 +57,9 @@ include "src/automap.cyr"
 include "src/level.cyr"
 include "src/menu.cyr"
 include "src/finale.cyr"
+# v0.37.0 — the --lockstep state record (the playthrough harness). After every
+# module whose state it reports.
+include "src/lockstep.cyr"
 
 var game_running = 0;
 # Previous-tick TAB state, for edge-detecting the automap toggle (audit F-U4).
@@ -95,6 +98,7 @@ fn load_map(reset_player): i64 {
         render_set_weapon(player_weapon);
     }
     things_spawn_from_map();
+    lockstep_map_gen += 1;   # --lockstep: re-baseline sector heights (lockstep.cyr)
     audio_init();
     audio_preload();
     # Load + start this map's MUS track (D_<name>). music_load returns -1 if the
@@ -109,6 +113,16 @@ fn load_map(reset_player): i64 {
     return 0;
 }
 
+# menu_run with the --lockstep screen marker set (input.cyr game_screen). The
+# marker lives here, not in menu.cyr, which tests/regression_menu.tcyr builds
+# against its own input stubs.
+fn menu_run_marked(): i64 {
+    game_screen = GS_MENU;
+    var r = menu_run();
+    game_screen = GS_PLAY;
+    return r;
+}
+
 # v0.35.8 (P4) — the boss level is done: the finale, then the title menu. 0 = a
 # new game is loaded and play continues, -1 = quit.
 fn episode_end(): i64 {
@@ -117,7 +131,7 @@ fn episode_end(): i64 {
     automap_active = 0;
     if (finale_run() != 0) { return 0 - 1; }
     if (music_load("INTRO") == 0) { music_start(); } else { music_stop(); }
-    if (menu_run() < 0) { return 0 - 1; }
+    if (menu_run_marked() < 0) { return 0 - 1; }
     # menu_run set the skill; load_map(1) spawns at it with a pistol start.
     level_set(1, 1);
     if (load_map(1) != 0) { return 0 - 1; }
@@ -243,6 +257,17 @@ fn doom_main(): i64 {
         if (streq(da, "--ppm") == 1) { want_ppm = 1; }
         if (streq(da, "--ppm-menu") == 1) { want_ppm = 1; }
         if (streq(da, "--ppm-finale") == 1) { want_ppm = 1; }
+        if (streq(da, "--lockstep") == 1) { lockstep_on = 1; }
+    }
+    # v0.37.0 --lockstep (src/lockstep.cyr): headless, silent, harness-paced. The
+    # state record goes to fd 3, so refuse to start unless the harness opened it.
+    if (lockstep_on == 1) {
+        if (syscall(72, 3, 1, 0) < 0) {           # fcntl(3, F_GETFD)
+            sakshi_error("--lockstep: fd 3 is not open (the harness owns it)", 50);
+            doom_exit(2);
+        }
+        want_ppm = 1;
+        audio_headless = 1;
     }
     if (wl_probe_mode == 1) {
         wl_verbose = 1;
@@ -281,7 +306,7 @@ fn doom_main(): i64 {
     sprite_init();
     level_init();
     status_init_font();
-    sound_init();
+    if (lockstep_on == 0) { sound_init(); }   # --lockstep is silent: no PC speaker
     automap_init();
 
     # Parse args
@@ -573,7 +598,7 @@ fn doom_main(): i64 {
     if (direct_map == 0) {
         # Title/menu music (D_INTRO), replacing the map track load_map started.
         if (music_load("INTRO") == 0) { music_start(); }
-        var mr = menu_run();
+        var mr = menu_run_marked();
         if (mr < 0) {
             # User quit from menu
             input_shutdown();
@@ -646,6 +671,7 @@ fn doom_main(): i64 {
             # a sustained release and dismiss on the next press — input.cyr's
             # dismiss gate since v0.35.8.
             dismiss_gate_reset(35);
+            game_screen = GS_DEATH;
             var dead_wait = 1;
             while (dead_wait == 1) {
                 tick_begin();
@@ -656,6 +682,7 @@ fn doom_main(): i64 {
                 if (input_quit == 1) { game_running = 0; dead_wait = 0; }
                 tick_wait();
             }
+            game_screen = GS_PLAY;
 
             if (game_running == 1) {
                 sakshi_info("respawn", 7);

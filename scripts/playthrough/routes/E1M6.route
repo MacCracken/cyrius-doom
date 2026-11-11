@@ -1,0 +1,13 @@
+# E1M6 Central Processing — drafted by autoroute.py, proved by playthrough.py
+# door 935 (special 1) — opened by the bot on its way
+key red
+# door 951 (special 28) — opened by the bot on its way
+key blue
+# door 975 (special 26) — opened by the bot on its way
+use 438    # special 103 tag 4
+key yellow
+# door 879 (special 27) — opened by the bot on its way
+use 822    # special 103 tag 1
+use 599    # special 103 tag 3
+# door 614 (special 1) — opened by the bot on its way
+exit 627

@@ -74,6 +74,10 @@ var snd_cache_rates = 0;
 var snd_cache_count = 0;
 var audio_dev = 0;
 var audio_inited = 0;
+# v0.37.0 — set by main for `--lockstep`: allocate the caches as usual but open no
+# device, exactly the "no usable device" path, so a harness run is silent and
+# never grabs the desktop's PCM.
+var audio_headless = 0;
 # Whether the explicit period/buffer (MIX_PERIOD/MIX_BUFFER) were accepted. If
 # the device fell back to kernel-chosen sizes we DON'T know the buffer, so we
 # must not impose a fixed start_threshold (it could exceed a small buffer and
@@ -209,6 +213,7 @@ fn audio_init(): i64 {
     # (sw_params/prepare/fd/FCNTL) is
     # Linux-only; the snd_* band needs none.
     #else
+    if (audio_headless == 1) { audio_dev = 0; return 0; }
     audio_dev = audio_open_best();
     if (audio_dev == 0) {
         sakshi_warn("audio: no usable device", 23);

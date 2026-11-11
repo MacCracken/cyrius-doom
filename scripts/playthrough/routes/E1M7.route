@@ -1,0 +1,14 @@
+# E1M7 Computer Station — drafted by autoroute.py, proved by playthrough.py
+# door 950 (special 31) — opened by the bot on its way
+# lift tag 1 via line 396 (special 88) — called by the bot on its way
+key yellow
+# door 693 (special 27) — opened by the bot on its way
+# door 905 (special 34) — opened by the bot on its way
+# lift tag 9 via line 248 (special 88) — called by the bot on its way
+key red
+# door 366 (special 28) — opened by the bot on its way
+key blue
+# door 460 (special 26) — opened by the bot on its way
+use 762    # special 103 tag 14
+# door 818 (special 1) — opened by the bot on its way
+exit 810

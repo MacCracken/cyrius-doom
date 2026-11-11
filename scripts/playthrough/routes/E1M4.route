@@ -1,0 +1,9 @@
+# E1M4 Command Control — drafted by autoroute.py, proved by playthrough.py
+# door 648 (special 31) — opened by the bot on its way
+cross 685    # special 90 tag 1
+key blue
+# door 571 (special 26) — opened by the bot on its way
+# door 469 (special 1) — opened by the bot on its way
+use 592    # special 18 tag 2
+# door 548 (special 1) — opened by the bot on its way
+exit 554

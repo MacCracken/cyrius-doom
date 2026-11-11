@@ -56,6 +56,10 @@ var pipe_fd = -1;
 # on agnos too — framebuf_init sets it after probing for a compositor.
 enum PresentMode { PM_FB0 = 0; PM_WAYLAND = 1; PM_PPM = 2; PM_SETU = 3; }
 var present_mode = 0;
+# v0.37.0 — `--lockstep` (src/lockstep.cyr): the playthrough harness's mode. Set
+# by main's Linux arg block only; read here (no present), in tick_wait (no sleep)
+# and in input_poll (record on fd 3, then block for the tick's keys).
+var lockstep_on = 0;
 # Wayland letterbox placement into the shm buffer (recomputed on resize).
 var wl_scale = 1; var wl_xoff = 0; var wl_yoff = 0;
 
@@ -440,6 +444,9 @@ fn framebuf_flip(): i64 {
     #ifndef CYRIUS_TARGET_AGNOS
     if (present_mode == PM_WAYLAND) { return framebuf_present_wayland(); }
     #endif
+    # --lockstep renders every frame but presents none (not even the per-frame
+    # /tmp/doom_frame.ppm bridge below).
+    if (lockstep_on == 1) { return 0; }
     if (fb_fd >= 0) {
         framebuf_blit();
         var rows = SCREEN_HEIGHT * fb_scale;

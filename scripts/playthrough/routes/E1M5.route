@@ -1,0 +1,11 @@
+# E1M5 Phobos Lab — drafted by autoroute.py, proved by playthrough.py
+cross 271    # special 22 tag 6
+# door 476 (special 1) — opened by the bot on its way
+key yellow
+# door 157 (special 27) — opened by the bot on its way
+use 189    # special 103 tag 2
+# door 145 (special 31) — opened by the bot on its way
+key blue
+# door 322 (special 26) — opened by the bot on its way
+# door 400 (special 1) — opened by the bot on its way
+exit 409

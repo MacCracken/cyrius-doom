@@ -44,6 +44,11 @@ include "src/player.cyr"
 include "src/things.cyr"
 include "src/sprite.cyr"
 
+# v0.37.0 — input.cyr's --lockstep read calls lockstep_emit (src/lockstep.cyr,
+# main.cyr only). Never reached here (lockstep_on stays 0); stubbed so the
+# build has no undefined function.
+fn lockstep_emit(): i64 { return 0; }
+
 var _fz_state = 0x5DEECE66D2A9F1B3;
 
 fn _fz_rand(): i64 {

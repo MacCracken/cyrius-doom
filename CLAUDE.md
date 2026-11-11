@@ -59,6 +59,9 @@ cyrius build tests/doom.tcyr build/test_doom && \
 cyrius build fuzz/fuzz_fixed.cyr build/fuzz_fixed && ./build/fuzz_fixed
 cyrius build fuzz/fuzz_wad.cyr   build/fuzz_wad   && ./build/fuzz_wad
 
+# Scripted playthrough E1M1 -> E1M8 finale (v1.0.0 item 1; --lockstep on a pty)
+python3 scripts/playthrough/playthrough.py build/doom wad/DOOM1.WAD
+
 # Bench (also appends a row to bench-history.csv)
 sh scripts/bench-history.sh wad/DOOM1.WAD
 
@@ -92,6 +95,7 @@ src/
   level.cyr       — episode/map tracking, exit lines, level stats
   menu.cyr        — WAD-native title screen (TITLEPIC), main menu, skill select
   finale.cyr      — episode-end screens: text typed over a flat (D_VICTOR), then the end picture
+  lockstep.cyr    — `--lockstep` state record on fd 3 for the scripted playthrough (scripts/playthrough/)
 
   platform/                    — desktop-display backends (v0.33.0), all #ifndef CYRIUS_TARGET_AGNOS
     wayland/wire.cyr    — Wayland wire-protocol codec (pure, no syscalls)
@@ -104,6 +108,9 @@ The Wayland backend is sovereign (raw wl protocol via syscalls — no libwayland
 runtime via `present_mode` (PM_FB0 / PM_WAYLAND / PM_PPM); `framebuf_flip`/`input_poll` branch to it on Linux,
 fb0/AGNOS/`--ppm` byte-identical. Any build that includes `src/framebuf.cyr` on Linux (tests, fuzz_weapon,
 `benches/doom.bcyr`) must also include the four `platform/` files first (framebuf references `win_*`).
+Likewise any build that includes `src/input.cyr` must provide `lockstep_emit` — include `src/lockstep.cyr`
+(main, `tests/doom.tcyr`) or stub it (`fuzz_weapon` / `fuzz_sprite` / `fuzz_patchdraw`, `benches/doom.bcyr`):
+cycc refuses to emit a binary with a reachable undefined function.
 
 Dep pins (bsp / vani versions) and module/lib counts live in [`state.md`](docs/development/state.md). What composes what is durable; the version numbers are not.
 

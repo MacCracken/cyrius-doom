@@ -48,6 +48,12 @@ fn tick_begin(): i64 {
 }
 
 fn tick_wait(): i64 {
+    # --lockstep: the harness paces the ticks (input_poll blocks for each one),
+    # so there is nothing to wait for.
+    if (lockstep_on == 1) {
+        store64(tick_state, load64(tick_state) + 1);
+        return 0;
+    }
     var now_ns = tick_get_time_ns();
     var start_ns = load64(tick_state + 8) * 1000000000 + load64(tick_state + 16);
     var elapsed = now_ns - start_ns;

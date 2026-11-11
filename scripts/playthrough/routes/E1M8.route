@@ -1,0 +1,11 @@
+# E1M8 Phobos Anomaly — drafted by autoroute.py, proved by playthrough.py
+use 141      # special 23 tag 1: lowers the start room's floor
+# door 129 (special 1) — opened by the bot on its way
+# lift tag 6 via line 231 (special 62) — called by the bot on its way
+cross 176    # special 2 tag 5
+killall 3003 # both barons: their deaths lower the star walls (tag 666, sector 30),
+             # which is the only way on to the stairs (reachability.py agrees).
+             # An explicit step, so the boss fight never depends on them waking.
+use 233      # special 7 tag 9: the stairs
+cross 299    # special 97 tag 3: the teleporter into the end sector
+endsector    # special 11: hurts until health < 11%, then the episode ends

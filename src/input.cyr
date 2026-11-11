@@ -40,6 +40,25 @@ var input_flags = 0;
 var input_weapon = 0;
 var input_quit = 0;
 
+# v0.37.0 — which screen is polling for input. Each loop that waits on the
+# keyboard sets it on entry and puts GS_PLAY back on exit; nothing in the engine
+# branches on it. It exists for the --lockstep record (src/lockstep.cyr), so the
+# playthrough harness knows whether it is steering, dismissing a tally or done.
+enum GameScreen {
+    GS_PLAY = 0;
+    GS_INTERMISSION = 1;
+    GS_DEATH = 2;
+    GS_FINALE_TEXT = 3;
+    GS_FINALE_PIC = 4;
+    GS_MENU = 5;
+}
+var game_screen = 0;
+
+# --lockstep tick boundary. The harness writes the keys it holds for this tick
+# and then LS_SYNC; it reads the next record before sending more. 0x1F is no key
+# doom decodes (Enter is 0x0A, so it cannot be the separator).
+enum LockstepSync { LS_SYNC = 31; }
+
 enum InputBit {
     INP_FORWARD = 1;
     INP_BACKWARD = 2;
@@ -471,6 +490,48 @@ fn input_tty_escape(bufp, pos, n): i64 {
     return q;
 }
 
+# --lockstep: write this tick's state record (fd 3), then block on stdin until
+# LS_SYNC. The bytes before it (at most `cap`; the rest of an over-long burst is
+# dropped) go to the normal tty decoder. Wait in poll(2), not in read: on a raw
+# tty (VMIN=0, VTIME=0) read returns 0 when nothing is ready, so 0 is NOT end of
+# file there. Hang-up or an error on stdin means the harness is gone: quit.
+# Returns the key-byte count. Linux only in practice (main sets lockstep_on in its
+# Linux block), but compiled on both, like the rest of this tty path.
+fn lockstep_read(bufp, cap): i64 {
+    if (lockstep_emit() != 0) { input_quit = 1; return 0; }
+    var got = 0;
+    var tmp[64];
+    var pfd[8];
+    while (1 == 1) {
+        store32(&pfd, 0);                                    # fd 0
+        store32(&pfd + 4, 1);                                # events = POLLIN, revents = 0
+        var pr = syscall(7, &pfd, 1, 0 - 1);
+        if (pr < 0) {
+            if (pr == 0 - 4) { continue; }                   # EINTR
+            input_quit = 1; return got;
+        }
+        var rev = (load32(&pfd + 4) >> 16) & 0xFFFF;
+        if ((rev & 1) == 0) {                                # no POLLIN: HUP / ERR / NVAL
+            input_quit = 1; return got;
+        }
+        var r = syscall(0, 0, &tmp, 64);
+        if (r < 0) {
+            if (r == 0 - 11 || r == 0 - 4) { continue; }     # EAGAIN / EINTR
+            input_quit = 1; return got;
+        }
+        if (r == 0) {
+            if ((rev & 0x10) != 0) { input_quit = 1; return got; }   # POLLHUP: gone
+            continue;
+        }
+        for (var k = 0; k < r; k += 1) {
+            var b = load8(&tmp + k);
+            if (b == LS_SYNC) { return got; }
+            if (got < cap) { store8(bufp + got, b); got += 1; }
+        }
+    }
+    return got;
+}
+
 fn input_poll(): i64 {
     input_flags = 0;
 
@@ -563,7 +624,9 @@ fn input_poll(): i64 {
     #endif
 
     var buf[32];
-    var n = syscall(0, 0, &buf, 32);
+    var n = 0;
+    if (lockstep_on == 1) { n = lockstep_read(&buf, 32); }
+    else { n = syscall(0, 0, &buf, 32); }
 
     if (n > 0) {
         var pos = 0;

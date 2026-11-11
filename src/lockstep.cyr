@@ -1,0 +1,198 @@
+# lockstep.cyr -- per-tick state record for the scripted-playthrough harness
+# (v0.37.0, roadmap v1.0.0-1). Usage: include "src/lockstep.cyr" (main.cyr only).
+#
+# `doom <wad> [map] --lockstep` runs the REAL game loop with three changes:
+#   - tick_wait does not sleep (tick.cyr) and nothing is presented
+#     (framebuf_flip returns at once); every frame is still rendered;
+#   - audio and the PC speaker stay closed (audio_headless, no sound_init);
+#   - input_poll's Linux tty path (input.cyr lockstep_read) first writes the
+#     record below to fd 3, then BLOCKS on stdin until the sync byte (0x1F).
+#     The bytes before the sync are that tick's keys, decoded by the same tty
+#     code as an interactive session — so the harness drives doom through a real
+#     pty, but one tick at a time: deterministic, and as fast as it can answer.
+#
+# Every loop that waits for a key (play, intermission, death, finale, menu) polls
+# through input_poll, so each of them emits a record and the harness can see
+# which screen it is on (`game_screen`, input.cyr).
+#
+# RECORD (text, one item per line, ends with a line "E"). Coordinates are raw
+# 16.16 fixed point; angles are 0..1023.
+#   S seq screen map_gen map level_time x y z angle health armor weapon
+#     weapons_mask bullets shells rockets cells keys sector kills max_kills items
+#     max_items secrets max_secrets freeze next_level
+#   T idx type cat state x y health flags los
+#       every ACTIVE monster, item, weapon, key, projectile and shootable decor
+#       thing; los (monsters within 2048 units only, else -1) is the engine's own
+#       thing_check_sight from the monster to the player
+#   H sector floor ceil
+#       a sector whose floor or ceiling (WORLD units, as map_sectors holds
+#       them) changed since the previous record; the baseline resets at every
+#       map load, when the heights equal the WAD's
+#   E
+#
+# Security (P(-1)): opt-in local test mode. It writes only to fd 3, which main
+# requires to be open before it enables the mode, and reads nothing but key
+# bytes, through the existing decoder. Not built for AGNOS (the flag is parsed
+# only in main's Linux block).
+
+var lockstep_map_gen = 0;  # bumped by main.cyr load_map on every map load
+var ls_buf = 0;
+var ls_len = 0;
+var ls_seq = 0;
+var ls_gen_seen = 0 - 1;
+var ls_sec_prev = 0;      # MAP_MAX_SECTORS * 16: last-sent floor, ceil
+
+enum LockstepConst {
+    LS_FD = 3;
+    LS_BUF_CAP = 65536;
+    LS_LOS_RANGE = 2048;
+}
+
+fn ls_flush(): i64 {
+    var off = 0;
+    while (off < ls_len) {
+        var w = syscall(1, LS_FD, ls_buf + off, ls_len - off);
+        if (w <= 0) { input_quit = 1; ls_len = 0; return 0 - 1; }
+        off += w;
+    }
+    ls_len = 0;
+    return 0;
+}
+
+fn ls_ch(c): i64 {
+    if (ls_len >= LS_BUF_CAP - 1) { ls_flush(); }
+    store8(ls_buf + ls_len, c);
+    ls_len += 1;
+    return 0;
+}
+
+# Append " <v>" in decimal.
+fn ls_int(v): i64 {
+    ls_ch(32);
+    if (ls_len >= LS_BUF_CAP - 24) { ls_flush(); }
+    if (v < 0) {
+        ls_ch(45);
+        # 0 - INT64_MIN overflows; no engine value comes near it, clamp anyway.
+        if (v < 0 - 9223372036854775807) { v = 0 - 9223372036854775807; }
+        v = 0 - v;
+    }
+    var tmp[24];
+    var n = 0;
+    if (v == 0) { store8(&tmp, 48); n = 1; }
+    while (v > 0) {
+        store8(&tmp + n, 48 + (v % 10));
+        v = v / 10;
+        n += 1;
+    }
+    while (n > 0) {
+        n -= 1;
+        ls_ch(load8(&tmp + n));
+    }
+    return 0;
+}
+
+fn ls_str(s): i64 {
+    ls_ch(32);
+    var p = s;
+    while (load8(p) != 0) { ls_ch(load8(p)); p += 1; }
+    return 0;
+}
+
+fn ls_thing_wanted(i): i64 {
+    var fl = thing_flags(i);
+    if ((fl & TF_ACTIVE) == 0) { return 0; }
+    var cat = thing_category(i);
+    if (cat == CAT_MONSTER) {
+        var st = thing_state(i);
+        if (st == STATE_DIE || st == STATE_DEAD) { return 0; }
+        if (thing_health(i) <= 0) { return 0; }
+        return 1;
+    }
+    if (cat == CAT_ITEM || cat == CAT_WEAPON || cat == CAT_KEY) {
+        if ((fl & TF_PICKUP) == 0) { return 0; }
+        return 1;
+    }
+    if (cat == CAT_PROJECTILE) { return 1; }
+    if ((fl & TF_SHOOTABLE) != 0) {
+        if (thing_health(i) <= 0) { return 0; }
+        return 1;
+    }
+    return 0;
+}
+
+fn lockstep_emit(): i64 {
+    if (ls_buf == 0) { ls_buf = alloc(LS_BUF_CAP); }
+    if (ls_sec_prev == 0) { ls_sec_prev = alloc(MAP_MAX_SECTORS * 16); }
+    ls_len = 0;
+
+    # New map: its current heights ARE the WAD's, which the harness already has.
+    if (ls_gen_seen != lockstep_map_gen) {
+        ls_gen_seen = lockstep_map_gen;
+        for (var s0 = 0; s0 < map_num_sectors; s0 += 1) {
+            store64(ls_sec_prev + s0 * 16, map_sector_floorh(s0));
+            store64(ls_sec_prev + s0 * 16 + 8, map_sector_ceilh(s0));
+        }
+    }
+
+    ls_ch(83);                                  # 'S'
+    ls_int(ls_seq);
+    ls_int(game_screen);
+    ls_int(lockstep_map_gen);
+    ls_str(level_get_name());
+    ls_int(level_time);
+    ls_int(player_x); ls_int(player_y); ls_int(player_z); ls_int(player_angle);
+    ls_int(player_health); ls_int(player_armor);
+    ls_int(player_weapon); ls_int(player_weapons);
+    ls_int(player_ammo_bullets); ls_int(player_ammo_shells);
+    ls_int(player_ammo_rockets); ls_int(player_ammo_cells);
+    ls_int(player_keys);
+    ls_int(player_find_sector());
+    ls_int(level_kills); ls_int(level_max_kills);
+    ls_int(level_items); ls_int(level_max_items);
+    ls_int(level_secrets); ls_int(level_max_secrets);
+    ls_int(player_freeze_tics);
+    ls_int(next_level_flag);
+    ls_ch(10);
+
+    # The record's own sight checks must not show up in --ai-probe's counters.
+    var saved_sight_calls = ai_stat_sight_calls;
+    for (var i = 0; i < thing_count; i += 1) {
+        if (ls_thing_wanted(i) == 1) {
+            var tx = thing_x(i);
+            var ty = thing_y(i);
+            var los = 0 - 1;
+            if (thing_category(i) == CAT_MONSTER) {
+                var ddx = (tx - player_x) >>> 16;
+                var ddy = (ty - player_y) >>> 16;
+                if (ddx < 0) { ddx = 0 - ddx; }
+                if (ddy < 0) { ddy = 0 - ddy; }
+                if (ddx < LS_LOS_RANGE && ddy < LS_LOS_RANGE) {
+                    los = thing_check_sight(tx, ty, player_x, player_y);
+                }
+            }
+            ls_ch(84);                          # 'T'
+            ls_int(i); ls_int(thing_type(i)); ls_int(thing_category(i));
+            ls_int(thing_state(i));
+            ls_int(tx); ls_int(ty);
+            ls_int(thing_health(i)); ls_int(thing_flags(i));
+            ls_int(los);
+            ls_ch(10);
+        }
+    }
+    ai_stat_sight_calls = saved_sight_calls;
+
+    for (var s = 0; s < map_num_sectors; s += 1) {
+        var f = map_sector_floorh(s);
+        var c = map_sector_ceilh(s);
+        if (f != load64(ls_sec_prev + s * 16) || c != load64(ls_sec_prev + s * 16 + 8)) {
+            store64(ls_sec_prev + s * 16, f);
+            store64(ls_sec_prev + s * 16 + 8, c);
+            ls_ch(72);                          # 'H'
+            ls_int(s); ls_int(f); ls_int(c);
+            ls_ch(10);
+        }
+    }
+    ls_ch(69); ls_ch(10);                       # "E"
+    ls_seq += 1;
+    return ls_flush();
+}

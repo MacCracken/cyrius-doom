@@ -42,6 +42,10 @@ include "src/sprite.cyr"
 # references — stub so they resolve. render_draw_weapon itself touches none of
 # these; with no map loaded its sector-light path is skipped (map_num_sectors==0).
 fn sound_pistol(): i64 { return 0; }
+# v0.37.0 — input.cyr's --lockstep read calls lockstep_emit (src/lockstep.cyr,
+# main.cyr only). Never reached here (lockstep_on stays 0); stubbed so the
+# build has no undefined function.
+fn lockstep_emit(): i64 { return 0; }
 fn sound_shotgun(): i64 { return 0; }
 fn sound_plasma(): i64 { return 0; }
 fn sound_explode(): i64 { return 0; }

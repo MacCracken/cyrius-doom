@@ -53,6 +53,23 @@ include "src/finale.cyr"
 # otherwise undefined — and calling an undefined function jumps to an
 # unresolved address and segfaults. Stubbing them keeps the test hermetic.
 fn sound_pistol(): i64 { return 0; }
+# v0.37.0 — the --lockstep record (the playthrough harness's view of the game).
+# Included for its formatter tests below; input.cyr's lockstep_read calls it.
+include "src/lockstep.cyr"
+
+# Format one value through the record's integer writer, return 1 if the bytes
+# are exactly `want` (it writes " <v>", leading space included).
+fn ls_fmt_is(v, want): i64 {
+    if (ls_buf == 0) { ls_buf = alloc(LS_BUF_CAP); }
+    ls_len = 0;
+    ls_int(v);
+    var n = strlen(want);
+    if (ls_len != n) { return 0; }
+    for (var i = 0; i < n; i += 1) {
+        if (load8(ls_buf + i) != load8(want + i)) { return 0; }
+    }
+    return 1;
+}
 fn sound_shotgun(): i64 { return 0; }
 fn sound_plasma(): i64 { return 0; }
 fn sound_explode(): i64 { return 0; }
@@ -109,6 +126,27 @@ fn main() {
     args_init();
 
     # ============================================================
+    # v0.37.0 — the --lockstep record. scripts/playthrough/doomproc.py parses
+    # every field with int(), so the writer must emit exact decimal for the
+    # whole i64 range doom uses: 16.16 coordinates are routinely negative and
+    # far beyond 32 bits. The screen numbers are the harness's contract too.
+    test_group("lockstep record (v0.37.0)");
+    assert_eq(ls_fmt_is(0, " 0"), 1, "zero");
+    assert_eq(ls_fmt_is(7, " 7"), 1, "one digit");
+    assert_eq(ls_fmt_is(0 - 1, " -1"), 1, "minus one");
+    assert_eq(ls_fmt_is(69206016, " 69206016"), 1, "E1M1 spawn x in 16.16");
+    assert_eq(ls_fmt_is(0 - 236978176, " -236978176"), 1, "E1M1 spawn y in 16.16");
+    assert_eq(ls_fmt_is(9223372036854775807, " 9223372036854775807"), 1, "INT64_MAX");
+    assert_eq(ls_fmt_is(0 - 9223372036854775807, " -9223372036854775807"), 1, "-INT64_MAX");
+    assert_eq(GS_PLAY, 0, "screen: play");
+    assert_eq(GS_INTERMISSION, 1, "screen: intermission");
+    assert_eq(GS_DEATH, 2, "screen: death");
+    assert_eq(GS_FINALE_TEXT, 3, "screen: finale text");
+    assert_eq(GS_FINALE_PIC, 4, "screen: finale picture");
+    assert_eq(GS_MENU, 5, "screen: menu");
+    assert_eq(LS_SYNC, 31, "sync byte 0x1F (not Enter)");
+    assert_eq(lockstep_on, 0, "lockstep is off unless --lockstep");
+
     test_group("asr (arithmetic shift right)");
     # ============================================================
 

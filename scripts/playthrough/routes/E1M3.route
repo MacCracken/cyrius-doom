@@ -1,0 +1,9 @@
+# E1M3 Toxin Refinery — drafted by autoroute.py, proved by playthrough.py
+# door 995 (special 31) — opened by the bot on its way
+# door 329 (special 1) — opened by the bot on its way
+# door 568 (special 1) — opened by the bot on its way
+key blue
+# door 467 (special 26) — opened by the bot on its way
+cross 967    # special 8 tag 14
+# door 624 (special 1) — opened by the bot on its way
+exit 982

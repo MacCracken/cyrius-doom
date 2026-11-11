@@ -62,6 +62,10 @@ fn audio_write(dev, buf, frames): i64 { return -1; }
 fn audio_drain(dev): i64 { return -1; }
 fn audio_fd(dev): i64 { return -1; }
 fn audio_close(dev): i64 { return 0; }
+# v0.37.0 — input.cyr's --lockstep read calls lockstep_emit (src/lockstep.cyr,
+# main.cyr only). Never reached here (lockstep_on stays 0); stubbed so the
+# build has no undefined function.
+fn lockstep_emit(): i64 { return 0; }
 
 var _b_startan = 0;
 var _b_texcol = 0;

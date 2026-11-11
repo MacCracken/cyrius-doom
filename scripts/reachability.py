@@ -143,7 +143,7 @@ class Map:
             if o != s: out.append(o)
         return out
 
-def run(M, enabled, start=None, init=None, trace=False, boss_dead=True, disabled_lines=()):
+def run(M, enabled, start=None, init=None, trace=False, boss_dead=True, disabled_lines=(), keys0=()):
     SEC, L = M.SEC, M.L
     n = len(SEC)
     if init is None:
@@ -156,8 +156,9 @@ def run(M, enabled, start=None, init=None, trace=False, boss_dead=True, disabled
     if start is None:
         start = M.point_sector(p1["x"], p1["y"])
     reach = {start}
-    keys = set()
+    keys = set(keys0)
     fired = set()
+    order = []   # ('key', k) / ('line', i) in the order the flood acquires them (playthrough autoroute)
     base_floor = [s["floor"] for s in SEC]
     base_ceil = [s["ceil"] for s in SEC]
 
@@ -214,7 +215,7 @@ def run(M, enabled, start=None, init=None, trace=False, boss_dead=True, disabled
                     px, py = x1 + tt * dx, y1 + tt * dy
                     if ((t["x"] - px) ** 2 + (t["y"] - py) ** 2) ** 0.5 < 36: ok = True; break
             if ok:
-                keys.add(k); changed = True
+                keys.add(k); order.append(('key', k)); changed = True
         for i, ld in enumerate(L):
             fs, bs = ld["fs"], ld["bs"]
             if fs is None or bs is None: continue
@@ -296,7 +297,7 @@ def run(M, enabled, start=None, init=None, trace=False, boss_dead=True, disabled
                     for t in M.T:
                         if t["type"] == 14 and M.point_sector(t["x"], t["y"]) == s:
                             if s not in reach: reach.add(s)
-            fired.add(i); changed = True
+            fired.add(i); order.append(('line', i)); changed = True
         # E1M8 boss death: tag 666 lower-to-lowest when all barons are dead
         if boss_dead and M.name == "E1M8" and "boss" not in fired:
             barons = [t for t in M.T if t["type"] == 3003 and not (t["opts"] & 16)]
@@ -305,7 +306,7 @@ def run(M, enabled, start=None, init=None, trace=False, boss_dead=True, disabled
                 fired.add("boss"); changed = True
     end11 = [i for i, s in enumerate(SEC) if s["special"] == 11]
     return dict(reach=reach, keys=keys, exits=exit_hit, end11=[s for s in end11 if s in reach],
-                state=(flo, fhi, clo, chi, ftex))
+                state=(flo, fhi, clo, chi, ftex), order=order)
 
 VANILLA = (set(DOOR_MANUAL) | DOOR_OPENING_TAG | LIFT | LOWER_LOWEST | LOWER_HIGHEST | TURBO_LOWER |
            RAISE_NEXT | RAISE_LOWCEIL | set(STAIRS) | DONUT | TELEPORT | EXIT_USE | EXIT_WALK)
