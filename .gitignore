@@ -9,6 +9,10 @@
 # vani / yukti.
 /lib/
 
+# Python bytecode (scripts/playthrough, scripts/reachability.py)
+__pycache__/
+*.pyc
+
 # WAD files (user provides their own)
 *.wad
 *.WAD

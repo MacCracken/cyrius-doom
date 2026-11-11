@@ -12,7 +12,10 @@ python3 scripts/playthrough/playthrough.py build/doom wad/DOOM1.WAD            #
 python3 scripts/playthrough/playthrough.py build/doom wad/DOOM1.WAD --map E1M5 --until E1M6
 ```
 
-Exit status 0 means the target was reached. `--out DIR` (default
+Exit status 0 means the target was reached. A death restarts the map from a
+pistol start, as it does in play, and the run goes on; `--max-deaths N`
+(default 6) ends it at the (N+1)th death on one map. The summary table counts
+every death. `--out DIR` (default
 `build/playthrough`) gets `run.log` (every decision the bot made, plus a status
 line every 3 s), `doom.log` (the engine's own log) and one PNG per map showing
 the path the player actually walked. Python 3, stdlib only; the WAD is the only
@@ -33,13 +36,15 @@ The keys go through the same tty decoder an interactive session uses (doom puts
 the pty in raw mode itself), so input, the game loop, collisions, doors,
 switches, walk lines, teleports, the intermission and the finale are all the
 shipped code paths. The harness answers one tick at a time, so a run is
-deterministic and far faster than real time: about 700 ticks a second.
+deterministic and faster than real time: 250–400 tics a second with the bot
+planning (the 35 Hz game runs 7–11× real time), so the whole episode takes minutes.
 
 The record (format in `src/lockstep.cyr`) carries the player (position, angle,
 health, armour, weapons, ammo, keys, sector), the level counters, which screen
 is polling (play / intermission / death / finale / menu), every active monster,
 pickup and projectile with the engine's own line-of-sight verdict, and every
-sector whose floor or ceiling moved.
+sector whose floor, ceiling or special changed (the engine rewrites specials:
+a raise-and-change floor clears its nukage).
 
 ## The player
 
@@ -48,7 +53,7 @@ sector whose floor or ceiling moved.
 | `doomproc.py` | Spawns doom on a pty with the record pipe on fd 3; `step(keys)` returns the next state. |
 | `wadmap.py` | The map's geometry from the WAD, BSP point-in-sector with the engine's side rule, PNG overviews. |
 | `nav.py` | An 8-unit occupancy grid judged by the engine's collision rules (radius, 24-unit step, 56-unit headroom, free drops, the drop-off escape rule), on live heights. A* plus string-pulling. Manual doors the bot can open count as open; a lift counts as both ends of its travel; pits and one-way drops the goal cannot be reached from are forbidden, with a margin on their rim. |
-| `bot.py` | Follows the route, steers, opens doors from their front, calls and rides lifts, fights (sticky target, barrel-aware, dodges projectiles, retreats when hurt), detours for weapons, health, armour and ammo it can come back from, and, when there is no path, runs the trigger search below. |
+| `bot.py` | Follows the route, steers, opens doors from their front, calls and rides lifts, fights (sticky target, barrel-aware, dodges projectiles, falls back to cover the shooters cannot see when hurt, saws demons and anything weak up close), detours for weapons, health, armour and ammo it can come back from, and, when there is no path, runs the trigger search below. Items are touched, not stood on: a key on a ledge (E1M7's blue) is taken from the floor beside it, within the engine's 36-unit reach. |
 | `autoroute.py` | Drafts a route: the triggers a map's exit depends on, in order. |
 | `routes/E1Mx.route` | The per-map routes, drafted by `autoroute.py`, then proved and, where needed, pinned with waypoints. |
 
@@ -70,5 +75,9 @@ needs as sub-steps. That is how it gets out of a room a door closed behind it
 - A run is one deterministic trajectory. A change anywhere in the engine (RNG
   use, AI, collision) changes it, so the run is a gate to re-run, not a
   recording to replay.
+- Ammo is tighter than in vanilla: monster drops and the backpack are not in
+  the engine yet (roadmap v0.37.2), so the map's own ammo is all there is. The
+  bot conserves it (the chainsaw for melee monsters, bullets for zombiemen,
+  shells for what needs them) and walks further for ammo when low.
 - Linux tty input only. Wayland, AGNOS and the menu's own key handling are not
   exercised beyond what dismissing the screens needs.

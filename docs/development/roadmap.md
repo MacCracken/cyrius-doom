@@ -19,14 +19,14 @@ roadmap row at all** are now placed, and six rows describing work already in the
 
 ---
 
-## Critical path to v1.0.0 — two releases
+## Critical path to v1.0.0 — one release
 
-v1.0.0 is "plays E1M1–E1M9 start to finish, on multiple display backends, on AGNOS". Three of its six
-checklist items already ship. Only two things stand in the way, and they are independently schedulable:
+v1.0.0 is "plays E1M1–E1M9 start to finish, on multiple display backends, on AGNOS". Four of its six
+checklist items ship. **v0.37.0 shipped item 1's evidence**: a scripted E1M1 → E1M8 playthrough reaches the
+finale through the real game loop at HMP (`scripts/playthrough/`, `--lockstep`). One thing stands in the way:
 
 | Blocker | Release | Why it is the blocker |
 |---|---|---|
-| Playable start-to-finish — the evidence | **v0.37.0** | *The mechanisms shipped in v0.35.8* — E1M8's boss floor, teleports, the exit room and the finale — so the episode can now end: the reachability model shows every map's exit reachable, and an in-engine test drives E1M8's whole ending. What v1.0.0 item 1 still lacks is a **scripted E1M1 → E1M8 playthrough** that reaches the finale through the real game loop — its own slot, by choice at the v0.35.8 cut, because it is a harness, not a mechanism. |
 | X11 backend | **v0.39.0** | The only unmet "multiple display backends" item; fb0 / Wayland ship. ⛔ **AGNOS-setu does NOT ship**: doom has no honest agnos proof as a window. v0.36.1 moved the vendored client onto the channel band (setu 0.9.1; the TCP path is gone), but nothing has run doom over it yet, and the old `aethersafha-doom-smoke.sh` greens came from the deleted `AETHERSAFHA_SETU_SELFTEST` kernel hook. doom's only honest agnos display path today is `PM_FB0` (blit#39). See agnos `planning/ipc.md` §9-§10. |
 
 Everything else below is quality, fidelity, robustness, or performance.
@@ -56,8 +56,11 @@ gated on a PPM A/B. Nothing below is.
 
 v0.35.0–v0.35.9 shipped the first half of this arc (sight and wake, the chase, thing physics, real thing-z,
 the interactables review, the sprite anchor, Episode end) and v0.36.0 closed out that minor on cyrius 6.7.9;
-see [`completed-phases.md`](completed-phases.md). These cuts are *not* byte-identical — they change what
-monsters do and how a level plays — so each release below names a gameplay gate instead of a PPM A/B.
+v0.37.0 shipped the scripted playthrough that proves the episode can be finished; see
+[`completed-phases.md`](completed-phases.md). These cuts are *not* byte-identical — they change what
+monsters do and how a level plays — so each release below names a gameplay gate instead of a PPM A/B, and
+re-runs the playthrough (`scripts/playthrough/`): a change that moves the trajectory is expected, one that
+stops it reaching the finale is a regression.
 
 > **Renumbered at v0.36.0.** Unplanned toolchain cuts used up the v0.35.x numbers and v0.36.0, so the plan
 > moved, in the same order. The CHANGELOG, audit reports and older docs keep the numbers they were written
@@ -76,15 +79,6 @@ monsters do and how a level plays — so each release below names a gameplay gat
 > | v0.36.0 | **v0.38.0** | Mouse / pointer input |
 > | v0.37.0 | **v0.39.0** | Native X11 backend ⭐ |
 > | v0.38.0 | **v0.40.0** | OPL2 FM synthesis |
-
-### v0.37.0 — Playable start-to-finish ⭐ *critical path*
-
-| # | Item | Detail |
-|---|------|--------|
-| v1.0.0-1 | **Scripted E1M1 → E1M8 playthrough** | A pty-driven run under skill_normal (HMP) through the real game loop — input, collisions, doors, switches, walk lines, teleports, the exit room — that reaches the finale. This *is* the v1.0.0 item-1 evidence. The mechanisms are in (v0.35.8); what does not exist yet is the route: per-map waypoint scripts that survive monster RNG, plus the harness that feeds them and checks each exit. |
-
-**Gate**: none — every map's exit is reachable in the model since v0.35.8. Exit: the playthrough reaches
-the E1M8 finale on Linux (fb0 or a headless present), with the per-map route recorded in-repo.
 
 ### v0.37.1 — Interactables II (feedback + the remaining specials)
 
@@ -121,7 +115,11 @@ counts toward items %, as in vanilla — and today nothing on screen says it is 
 
 ### v0.37.3 — Combat cosmetics + a dormant one-liner
 
-BEXP rocket-explosion frames (a rocket's detonation is still instant — barrels got theirs in v0.35.6) · the
+**RK-1** the player's rocket flies on the player's collision test (`thing_missile_tick` →
+`player_check_position`: radius 16 not 11, steps and headroom from the player's floor not the rocket's z,
+stops at `ML_BLOCKING`) — give it its own flight rule as the fireballs have; found by the v0.37.0
+playthrough, evidence in `docs/audit/2026-11-11-lockstep-playthrough.md` §4 · BEXP rocket-explosion frames
+(a rocket's detonation is still instant — barrels got theirs in v0.35.6) · the
 teleport fog's vanilla frame order (v0.35.8 runs TFOG A..J once; vanilla opens A B A B, then C..J) · full
 xdeath giblet animation on overkill · animated multi-frame muzzle flash (chaingun/rocket show only frame A —
 needs a flash counter decoupled from `weapon_fire_max`) · **G-11** BFG is collectible but unselectable (fix
@@ -201,7 +199,7 @@ Ordered so the `win_*` seam churns exactly once: scaling → pointer → X11.
 
 ## v1.0.0 — Ship
 
-**Blocked only on v0.37.0 (the playthrough evidence) and v0.39.0.** Checklist items 4 (runs on AGNOS), 5 (runs on /dev/fb0) and 6 (in
+**Blocked only on v0.39.0 (X11).** Item 1's evidence shipped in v0.37.0 (the scripted playthrough). Checklist items 4 (runs on AGNOS), 5 (runs on /dev/fb0) and 6 (in
 the AGNOS initrd) already ship — correct them to ✅ with their evidence at tag time, and fold item 2 (X11)
 into v0.39.0 as one row rather than two.
 
@@ -214,7 +212,9 @@ into v0.39.0 as one row rather than two.
 > §9-§10.
 
 Ship criteria: a full E1M1→E1M8 playthrough under skill_normal on **each** shipping backend (fb0,
-Wayland, X11 — ⛔ NOT AGNOS/setu, retracted above); the full CLAUDE.md closeout pass (every `tests/*.tcyr`, bench vs the prior
+Wayland, X11 — ⛔ NOT AGNOS/setu, retracted above) — v0.37.0's `--lockstep` renders every frame but
+presents none, so this needs it to present through the selected backend while lock-stepped (`framebuf_flip`
+returns early today; the harness itself is backend-agnostic); the full CLAUDE.md closeout pass (every `tests/*.tcyr`, bench vs the prior
 closeout, `CYRIUS_DCE=1` NOP-sled recorded, security re-scan, clean-from-scratch build); and tag-time doc
 truth across VERSION, `cyrius.cyml`, the CHANGELOG header, `state.md`, `completed-phases.md` and the tag.
 

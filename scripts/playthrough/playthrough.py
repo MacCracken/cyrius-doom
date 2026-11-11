@@ -16,6 +16,7 @@ Exit status: 0 = reached the target, 1 = did not, 2 = harness error.
 Output (--out): run.log (events), trace PNGs per map (the bot's path).
 """
 import argparse, os, sys, time
+sys.dont_write_bytecode = True   # no __pycache__ beside the sources (scripts/, scripts/playthrough/)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -29,7 +30,8 @@ def main():
     ap.add_argument('--map', default='E1M1')
     ap.add_argument('--until', default='finale', help='finale, or a map name: stop on reaching it')
     ap.add_argument('--max-ticks', type=int, default=35 * 60 * 60)
-    ap.add_argument('--max-deaths', type=int, default=4, help='per map')
+    ap.add_argument('--max-deaths', type=int, default=6,
+                    help='per map: a death restarts the map from a pistol start, as in play; one more ends the run')
     ap.add_argument('--out', default='build/playthrough')
     ap.add_argument('--routes', default=os.path.join(HERE, 'routes'))
     a = ap.parse_args()
@@ -48,6 +50,9 @@ def main():
     maps_done = []
     last_map = None
     deaths_at_entry = 0
+    rows = []            # per map: name, ticks, deaths, health at exit, kills, items, secrets
+    map_start = 0
+    prev = None
     try:
         while ticks < a.max_ticks:
             st = d.state
@@ -57,6 +62,11 @@ def main():
             if st.map != last_map:
                 if last_map is not None:
                     maps_done.append(last_map)
+                    if prev is not None:
+                        rows.append((last_map, ticks - map_start, b.deaths - deaths_at_entry, prev.health,
+                                     '%d/%d' % (prev.kills, prev.max_kills), '%d/%d' % (prev.items, prev.max_items),
+                                     '%d/%d' % (prev.secrets, prev.max_secrets)))
+                map_start = ticks
                 last_map = st.map
                 deaths_at_entry = b.deaths
                 print('%7d  %s' % (ticks, st.map), flush=True)
@@ -64,6 +74,8 @@ def main():
                     b.result = 'reached ' + a.until
                     rc = 0
                     break
+            if st.screen_name == 'play':
+                prev = st         # after the map-change check: a row reports its own map
             keys = b.tick()
             if b.result == 'finale':
                 b.say('FINALE reached')
@@ -87,6 +99,14 @@ def main():
             ','.join(maps_done + ([last_map] if last_map else [])), st.map if st else '?')
         b.say(summary)
         print(summary)
+        if last_map is not None and prev is not None:
+            rows.append((last_map + ('' if b.result == 'finale' else ' (unfinished)'), ticks - map_start,
+                         b.deaths - deaths_at_entry, prev.health, '%d/%d' % (prev.kills, prev.max_kills),
+                         '%d/%d' % (prev.items, prev.max_items), '%d/%d' % (prev.secrets, prev.max_secrets)))
+        table = ['| Map | Tics | Deaths | Health at exit | Kills | Items | Secrets |', '|---|---:|---:|---:|---:|---:|---:|']
+        table += ['| %s | %d | %d | %d | %s | %s | %s |' % r for r in rows]
+        open(os.path.join(a.out, 'summary.md'), 'w').write(summary + '\n\n' + '\n'.join(table) + '\n')
+        print('\n'.join(table))
         d.close()
         log.close()
     return rc

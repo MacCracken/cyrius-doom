@@ -1,7 +1,8 @@
 # E1M4 Command Control — drafted by autoroute.py, proved by playthrough.py
 # door 648 (special 31) — opened by the bot on its way
-cross 685    # special 90 tag 1
+cross 685    # special 90 tag 1: opens the pillar room's four doors (they close again)
 key blue
+cross 348    # special 86 tag 1: the box round the key — walking over it opens those doors to stay
 # door 571 (special 26) — opened by the bot on its way
 # door 469 (special 1) — opened by the bot on its way
 use 592    # special 18 tag 2

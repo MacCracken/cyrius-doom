@@ -24,10 +24,12 @@
 #       every ACTIVE monster, item, weapon, key, projectile and shootable decor
 #       thing; los (monsters within 2048 units only, else -1) is the engine's own
 #       thing_check_sight from the monster to the player
-#   H sector floor ceil
-#       a sector whose floor or ceiling (WORLD units, as map_sectors holds
-#       them) changed since the previous record; the baseline resets at every
-#       map load, when the heights equal the WAD's
+#   H sector floor ceil special
+#       a sector whose floor, ceiling (WORLD units, as map_sectors holds them)
+#       or special changed since the previous record. The engine rewrites
+#       specials at run time (a raise-and-change floor clears its nukage; a
+#       credited secret clears 9), so the harness needs them live. The baseline
+#       resets at every map load, when everything equals the WAD's.
 #   E
 #
 # Security (P(-1)): opt-in local test mode. It writes only to fd 3, which main
@@ -40,7 +42,7 @@ var ls_buf = 0;
 var ls_len = 0;
 var ls_seq = 0;
 var ls_gen_seen = 0 - 1;
-var ls_sec_prev = 0;      # MAP_MAX_SECTORS * 16: last-sent floor, ceil
+var ls_sec_prev = 0;      # MAP_MAX_SECTORS * 24: last-sent floor, ceil, special
 
 enum LockstepConst {
     LS_FD = 3;
@@ -122,15 +124,16 @@ fn ls_thing_wanted(i): i64 {
 
 fn lockstep_emit(): i64 {
     if (ls_buf == 0) { ls_buf = alloc(LS_BUF_CAP); }
-    if (ls_sec_prev == 0) { ls_sec_prev = alloc(MAP_MAX_SECTORS * 16); }
+    if (ls_sec_prev == 0) { ls_sec_prev = alloc(MAP_MAX_SECTORS * 24); }
     ls_len = 0;
 
     # New map: its current heights ARE the WAD's, which the harness already has.
     if (ls_gen_seen != lockstep_map_gen) {
         ls_gen_seen = lockstep_map_gen;
         for (var s0 = 0; s0 < map_num_sectors; s0 += 1) {
-            store64(ls_sec_prev + s0 * 16, map_sector_floorh(s0));
-            store64(ls_sec_prev + s0 * 16 + 8, map_sector_ceilh(s0));
+            store64(ls_sec_prev + s0 * 24, map_sector_floorh(s0));
+            store64(ls_sec_prev + s0 * 24 + 8, map_sector_ceilh(s0));
+            store64(ls_sec_prev + s0 * 24 + 16, map_sector_special(s0));
         }
     }
 
@@ -184,11 +187,14 @@ fn lockstep_emit(): i64 {
     for (var s = 0; s < map_num_sectors; s += 1) {
         var f = map_sector_floorh(s);
         var c = map_sector_ceilh(s);
-        if (f != load64(ls_sec_prev + s * 16) || c != load64(ls_sec_prev + s * 16 + 8)) {
-            store64(ls_sec_prev + s * 16, f);
-            store64(ls_sec_prev + s * 16 + 8, c);
+        var sp = map_sector_special(s);
+        var pb = ls_sec_prev + s * 24;
+        if (f != load64(pb) || c != load64(pb + 8) || sp != load64(pb + 16)) {
+            store64(pb, f);
+            store64(pb + 8, c);
+            store64(pb + 16, sp);
             ls_ch(72);                          # 'H'
-            ls_int(s); ls_int(f); ls_int(c);
+            ls_int(s); ls_int(f); ls_int(c); ls_int(sp);
             ls_ch(10);
         }
     }

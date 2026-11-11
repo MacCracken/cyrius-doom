@@ -4,6 +4,12 @@
 
 Each entry: one row, headline only. For the full changelog see [`CHANGELOG.md`](../../CHANGELOG.md).
 
+## v0.37.x — The gameplay arc, continued
+
+| Version | Shipped | Milestone |
+|---------|---------|-----------|
+| v0.37.0 | 2026-11-11 | **Playable start to finish: the scripted E1M1 → E1M8 playthrough** (v1.0.0 item 1). `--lockstep` runs the real game loop one tick at a time on a pty, writing a state record to fd 3; `scripts/playthrough/` (a WAD reader, a planner on the engine's collision rules, a bot, per-map routes) drives it from E1M1 to the finale at HMP with inventory carried: 148,119 tics, 2 deaths, both on E1M6. Normal play byte-identical to v0.36.3. One engine finding recorded for v0.37.3: RK-1, the player's rocket flies on the player's collision test. |
+
 ## v0.36.x — Toolchain closeout
 
 | Version | Shipped | Milestone |

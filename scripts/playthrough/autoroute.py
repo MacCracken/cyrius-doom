@@ -21,6 +21,7 @@ point. The model is optimistic (a mover can be at either end of its travel), so
 a route still has to be proved in the engine with playthrough.py.
 """
 import os, sys
+sys.dont_write_bytecode = True   # no __pycache__ beside the sources (scripts/, scripts/playthrough/)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..'))

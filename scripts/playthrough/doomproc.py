@@ -48,8 +48,8 @@ class State:
             if ln[0] == 'T':
                 self.things.append(Thing(ln.split()))
             elif ln[0] == 'H':
-                _, s, fl, ce = ln.split()
-                self.heights.append((int(s), int(fl), int(ce)))
+                f_ = ln.split()
+                self.heights.append((int(f_[1]), int(f_[2]), int(f_[3]), int(f_[4])))
 
 
 class Doom:
@@ -102,11 +102,13 @@ class Doom:
         """Reset live heights to the WAD's (call when state.map_gen changes)."""
         self.floor = [s['floor'] for s in m.sectors]
         self.ceil = [s['ceil'] for s in m.sectors]
+        self.special = [s['special'] for s in m.sectors]
 
     def apply_heights(self, st):
-        for s, fl, ce in st.heights:
+        for s, fl, ce, sp in st.heights:
             self.floor[s] = fl
             self.ceil[s] = ce
+            self.special[s] = sp
 
     def close(self):
         try:

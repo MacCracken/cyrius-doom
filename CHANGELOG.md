@@ -7,6 +7,98 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.37.0] - 2026-11-11 — Playable start to finish: the scripted E1M1 → E1M8 playthrough
+
+v1.0.0 item 1's evidence. A pty-driven run of the real game loop at the default skill (Hurt Me Plenty)
+starts at E1M1, carries its inventory from map to map, and reaches the E1M8 finale: 148,119 tics (70.5
+game-minutes, 11 minutes of wall time), two deaths, both on E1M6. No engine behaviour changed: the new mode is
+opt-in, and normal play renders and thinks byte for byte as v0.36.3 did.
+
+### Added
+
+- **`--lockstep`** (`src/lockstep.cyr`; Linux only). The interactive game with three differences: frames are
+  rendered but not presented and `tick_wait` does not sleep; audio and the PC speaker stay closed; and every
+  input poll first writes a state record to fd 3, then blocks on stdin until the harness sends that tick's keys
+  and the sync byte `0x1F`. The keys go through the unchanged tty decoder on a real pty, so input, the game loop,
+  collisions, doors, switches, walk lines, lifts, teleports, the intermission and the finale are all the shipped
+  paths. A run is deterministic and runs at a few hundred tics a second. The record carries the player, the level
+  counters, which screen is polling (`game_screen`, new in `input.cyr`), every active monster, pickup and
+  projectile with the engine's own line-of-sight verdict, and every sector whose floor, ceiling or special
+  changed.
+- **`scripts/playthrough/`** — the harness (Python 3, stdlib only; README in the directory): a pty driver, a WAD
+  reader, an occupancy-grid planner judged by the engine's collision rules, a bot, and per-map routes in
+  `routes/`. `autoroute.py` drafts a route from `scripts/reachability.py`: the triggers a map's exit depends on,
+  in order. When the planner finds no path, the bot runs the same minimal-trigger search live, from where it
+  stands, and walks over or uses what it needs (E1M4's blue-key pillar). It touches items rather than standing on
+  them (E1M7's blue key is on a ledge), threads barrel gaps, calls lifts from where it stands, saws demons, falls
+  back to cover the shooters cannot see, and prices damaging floors against the health a detour would bring.
+- `scripts/reachability.py`: `run()` records the order it acquires keys and fires lines, and takes `keys0`.
+  Its report is unchanged.
+- 15 WAD-free assertions (`lockstep record`): the record's integer writer over the i64 range doom uses, and the
+  screen / sync-byte constants the harness depends on.
+
+### Changed
+
+- `README.md`: the status block said v0.24.6 (20 modules, 243 KB, Cyrius 5.5.0); it now gives v0.37.0's and
+  points at `state.md` for the live numbers. Build and run notes gain the playthrough.
+- `.gitignore` ignores Python bytecode, and the harness no longer writes any (`sys.dont_write_bytecode`).
+  The `__pycache__/` files already committed under `scripts/` need a `git rm -r --cached`.
+- `CLAUDE.md`: the module map gains `lockstep.cyr`, the Quick Start the playthrough, the include rules the
+  `lockstep_emit` requirement, and the work loop a playthrough gate for gameplay changes (6b).
+
+### Found (not fixed here)
+
+- **RK-1** — the player's rocket flies on the *player's* collision test (`thing_missile_tick` →
+  `player_check_position`): radius 16 instead of 11, steps and headroom from the player's floor instead of the
+  rocket's own height, stopped by `ML_BLOCKING`. It goes off early near walls and on step lips. Slotted in
+  v0.37.3 with the other rocket work; the bot checks a rocket's first 240 units against that rule before it
+  fires. Audit note §4.
+
+### Verification
+
+- **The run** (`python3 scripts/playthrough/playthrough.py build/doom wad/DOOM1.WAD`, final binary
+  `812c74b2…`; a second run of the same binary and harness reproduced it tic for tic — the whole decision log
+  byte-identical but for the wall-clock line):
+
+  | Map | Tics | Deaths | Health at exit | Kills | Items | Secrets |
+  |---|---:|---:|---:|---:|---:|---:|
+  | E1M1 | 2,603 | 0 | 101 | 6/6 | 5/37 | 0/3 |
+  | E1M2 | 7,218 | 0 | 82 | 22/41 | 0/42 | 0/6 |
+  | E1M3 | 16,254 | 0 | 88 | 52/74 | 22/94 | 1/7 |
+  | E1M4 | 6,822 | 0 | 103 | 27/54 | 7/45 | 1/3 |
+  | E1M5 | 21,045 | 0 | 100 | 91/91 | 9/26 | 2/9 |
+  | E1M6 | 70,631 | 2 | 100 | 97/118 | 22/95 | 1/4 |
+  | E1M7 | 20,205 | 0 | 92 | 78/84 | 30/82 | 0/4 |
+  | E1M8 | 3,341 | 0 | 12 → finale | 12/27 | 1/1 | 1/1 |
+
+  A death restarts the map from a pistol start, as in play (the runner allows six per map). E1M8's "12" is
+  the exit room draining health to the 10 at which the episode ends.
+- Normal play is unchanged: 52 PPMs + 603 `--ai-probe` lines byte-identical to v0.36.3 on the plain and
+  `CYRIUS_DCE=1` builds; the 25-staging `ai-staging-sweep` identical.
+- Tests: **427** / 33 / 14 / 22 / 14 / 12 WAD-free (+15, the lockstep group), **746** with the WAD (+15). Fuzz ×8
+  clean at full iteration counts.
+- Builds: **551,392 B** plain / **350,688 B** release / **551,016 B** agnos (+8,408 / +8,408 / +4,256: the
+  record writer; on AGNOS it is compiled in but unreachable). `CYRIUS_DCE=1` still removes 852 fns / 201,375 B.
+  A clean `rm -rf lib cyrius.lock && cyrius deps` reproduces release `6bcde1aa…`, agnos `d364d277…` and plain
+  `812c74b2…` byte for byte; lock 42 / 0, unchanged.
+- Bench: 3 interleaved rounds against a v0.36.3 build, best of 3, on a machine busy with playthrough runs:
+  `render_frame` 408.8 → 404.9 µs, spawned frame 598.7 → 598.7 µs, every other metric within noise. The render
+  path did not change; the absolute numbers sit ~7% above v0.36.3's quiet-machine figures because of the load.
+  On the idle machine afterwards, `bench-history.csv`'s row: `render_frame` 383.2 → 382.2 µs against v0.36.3's.
+- **AGNOS QEMU** (final `doom_agnos`): boots v0.37.0, loads the WAD, **64,000 / 64,000** 6× blocks exact
+  against the Linux E1M1 frame at origin (64, 424); control against E1M2 30,547. The floor-band gate still
+  false-FAILs at 2048×2048 (agnos-side origin assumption).
+- Audit note: `docs/audit/2026-11-11-lockstep-playthrough.md` (new surface: no finding; RK-1; one false lead on
+  E1M8 closed).
+
+### Not verified / not claimed
+
+- The bot reads every monster's position from the record and plays HMP only: the run shows the episode can be
+  finished through the shipped mechanisms, not that it is fair.
+- Ammo is tighter than in vanilla — monster drops and the backpack are not in the engine yet (v0.37.2).
+- The run is one deterministic trajectory; any change to RNG use, AI or collision changes it, so it is a gate to
+  re-run, not a recording to replay.
+
 ## [0.36.3] - 2026-11-10 — bsp 1.3.2
 
 A dependency cut: bsp moves to its newest tag. Linux rendering and monster behaviour are byte-identical to

@@ -1,19 +1,21 @@
 # Cyrius DOOM
 
-> Clean-room DOOM engine in Cyrius. 191KB. Direct framebuffer. No libc. No SDL. Just kernel syscalls.
+> Clean-room DOOM engine in Cyrius. A ~350 KB static binary. Direct framebuffer. No libc. No SDL. Just kernel syscalls.
 
 ## What This Is
 
 A playable DOOM engine implemented from documented specs in Cyrius — the sovereign systems language bootstrapped from a 29KB seed. Reads standard DOOM1.WAD shareware files. Full gameplay loop: shoot monsters, collect keys, open doors, die and respawn, transition between all 9 maps of Episode 1.
 
-## Status — v0.24.6
+## Status — v0.37.0
 
-- **20 modules**, ~5,500 lines of Cyrius
-- **243KB** static ELF binary, no external dependencies
-- **All 9 shareware maps** (E1M1–E1M9) load and render (E1M6 subsector cap bumped in 0.24.6)
-- **2.73ms per frame** (88% headroom on 35Hz tick budget)
-- **Security hardened** — CVE audit with 5 findings, all fixed
-- Built on **Cyrius 5.5.0** (cc5 compiler)
+- **The episode plays start to finish**: a scripted run drives the real game loop through a pty at the default
+  skill, from E1M1 to the E1M8 finale, carrying its inventory map to map ([`scripts/playthrough/`](scripts/playthrough/))
+- **28 modules**, ~14,800 lines of Cyrius
+- **551 KB** static ELF (**351 KB** with dead-code elimination), no external dependencies; also builds for AGNOS
+- **All 9 shareware maps** (E1M1–E1M9), Wayland or `/dev/fb0` on Linux, the setu display server on AGNOS
+- **About 0.55 ms per frame** with E1M1's monsters spawned, against a 28.6 ms tick
+- **Tested**: 522 WAD-free + 746 WAD-gated assertions, 8 fuzzers, security audits in [`docs/audit/`](docs/audit/)
+- Built on the **Cyrius** toolchain pinned in `cyrius.cyml` (live numbers: [`docs/development/state.md`](docs/development/state.md))
 
 ### Features
 
@@ -36,7 +38,7 @@ A playable DOOM engine implemented from documented specs in Cyrius — the sover
 # Download shareware WAD
 sh scripts/get-wad.sh wad
 
-# Build (requires Cyrius 5.5.0+)
+# Build (requires the Cyrius toolchain pinned in cyrius.cyml)
 cyrius build src/main.cyr build/doom
 
 # Run (interactive — needs /dev/fb0 or use GTK viewer)
@@ -48,6 +50,9 @@ cyrius build src/main.cyr build/doom
 # Screenshot mode (headless)
 ./build/doom wad/DOOM1.WAD --ppm
 ./build/doom wad/DOOM1.WAD --ppm-menu
+
+# Scripted playthrough, E1M1 -> E1M8 finale (Python 3, stdlib only; a few minutes)
+python3 scripts/playthrough/playthrough.py build/doom wad/DOOM1.WAD
 ```
 
 ## Controls

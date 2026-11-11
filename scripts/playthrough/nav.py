@@ -93,6 +93,8 @@ class Nav:
         self.blocked = set()
         self.danger = set()
         self.trap = set()
+        self.threat = set()
+        self.avoid_cells = set()
         self.door_from = {}
         self.door_closed = {}
         # Cells on the HIGH side of a ledge (a drop of more than a step), close to
@@ -122,12 +124,86 @@ class Nav:
                     if seg_dist(cx, cy, x1_, y1_, x2_, y2_) < 22:
                         self.ledge.add(k)
 
+    # ------------------------------------------------------------ sight
+    def sight(self, ax, ay, bx, by, floor, ceil):
+        """Rough 2D line of sight: False when a one-sided line, or a two-sided
+        line whose opening is shut (live heights: a closed door), crosses the
+        segment. The engine's own check also tests slopes; this only has to tell
+        a spot behind a wall or a doorframe from one in the open, for cover."""
+        if not hasattr(self, '_sb'):
+            self._sb = {}
+            for ln in self.m.lines:
+                x1_, y1_, x2_, y2_ = self.m.line_xy(ln['i'])
+                for j in range(int((min(y1_, y2_) - self.oy) // 64), int((max(y1_, y2_) - self.oy) // 64) + 1):
+                    for i in range(int((min(x1_, x2_) - self.ox) // 64), int((max(x1_, x2_) - self.ox) // 64) + 1):
+                        self._sb.setdefault((i, j), []).append(ln['i'])
+        L = math.hypot(bx - ax, by - ay)
+        n = max(1, int(L / 8))
+        seen = set()
+        for q in range(n + 1):
+            x = ax + (bx - ax) * q / n
+            y = ay + (by - ay) * q / n
+            b = (int((x - self.ox) // 64), int((y - self.oy) // 64))
+            for li in self._sb.get(b, ()):
+                if li in seen:
+                    continue
+                seen.add(li)
+                ln = self.m.lines[li]
+                if ln['back'] >= 0 and ln['front'] >= 0:
+                    a_, b_ = ln['front'], ln['back']
+                    if min(ceil[a_], ceil[b_]) - max(floor[a_], floor[b_]) > 0:
+                        continue
+                x1_, y1_, x2_, y2_ = self.m.line_xy(li)
+                if segs_cross(ax, ay, bx, by, x1_, y1_, x2_, y2_):
+                    return False
+        return True
+
     # ------------------------------------------------------------ heights
-    def set_obstacles(self, obstacles):
+    def set_avoid_lines(self, lines, band=14.0):
+        """Cells within `band` of linedefs that should not be crossed if there is
+        another way (walk triggers that open a monster closet)."""
+        self.avoid_cells = set()
+        cell = self.cell
+        for li in lines:
+            x1_, y1_, x2_, y2_ = self.m.line_xy(li)
+            i0 = int((min(x1_, x2_) - band - self.ox) / cell) - 1
+            i1 = int((max(x1_, x2_) + band - self.ox) / cell) + 1
+            j0 = int((min(y1_, y2_) - band - self.oy) / cell) - 1
+            j1 = int((max(y1_, y2_) + band - self.oy) / cell) + 1
+            for j in range(max(j0, 0), min(j1, self.ny - 1) + 1):
+                for i in range(max(i0, 0), min(i1, self.nx - 1) + 1):
+                    cx, cy = self.ox + (i + 0.5) * cell, self.oy + (j + 0.5) * cell
+                    if seg_dist(cx, cy, x1_, y1_, x2_, y2_) < band:
+                        self.avoid_cells.add(j * self.nx + i)
+
+    def set_threats(self, monsters, radius=160.0):
+        """Cells within `radius` of a live monster: priced, so a route skirts a
+        crowd (or a closet of them) when there is another way."""
+        self.threat = set()
+        for (x, y) in monsters:
+            r = radius
+            for j in range(int((y - r - self.oy) / self.cell), int((y + r - self.oy) / self.cell) + 1):
+                for i in range(int((x - r - self.ox) / self.cell), int((x + r - self.ox) / self.cell) + 1):
+                    cx, cy = self.ox + (i + 0.5) * self.cell, self.oy + (j + 0.5) * self.cell
+                    if (cx - x) * (cx - x) + (cy - y) * (cy - y) < r * r:
+                        self.threat.add(j * self.nx + i)
+
+    def set_obstacles(self, obstacles, learned=()):
         """Solid things the planner must keep the player's radius clear of:
-        [(x, y, radius)] (barrels; monsters move and are left to the bot)."""
+        [(x, y, radius)] (barrels; monsters move and are left to the bot).
+        `learned`: [(x, y, radius)] spots the player was stopped at in play,
+        which the grid thinks clear — blocked, without a barrel's blast zone."""
         self.blocked = set()
         self.danger = set()
+        self.near_obst = set()
+        self.obst = list(obstacles)
+        for (x, y, r) in learned:
+            rr = r + self.radius
+            for j in range(int((y - rr - self.oy) / self.cell), int((y + rr - self.oy) / self.cell) + 1):
+                for i in range(int((x - rr - self.ox) / self.cell), int((x + rr - self.ox) / self.cell) + 1):
+                    cx, cy = self.ox + (i + 0.5) * self.cell, self.oy + (j + 0.5) * self.cell
+                    if math.hypot(cx - x, cy - y) < rr:
+                        self.blocked.add(j * self.nx + i)
         for (x, y, r) in obstacles:
             # blast range (a barrel's explosion reaches 128 units): pricey, not forbidden
             rr = 128.0
@@ -137,22 +213,29 @@ class Nav:
                     if math.hypot(cx - x, cy - y) < rr:
                         self.danger.add(j * self.nx + i)
             rr = r + self.radius
-            i0 = int((x - rr - self.ox) / self.cell)
-            i1 = int((x + rr - self.ox) / self.cell)
-            j0 = int((y - rr - self.oy) / self.cell)
-            j1 = int((y + rr - self.oy) / self.cell)
+            ro = rr + 10        # a margin string-pulling may not cut into (see smooth)
+            i0 = int((x - ro - self.ox) / self.cell)
+            i1 = int((x + ro - self.ox) / self.cell)
+            j0 = int((y - ro - self.oy) / self.cell)
+            j1 = int((y + ro - self.oy) / self.cell)
             for j in range(j0, j1 + 1):
                 for i in range(i0, i1 + 1):
                     cx, cy = self.ox + (i + 0.5) * self.cell, self.oy + (j + 0.5) * self.cell
-                    if math.hypot(cx - x, cy - y) < rr:
+                    d_ = math.hypot(cx - x, cy - y)
+                    if d_ < rr:
                         self.blocked.add(j * self.nx + i)
+                    elif d_ < ro:
+                        self.near_obst.add(j * self.nx + i)
 
-    def plan_heights(self, live_floor, live_ceil, keys=0, open_doors=True, extra=None):
+    def plan_heights(self, live_floor, live_ceil, keys=0, open_doors=True, extra=None, special=None):
         """Heights to plan against: live ones, with every manual door the bot can
         open (key in hand) raised to its open height. `extra` maps sector ->
         (floor, ceil) overrides (a lift the route will ride, a bridge that will rise)."""
         f = list(live_floor)
         c = list(live_ceil)
+        # sector specials as the engine has them NOW (a raise-and-change floor
+        # clears its nukage): damage costs and safe cells use these
+        self.SP = list(special) if special is not None else [s_['special'] for s_ in self.m.sectors]
         self.door_sectors = {}
         # A door opens only from the side an opener line faces (E1M5's sector 52
         # has a manual face to the west and a plain line to the east), so a CLOSED
@@ -405,9 +488,27 @@ class Nav:
         dist = {start: 0.0}
         prev = {start: -1}
         pq = [(0.0, start)]
-        dmg = {i: DAMAGE_SPECIALS.get(s['special'], 0) for i, s in enumerate(self.m.sectors)}
+        SP = getattr(self, 'SP', None) or [s_['special'] for s_ in self.m.sectors]
+        dmg = {i: DAMAGE_SPECIALS.get(sp_, 0) for i, sp_ in enumerate(SP)}
         n_exp = 0
         D = math.sqrt(2) * cs
+        near, blocked, sec, ny = self.near, self.blocked, self.sec, self.ny
+        trap, door_closed, door_from = self.trap, self.door_closed, self.door_from
+        danger, ledge, threat = self.danger, self.ledge, self.threat
+        avoid_cells = self.avoid_cells
+        ranges, F = self.ranges, self.F
+        ok = self.ok
+        NB = ((1, 0, cs), (-1, 0, cs), (0, 1, cs), (0, -1, cs), (1, 1, D), (1, -1, D), (-1, 1, D), (-1, -1, D))
+
+        def free(q, floors, k):
+            # the common case first: a cell no line is within reach of
+            if q not in near:
+                return q not in blocked
+            for f_ in floors:
+                if ok(q, f_, k):
+                    return True
+            return False
+
         while pq:
             d, k = heapq.heappop(pq)
             g = dist[k]
@@ -421,52 +522,55 @@ class Nav:
             if n_exp > max_nodes:
                 return None
             i, j = k % nx, k // nx
-            sf = (start_floor,) if (k == start and start_floor is not None) else None
-            for di, dj, w in ((1, 0, cs), (-1, 0, cs), (0, 1, cs), (0, -1, cs),
-                              (1, 1, D), (1, -1, D), (-1, 1, D), (-1, -1, D)):
+            sk = sec[k]
+            if k == start and start_floor is not None:
+                floors = (start_floor,)   # the start cell's centre may sit across a line from the player
+            else:
+                r_ = ranges.get(sk)
+                floors = r_ if r_ else (F[sk],)
+            for di, dj, w in NB:
                 ii, jj = i + di, j + dj
-                if ii < 0 or jj < 0 or ii >= nx or jj >= self.ny:
+                if ii < 0 or jj < 0 or ii >= nx or jj >= ny:
                     continue
                 q = jj * nx + ii
-                if sf is not None:
-                    # the start cell's centre may sit across a line from the
-                    # player: judge its first step from the real floor
-                    if not any(self.ok(q, f_, k) for f_ in sf):
+                if not free(q, floors, k):
+                    continue
+                if di and dj:   # no corner cutting
+                    if not free(j * nx + ii, floors, k) or not free(jj * nx + i, floors, k):
                         continue
-                    if di and dj and not (any(self.ok(j * nx + ii, f_, k) for f_ in sf) and
-                                          any(self.ok(jj * nx + i, f_, k) for f_ in sf)):
-                        continue
-                else:
-                    if not self.ok_from(q, k):
-                        continue
-                    if di and dj:   # no corner cutting
-                        if not self.ok_from(j * nx + ii, k) or not self.ok_from(jj * nx + i, k):
-                            continue
-                sq = self.sec[q]
-                sk = self.sec[k]
-                if sq != sk and (sq in self.trap or sk in self.trap):
-                    continue      # never into a pit you cannot climb out of (nor "out" of one)
-                if sq != sk and self.door_closed.get(sq) and sk not in self.door_from.get(sq, ()):
-                    continue      # a shut door, from a side it cannot be opened from
-                if alive is not None and sq not in alive and sk in alive:
-                    continue      # nor anywhere the goal cannot be reached from
+                sq = sec[q]
+                if sq != sk:
+                    if sq in trap or sk in trap:
+                        continue      # never into a pit you cannot climb out of (nor "out" of one)
+                    if door_closed.get(sq) and sk not in door_from.get(sq, ()):
+                        continue      # a shut door, from a side it cannot be opened from
+                    if alive is not None and sq not in alive and sk in alive:
+                        continue      # nor anywhere the goal cannot be reached from
                 if cliff is not None and q in cliff and k not in cliff:
-                    continue      # and keep off the rim of such a drop
+                    continue          # and keep off the rim of such a drop
                 cost = w
                 if dmg[sq] and not damage_ok:
                     cost *= 1 + dmg[sq] * dmg_weight
                 if avoid and sq in avoid:
                     cost *= 50
-                if q in self.danger:
+                if q in danger:
                     cost *= 6
-                if q in self.ledge:
+                if q in ledge:
                     cost *= 5
+                if q in threat:
+                    cost *= 3
+                if q in avoid_cells:
+                    cost *= 40
                 ng = g + cost
                 if ng < dist.get(q, 1e18):
                     dist[q] = ng
                     prev[q] = k
-                    qx, qy = self.center(q)
-                    heapq.heappush(pq, (ng + math.hypot(qx - gx, qy - gy), q))
+                    qx = self.ox + (q % nx + 0.5) * cs
+                    qy = self.oy + (q // nx + 0.5) * cs
+                    # weighted A* (x1.6): the cost multipliers above make the plain
+                    # straight-line bound far too weak, and a slightly longer path
+                    # found 10x faster is the better trade for a bot
+                    heapq.heappush(pq, (ng + 1.6 * math.hypot(qx - gx, qy - gy), q))
         return None
 
     def walkable_segment(self, ax, ay, bx, by, cfloor, allowed_sectors=None, forbid_cells=None):
@@ -504,9 +608,19 @@ class Nav:
         # A pulled segment may cross any sector the cell path visits, except a
         # damaging one the path did not enter: those detours are deliberate.
         visited = set(self.sec[k] for k in cells)
-        safe = set(i for i, s in enumerate(self.m.sectors) if s['special'] not in DAMAGE_SPECIALS)
+        SP = getattr(self, 'SP', None) or [s_['special'] for s_ in self.m.sectors]
+        safe = set(i for i, sp_ in enumerate(SP) if sp_ not in DAMAGE_SPECIALS)
         allowed = safe | visited
-        forbid = (cliff - set(cells)) if cliff else None
+        # nor cut close past a barrel: between two of them (E1M5's secret
+        # shotgun door) the way is a cell or two wide, and only the cells the
+        # search chose are known to fit
+        forbid = set(cliff) if cliff else set()
+        forbid |= getattr(self, 'near_obst', set())
+        # nor onto the lip of a drop the search kept off (ledge cells cost 5x
+        # there): pulled straight, E1M4's stairs out of the nukage pit ran four
+        # units from its edge, and three lives fell back in
+        forbid |= self.ledge
+        forbid = (forbid - set(cells)) or None
         out = [pts[0]]
         i = 0
         while i < len(pts) - 1:
@@ -523,16 +637,106 @@ class Nav:
         gs = self.m.point_sector(gx, gy)
         if 'alive' not in kw and gs >= 0:
             alive = self.alive_for(gs)
+            # the sector graph already says whether the goal can be reached at
+            # all: if not, skip the grid search (a failing A* walks every cell)
+            k0 = self.cell_of(sx, sy)
+            if k0 >= 0 and self.sec[k0] not in alive and self.m.point_sector(sx, sy) not in alive:
+                return None
             kw['alive'] = alive
             kw['cliff'] = self.cliff_cells(alive)
-        cells = self.astar(sx, sy, lambda k: math.hypot(self.center(k)[0] - gx, self.center(k)[1] - gy) <= tol,
-                           (gx, gy), **kw)
+        goal = set()
+        r = int(tol / self.cell) + 1
+        gi, gj = int((gx - self.ox) / self.cell), int((gy - self.oy) / self.cell)
+        for j in range(gj - r, gj + r + 1):
+            for i in range(gi - r, gi + r + 1):
+                if 0 <= i < self.nx and 0 <= j < self.ny:
+                    cx, cy = self.ox + (i + 0.5) * self.cell, self.oy + (j + 0.5) * self.cell
+                    if math.hypot(cx - gx, cy - gy) <= tol:
+                        goal.add(j * self.nx + i)
+        cells = self.astar(sx, sy, goal.__contains__, (gx, gy), **kw)
         if cells is None:
             return None
         return self.smooth(cells, kw.get('cliff'))
 
-    def nearest_safe(self, sx, sy, limit=4000):
-        """Nearest cell (BFS over clear cells) whose sector does not hurt."""
+    def nearest_safe(self, sx, sy, limit=4000, path=False):
+        """Nearest cell (BFS over clear cells) whose sector does not hurt; with
+        path=True, the walk there as waypoints (out of a pit it is the stairs,
+        not the wall the nearest safe floor sits on top of — E1M4 sector 42)."""
+        start = self.cell_of(sx, sy)
+        if start < 0:
+            return None
+        seen = {start}
+        prev = {start: -1}
+        q = [start]
+        qi = 0
+        while qi < len(q) and qi < limit:
+            k = q[qi]
+            qi += 1
+            SP = getattr(self, 'SP', None)
+            sp_ = SP[self.sec[k]] if SP else self.m.sectors[self.sec[k]]['special']
+            if sp_ not in DAMAGE_SPECIALS and k not in self.near:
+                if not path:
+                    return self.center(k)
+                cells = []
+                while k != -1:
+                    cells.append(k)
+                    k = prev[k]
+                return self.smooth(cells[::-1])
+            i, j = k % self.nx, k // self.nx
+            for di, dj in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                ii, jj = i + di, j + dj
+                if 0 <= ii < self.nx and 0 <= jj < self.ny:
+                    n = jj * self.nx + ii
+                    if n not in seen and self.ok_from(n, k):
+                        seen.add(n)
+                        prev[n] = k
+                        q.append(n)
+        return None
+
+    def path_to_touch(self, sx, sy, ix, iy, **kw):
+        """Path to anywhere the engine would let the player pick up an item at
+        (ix, iy): |dx| and |dy| under 36 (item 20 + player 16) and the item between 8 below and 56 above the player's floor
+        (things.cyr things_check_pickups). A key on a pedestal (E1M7's blue) is
+        taken from the floor beside it, never stood on."""
+        isec = self.m.point_sector(ix, iy)
+        iz = self.F[isec] if isec >= 0 else 0
+        goal = set()
+        # engine reach is strictly under 36; a cell counts if its centre is within
+        # 36 + half a cell, and the bot's last step pushes on toward the item itself
+        # (into the ledge if need be), which closes the rest
+        R_ = 36.0 + self.cell / 2.0
+        r = int(R_ / self.cell) + 1
+        gi, gj = int((ix - self.ox) / self.cell), int((iy - self.oy) / self.cell)
+        for j in range(gj - r, gj + r + 1):
+            for i in range(gi - r, gi + r + 1):
+                if not (0 <= i < self.nx and 0 <= j < self.ny):
+                    continue
+                cx, cy = self.ox + (i + 0.5) * self.cell, self.oy + (j + 0.5) * self.cell
+                if abs(cx - ix) >= R_ or abs(cy - iy) >= R_:
+                    continue
+                k = j * self.nx + i
+                f = self.F[self.sec[k]]
+                if -8 <= iz - f <= 56 and k not in self.blocked and self.ok(k, f):
+                    goal.add(k)
+        if not goal:
+            return None
+        if 'alive' not in kw:
+            alive = set()
+            for gs in set(self.sec[k] for k in goal):
+                alive |= self.alive_for(gs)
+            k0 = self.cell_of(sx, sy)
+            if k0 >= 0 and self.sec[k0] not in alive and self.m.point_sector(sx, sy) not in alive:
+                return None
+            kw['alive'] = alive
+            kw['cliff'] = self.cliff_cells(alive)
+        cells = self.astar(sx, sy, goal.__contains__, (ix, iy), **kw)
+        if cells is None:
+            return None
+        return self.smooth(cells, kw.get('cliff'))
+
+    def nearest_where(self, sx, sy, pred, limit=3000):
+        """Nearest clear cell (BFS over cells the player can walk between) whose
+        centre satisfies pred(x, y)."""
         start = self.cell_of(sx, sy)
         if start < 0:
             return None
@@ -542,8 +746,9 @@ class Nav:
         while qi < len(q) and qi < limit:
             k = q[qi]
             qi += 1
-            if self.m.sectors[self.sec[k]]['special'] not in DAMAGE_SPECIALS and k not in self.near:
-                return self.center(k)
+            cx, cy = self.center(k)
+            if k != start and pred(cx, cy) and k not in self.near:
+                return (cx, cy)
             i, j = k % self.nx, k // self.nx
             for di, dj in ((1, 0), (-1, 0), (0, 1), (0, -1)):
                 ii, jj = i + di, j + dj
